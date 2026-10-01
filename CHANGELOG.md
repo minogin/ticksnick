@@ -17,20 +17,31 @@ the banner instead, which is where a caller meets it once rather than at every c
 
 Builds on Gradle 9.7.1 and Kotlin 2.4.0.
 
-### Paused
+### Run and paused
 
-The header says how long every thread was stopped, and the JVM's own count of how much of that was
-garbage collection:
+The header splits wall time into the part that ran and the part every thread was stopped, and
+`Time on CPU` is now a share of run time:
 
 ```
-Paused        3.91 s (5.93%) in 20 pauses, longest 297 ms - every thread stopped, usually GC
-  GC          3.91 s by the JVM's own count
+Wall time     66.6 s = 60.2 s run + 6.42 s paused (9.64%)
+  Paused      21 pauses, longest 2.61 s - every thread stopped, usually GC
+  GC          6.43 s by the JVM's own count
+...
+Time on CPU   99.39% of run time
+  Bound       at most 0.61 pp of any share is a thread waiting rather than working
 ```
 
-It is the sampler's own lateness added up, so it costs nothing on the hot path and needs nothing
-from the JVM. Checked against `-Xlog:safepoint` it agrees to a percent. Printed only when there was
-a pause. Shares are unmoved by pauses; thread-time and time per call still include them, which the
-row now lets a reader see. `Report.pause` carries the figures.
+Paused time is the sampler's own lateness, as far as the JVM's count of its collection pauses
+confirms it, so it costs nothing on the hot path. Checked against `-Xlog:safepoint` it agrees to a
+percent.
+
+**The bound on every share is tighter on any workload that collects**, and that is a correction:
+no sample is taken during a pause, so the shares never contained that time, and the bound was
+charging them for it - 10.8 pp where about 1 pp was the evidence. On a JVM whose collectors the
+profiler cannot read, nothing is subtracted and the bound is unchanged.
+
+Thread-time and time per call are still scaled to wall time and still include the pauses.
+`Report.pause` and `DutyReport.runDuty` carry the figures; `DutyReport.duty` is still over wall time.
 
 ### Crossing threads
 

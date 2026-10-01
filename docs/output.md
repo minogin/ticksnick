@@ -35,35 +35,46 @@ meaningless. `1.006 ms` is the step the sampler *achieved* against the one you a
 has drifted far above your `stepMillis`, the sampler could not get scheduled and the run is worth
 less than it looks.
 
-**`Paused` — a row that is only there when something stopped the JVM.**
+**`Wall time` — the run split into the part that ran and the part that was stopped.**
 
 ```
-Sampling      61,869 ticks at 1.064 ms mean (jittered) x 1 thread - one sample per thread per tick
-Paused        3.91 s (5.93%) in 20 pauses, longest 297 ms - every thread stopped, usually GC
-  GC          3.91 s by the JVM's own count
+Sampling      60,117 ticks at 1.108 ms mean (jittered) x 1 thread - one sample per thread per tick
+Wall time     66.6 s = 60.2 s run + 6.42 s paused (9.64%)
+  Paused      21 pauses, longest 2.61 s - every thread stopped, usually GC
+  GC          6.43 s by the JVM's own count
 ```
 
-It sits under the step because it is what stretches the step. The sampler spins, so it wakes within
-microseconds of when it asked to; a tick that runs a whole step late was *stopped*, and a JVM thread
-is only ever stopped together with every other one. `Paused` is the sum of that lateness, whatever
-caused it — the name is the observation, and *usually GC* is a hint.
+**Paused** is time every thread was stopped. The sampler spins, so it wakes within microseconds of
+when it asked to; a tick that runs a whole step late was *stopped*, and a JVM thread is only ever
+stopped together with every other one. It sits under the step because it is what stretches the step.
 
-`GC` is the check on the hint: the JVM's own count of collection pauses over the same session. When
-the two agree nothing more is said. When they do not, the row says which way — *"the other 4.00 s was
-not GC"* means another kind of JVM pause or a sampler kept off its core, and *"more than the sampler
-saw"* means pauses shorter than one step, which lose no tick and so are invisible to it. On a JVM
-whose collectors the profiler cannot read, the row says *not counted* rather than printing a figure.
+**Run** is the rest, and it is the time everything else in the header is about: no sample is taken
+during a pause, so every share is a share of run time, and `Time on CPU` further down is a share of
+run time for the same reason. The row is printed on every run, `+ 0 paused` included, so that the
+term is always on the page before it is used.
+
+**What goes into the split is only what the JVM confirms.** The sampler sums every late tick,
+whatever caused it, and `GC` is the JVM's own count of its collection pauses over the same session.
+The paused figure is the smaller of the two. That is what makes it safe to subtract: a sampler that
+lost its core while the workers ran on has lateness with no collection behind it, the JVM's count
+does not move, and nothing is taken out of run time. When the two disagree the `GC` row says which
+way, and where the difference went:
+
+- *"the other 4.00 s the sampler lost was not GC, and is counted as run time"* — another kind of JVM
+  pause, or the sampler kept off its core.
+- *"more than the sampler saw"* — pauses shorter than one step, which lose no tick.
+- *"not counted"* — a JVM whose collectors the profiler cannot read. Nothing is subtracted, and the
+  `Paused` row then gives the sampler's own total, since it appears nowhere else.
 
 Three things follow, and the third is the one that changes how to read the tables:
 
-- **No sample is taken during a pause**, so a share is a share of *running* time and a pause does not
-  move it or the ranking.
+- **A pause does not move a share or the ranking**, because no sample is taken in one.
 - **Coarse spans include their pauses**, because they are two timestamps. A request that sat through
-  a 1.8 s collection took 1.8 s longer, and its percentiles say so.
-- **Thread-time and time per call include the pauses too**, spread over every operation in proportion
-  to its samples — one sample is worth the step the sampler *achieved*, and that is the stretched
-  one. On the run above every `Thread-time per call` is about 6% high, and the operation that
-  allocated its way into the collection is charged no more of it than one that allocated nothing.
+  a 2.6 s collection took 2.6 s longer, and its percentiles say so.
+- **Thread-time and time per call are still scaled to wall time**, so they include the pauses,
+  spread over every operation in proportion to its samples. On the run above every
+  `Thread-time per call` is about 10% high, and the operation that allocated its way into the
+  collection is charged no more of it than one that allocated nothing.
 
 A sampler that is not spinning prints *not measured*: parking is late on every tick by the
 scheduler's doing, and none of that is anybody's pause.
@@ -234,7 +245,7 @@ Samples       5,998 taken over 3.1 s - 5,526 inside an operation, 472 outside ev
 Sampling      3,004 ticks at 0.999 ms mean (jittered) x 2 threads - one sample per thread per tick
 Coverage      5.52 s of 5.99 s thread-time observed (92.1%)
   Outside     471.6 ms - 5.0 ms parked (1.1%), 466.6 ms runnable inside no operation
-Time on CPU   99.98% of wall time; 100.00% inside operations
+Time on CPU   99.98% of run time; 100.00% inside operations
   Bound       at most 0.00 pp of any share is a thread waiting rather than working
   Verdict     the ranking is trustworthy
 ```

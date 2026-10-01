@@ -1798,6 +1798,40 @@ entirely on a CPU. The bound is sound and several times looser than it need be.
 **Not measured:** a loaded machine, where the sampler can lose its core while the workers keep
 running and the lateness is not a pause at all; any collector but G1; `PARK`.
 
+### Time on CPU over run time: 99.39% where wall time said 89.8%
+
+**The measurement behind taking the pauses out of the duty cycle.** Same workload and setup as the
+section above, 2026-10-01, one run with the correction built and `-Xlog:safepoint,gc` beside it.
+
+```
+Wall time     66.6 s = 60.2 s run + 6.42 s paused (9.64%)
+  Paused      21 pauses, longest 2.61 s - every thread stopped, usually GC
+  GC          6.43 s by the JVM's own count
+Time on CPU   99.39% of run time
+  Bound       at most 0.61 pp of any share is a thread waiting rather than working
+  Verdict     the ranking is trustworthy
+```
+
+| | |
+|---|---|
+| JVM log: safepoints inside the session | 6.430 s over 23, 20 of them over 1 ms |
+| subtracted from wall time | 6.42 s |
+| time on CPU over wall time (the footnote's 10.2% off) | 89.8% |
+| time on CPU over run time | 99.39% |
+| bound, before / after | about 11 pp / 0.61 pp |
+
+**The subtraction is on the safe side of the truth.** 6.42 s was taken out where the JVM stopped the
+threads for 6.430 s, so 10 ms of pause is still in the run time and the bound is that much looser
+than it could be, not tighter.
+
+**The corrected figure does not depend on how much pausing there was.** The same arithmetic by hand
+on the four earlier runs, whose pauses ranged from 3.9 s to 6.0 s: 98.6%, 98.7%, 98.9%, 99.2%,
+against printed figures from 88.97% to 92.75%. The printed one moved four points with the pause
+time; the corrected one stays within a point.
+
+**Not measured:** the negative control live. A sampler kept off its core with no collection behind
+it must subtract nothing; that is covered by arithmetic in `PauseTest` and has not been staged.
+
 ## Open questions
 
 **What the bench's duration tolerance should be on a warm machine.** Settled above that `--coarse` is

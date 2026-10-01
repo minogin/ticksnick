@@ -77,7 +77,7 @@ internal class Sampler(
     private val duty = DutyCycle(dutyWindowNanos)
 
     /** Time this thread was itself stopped, which is time every thread was. See [PauseTracker]. */
-    private val pause = PauseTracker(stepNanos)
+    private val pause = PauseTracker(stepNanos, GcPauseClock.pauseNanos())
 
     /** When to next look for slots whose thread died without releasing. See Profiler.reclaimDeadSlots. */
     private var nextReclaim = Long.MIN_VALUE
@@ -633,7 +633,7 @@ internal class Sampler(
             if (live > maxSlots) maxSlots = live
             ticks++
             // Self-throttling: these return immediately on all but one tick in a thousand.
-            duty.tick(now)
+            if (duty.due(now)) duty.tick(now, pause.settle(GcPauseClock.pauseNanos()))
             if (now >= nextReclaim) {
                 Profiler.reclaimDeadSlots()
                 nextReclaim = now + RECLAIM_NANOS
@@ -663,7 +663,9 @@ internal class Sampler(
         }
         // The tail of the run belongs to the measurement as much as the middle does. Taken here
         // rather than in shutdown() so that it happens on this thread, before the slots go.
-        duty.finish(System.nanoTime())
+        // Settled here whether or not the duty cycle takes a last window, so that the confirmed
+        // total covers the whole session even where there is no CPU clock to correct.
+        duty.finish(System.nanoTime(), pause.settle(GcPauseClock.pauseNanos()))
     }
 
     /**
@@ -725,7 +727,7 @@ internal class Sampler(
     internal fun pauses(gcNanos: Long): PauseReport = PauseReport(
         measured = wait == WaitStrategy.SPIN,
         pausedNanos = pause.pausedNanos, pauses = pause.pauses, longestNanos = pause.longestNanos,
-        gcNanos = gcNanos,
+        gcNanos = gcNanos, confirmedNanos = pause.confirmedNanos,
     )
 
     private fun waitUntil(deadline: Long) {

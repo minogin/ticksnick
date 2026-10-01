@@ -1239,15 +1239,15 @@ spans are timestamps and *do* include their pauses, so `mean - busy/exec` would 
 pauses as waiting. Both are right, and both need the report to say so. It also moves a number that
 has been compared across runs.
 
-## 39. Take the pauses out of the duty windows · open
+## 39. Take the pauses out of the duty windows · built 2026-10-01
 
-The duty cycle divides CPU time by wall time, and the wall time includes pauses in which no sample
-was taken. The bound then charges the shares for time that is not in them: 7.82 pp on a run where
-the samples were on a CPU almost throughout, and a verdict one step down from the one deserved.
+Built, as *wall time = run + paused* with time on CPU taken over run time - see
+[plan.md](plan.md). The bound on the graph run went from 10.8 pp to about 1 pp, and the verdict
+with it.
 
-**What it needs.** The pause total per window, subtracted from that window's wall time. The catch
-is the clock: CPU time advances in 15.6 ms steps on Windows, so a window that is mostly pause has a
-numerator made of two or three steps.
+**Left from it:** the `Windows` range is still over wall time, so its low end is still the window
+the longest pause landed in. And only what the JVM confirms is subtracted, so on a collector the
+profiler cannot read the bound is as loose as before - which item 40 would lift.
 
 ## 40. Tell a stopped JVM from a preempted sampler, without asking the JVM · open
 

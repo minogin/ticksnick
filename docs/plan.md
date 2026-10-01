@@ -1872,6 +1872,64 @@ already prints or add a dependency, and this change was held to adding a row and
 call on the sampling thread per tick - so `--verify` and `--hook` were argued unchanged rather than
 re-run. `./gradlew test` passes, 127 tests.
 
+## Wall time = run + paused, and time on CPU over run time · 2026-10-01
+
+The follow-up to the entry above, decided the same day after reading a real report line by line.
+`Time on CPU 90.24%` and `Bound at most 10.8 pp` sat under `Paused 5.78 s`, and both were charging
+the shares for the pauses: about 59.6 s of CPU over the 60.2 s anything was running is 98.9%, and
+1.1 pp. A bound ten times looser than the evidence changes the verdict of the whole report, on every
+workload that allocates. This is [ideas.md](ideas.md) item 39, built.
+
+**The header, and it is Andrey's.** My version qualified the CPU line - *"98.9% while running;
+90.24% of wall time with the 5.78 s paused"* - and then tried to rescue it by calling the remainder
+"unpaused time". His: *"Show wall time split, wall time = run time + paused time. Show time on CPU
+as it is now, but against run time."* The split defines the term once, at the top, so the CPU line
+needs no qualifier and no second figure. `Run` and `Paused` are a pair.
+
+```
+Wall time     66.6 s = 60.2 s run + 6.42 s paused (9.64%)
+  Paused      21 pauses, longest 2.61 s - every thread stopped, usually GC
+  GC          6.43 s by the JVM's own count
+...
+Time on CPU   99.39% of run time
+  Bound       at most 0.61 pp of any share is a thread waiting rather than working
+  Verdict     the ranking is trustworthy
+```
+
+**"Wall time" keeps its ordinary meaning.** Redefining it as the non-paused part was considered and
+rejected: the `Wall-time` column and the coarse spans include pauses, and one word would have meant
+two things on one page.
+
+**Only confirmed pause is subtracted.** The paused figure is the smaller of what the sampler lost
+and what the JVM counted as collection, cumulatively (`PauseTracker.settle`). Each is a floor on the
+time every thread was stopped, so the smaller is a floor, and subtracting a floor can leave a pause
+in but cannot take running time out - the direction a bound is allowed to be wrong in. It is also
+the whole defence against a preempted sampler: lateness with no collection behind it confirms
+nothing. On a JVM whose collectors cannot be read, nothing is subtracted and the bound is exactly
+as loose as it was.
+
+**The split shows the confirmed figure, not the sampler's.** So the run time on the first line is
+the run time the duty cycle divides by, and the page agrees with itself. What the sampler lost
+beyond it is named on the `GC` row and said to be in run time.
+
+**What moved and what did not.** The per-thread wall time that feeds `labelledDuty` has the pauses
+taken out window by window, and `shareDuty`, `boundPp` and the verdict follow. `DutyReport.duty`
+keeps the whole wall clock, because `machineFloor`, `offCpuSamples` and the long-execution check
+read it and are about everything that happened to a thread, pauses included; the footnote under the
+table still says *"the machine itself accounts for up to 10.2%"*. The `Windows` range is also left
+on wall time: a window that is mostly pause has two or three CPU-clock steps left in it.
+
+**Always printed.** `Wall time ... + 0 paused` on a quiet run, because `of run time` lower down
+refers to it.
+
+**Cost.** One read of the JVM's collection count per duty window, on the sampling thread.
+
+**Not re-measured:** the bench, for the same reason as above. `./gradlew test` passes, 137 tests,
+ten runs in a row. One earlier run failed `RegistryTest` *"the thread count is per operation and not
+per run"* with 0 for 1; it did not recur and was not explained. That test starts its workers
+straight after `start()` while the sampler takes its baseline on its own thread, which is a race
+this change does not touch.
+
 ## Next session: the coarse output · opened 2026-09-02
 
 Written as a handover, because the work is Andrey's to start and the context is a day old.

@@ -1211,12 +1211,13 @@ class Report internal constructor(
         appendLine("  summed across threads, with waiting counted in full. NOT CPU - the time-on-CPU block above")
         appendLine("  bounds how much of it was waiting. The absolute one does not move when a label is added or")
         appendLine("  removed, which makes it the column to compare between two runs")
-        appendLine("paused is time the sampler itself was stopped for a whole step or more, summed whatever the")
-        appendLine("  cause. A spinning sampler is only ever stopped with every other thread, so it is time the")
-        appendLine("  whole JVM stood still - nearly always a garbage collection, and GC beside it is the JVM's")
-        appendLine("  own count of that. No sample is taken in a pause, so a share is a share of RUNNING time")
-        appendLine("  and a pause does not move it. Thread-time and time per call are scaled to the wall clock")
-        appendLine("  and so INCLUDE the pauses, spread over every operation in proportion to its samples")
+        appendLine("wall time = run + paused. Paused is time every thread was stopped: ticks the sampler ran a")
+        appendLine("  whole step late, as far as the JVM's own count of its collections confirms them. A late")
+        appendLine("  tick nobody confirmed stays in run time - the sampler may have been stopped alone. No")
+        appendLine("  sample is taken in a pause, so a share is a share of RUN time and a pause does not move")
+        appendLine("  it, and time on CPU is a share of run time for the same reason. Thread-time and time per")
+        appendLine("  call are still scaled to WALL time and so include the pauses, spread over every operation")
+        appendLine("  in proportion to its samples")
         appendLine("runnable / wait are the two halves of the thread-time beside them and add to 100%: the")
         appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
         appendLine("  NOT working - a thread the scheduler merely preempted reads runnable, and so does one")
@@ -1659,9 +1660,10 @@ class Report internal constructor(
                 )
             )
         )
-        // Directly under the step it explains. A mean of 1.109 ms against a 1 ms request reads as a
-        // sampler that cannot keep time, and the cause is nothing of the kind: it kept time and was
-        // stopped, along with everything it was watching.
+        // Wall time split into run and paused, directly under the step the pauses stretch. A mean of
+        // 1.109 ms against a 1 ms request reads as a sampler that cannot keep time, and the cause is
+        // nothing of the kind: it kept time and was stopped, along with everything it was watching.
+        // On every run, paused or not, because "run time" is what `Time on CPU` below is a share of.
         for (l in pause.lines(samplingSpanNanos)) appendLine(l)
         appendLine(
             row(

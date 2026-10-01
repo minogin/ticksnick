@@ -118,6 +118,15 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
     private var windows = 0
     private var cpuNanos = 0L
     private var wallNanos = 0L
+
+    /**
+     * Confirmed pause inside the windows counted so far, summed per thread like [wallNanos], so that
+     * `wallNanos - pausedNanos` is the run time of exactly the threads [cpuNanos] was read from.
+     */
+    private var pausedNanos = 0L
+
+    /** Confirmed pause since the last window boundary, waiting for a window to be taken out of. */
+    private var pendingPause = 0L
     private var minDuty = Double.NaN
     private var maxDuty = Double.NaN
     private var maxThreads = 0
@@ -149,22 +158,40 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
      * would otherwise consume a window and push the first countable boundary a whole window later,
      * out past the end of a short run.
      */
-    fun tick(now: Long) {
-        if (!available || now < nextAt) return
-        sample(now)
+    fun tick(now: Long, confirmedPause: Long = 0) {
+        if (!due(now)) return
+        sample(now, confirmedPause)
         nextAt = if (prevWall == 0L) now else now + windowNanos
     }
+
+    /**
+     * Whether [tick] would take a sample now. Asked first by the sampler, so that the JVM's
+     * collection count is read once a window rather than once a tick.
+     */
+    fun due(now: Long): Boolean = available && now >= nextAt
 
     /**
      * A final sample, so the last partial window is not silently dropped. Refused when too little
      * time has passed to be worth reading, which is the rule the windows themselves follow.
      */
-    fun finish(now: Long) {
+    fun finish(now: Long, confirmedPause: Long = 0) {
         if (!available || prevWall == 0L || now - prevWall < floorNanos) return
-        sample(now)
+        sample(now, confirmedPause)
     }
 
-    private fun sample(now: Long) {
+    /**
+     * @param confirmedPause time every thread was stopped since the last call, by
+     *   [PauseTracker.settle] - the part of the wall clock in which no sample was taken.
+     */
+    private fun sample(now: Long, confirmedPause: Long) {
+        // The shares this bounds are over samples, and no sample is taken while the JVM is stopped.
+        // So the wall time a thread's CPU is divided by must leave the pauses out too, or the bound
+        // charges the shares for time that is not in them: 10.8 pp on a run whose samples were on a
+        // CPU 98.9% of the time. Only the per-thread figures that feed the bound are corrected; the
+        // aggregate keeps the whole wall clock, because the machine-wide readings taken from it are
+        // about everything that happened to a thread, pauses included.
+        pendingPause += confirmedPause
+        val paused = if (prevWall == 0L) 0L else min(pendingPause, now - prevWall)
         // What this walk costs the sampler, measured rather than assumed: it runs on the sampling
         // thread, and a sampler that holds a 1 ms step is not something to spend without counting.
         val entered = System.nanoTime()
@@ -189,7 +216,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
                 val idx = s.index
                 if (idx >= 0) {
                     cpuByIndex[idx] += d
-                    wallByIndex[idx] += now - prevWall
+                    wallByIndex[idx] += now - prevWall - paused
                 }
             }
         }
@@ -199,6 +226,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
             val wall = (now - prevWall) * counted
             cpuNanos += cpu
             wallNanos += wall
+            pausedNanos += paused * counted
             windows++
             val d = cpu.toDouble() / wall
             if (windows == 1) {
@@ -230,6 +258,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
         // on every tick for the rest of the run.
         if (next.isEmpty() && prevWall == 0L) return
         prevWall = now
+        pendingPause = 0
         val cost = System.nanoTime() - entered
         if (cost > maxSampleNanos) maxSampleNanos = cost
     }
@@ -267,6 +296,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
         maxWindowDuty = maxDuty,
         anomalies = anomalies,
         maxSampleNanos = maxSampleNanos,
+        pausedNanos = pausedNanos,
         )
     }
 
@@ -417,12 +447,33 @@ class DutyReport internal constructor(
     val anomalies: Int,
     /** The dearest of the walks, so what this costs the sampling thread is a number and not a hope. */
     val maxSampleNanos: Long,
+    /**
+     * Of [wallNanos], the part in which every thread was stopped - confirmed pauses, summed per
+     * thread the way [wallNanos] is. See [PauseTracker.settle] for what confirmed means.
+     */
+    val pausedNanos: Long = 0,
 ) {
     /** True when there is a number to read: a measurement was attempted and it succeeded. */
     val available: Boolean get() = reason == null && windows > 0 && wallNanos > 0
 
-    /** The fraction of occupancy that was CPU, over every registered thread. */
+    /**
+     * The fraction of wall time that was CPU, over every registered thread, pauses included.
+     *
+     * What the machine did to a thread, all of it - so a collection counts against it. The figure
+     * the report prints and bounds the shares with is [runDuty].
+     */
     val duty: Double get() = if (wallNanos > 0) cpuNanos.toDouble() / wallNanos else Double.NaN
+
+    /**
+     * The fraction of *run time* that was CPU: [duty] with the confirmed pauses taken out of the
+     * wall clock.
+     *
+     * Capped at 1, because the CPU counter moves in scheduler ticks and the pauses are subtracted
+     * exactly, so a short run can read a hair over.
+     */
+    val runDuty: Double
+        get() = if (wallNanos - pausedNanos > 0) min(1.0, cpuNanos.toDouble() / (wallNanos - pausedNanos))
+        else Double.NaN
 
     /**
      * The duty the shares are actually bounded by: [labelledDuty] where it exists, and the
@@ -432,7 +483,7 @@ class DutyReport internal constructor(
      * doing to every thread at once — [Report.machineFloor], [Report.offCpuSamples] — keeps using
      * [duty], because there the whole process is the subject and an idle thread belongs in it.
      */
-    val shareDuty: Double get() = if (labelledDuty.isNaN()) duty else labelledDuty
+    val shareDuty: Double get() = if (labelledDuty.isNaN()) runDuty else labelledDuty
 
     /**
      * True when the bound has run out of evidence rather than found something.
@@ -517,7 +568,7 @@ class DutyReport internal constructor(
         out += row(
             "Time on CPU",
             String.format(
-                Locale.ROOT, "%.2f%% of wall time%s", duty * 100,
+                Locale.ROOT, "%.2f%% of run time%s", runDuty * 100,
                 // Withheld when the bound is unusable: a labelled figure printed beside "none"
                 // reads as a measurement that was taken and then ignored, which is the opposite of
                 // what happened - the evidence ran out.

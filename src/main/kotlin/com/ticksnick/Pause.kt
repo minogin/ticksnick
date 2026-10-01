@@ -1,8 +1,10 @@
 package com.ticksnick
 
+import java.lang.management.GarbageCollectorMXBean
 import java.lang.management.ManagementFactory
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Adds up the time the sampling thread was itself stopped.
@@ -18,6 +20,10 @@ import kotlin.math.max
  * report prints is the observation - *paused* - and the cause is offered as a hint beside it, with
  * the JVM's own collection count ([GcPauseClock]) as the check on that hint.
  *
+ * **Seen is not the same as confirmed, and only confirmed time is ever subtracted from anything.**
+ * [pausedNanos] is what this thread saw. [confirmedNanos] is the part of it the JVM also counted,
+ * and it is the only figure the report takes out of wall time - see [settle].
+ *
  * One subtraction and one compare per tick, on the sampling thread. Nothing here is on the hot path.
  */
 internal class PauseTracker(
@@ -26,10 +32,15 @@ internal class PauseTracker(
      * none was lost, and lateness of that size is also what a busy machine does to any thread.
      */
     private val thresholdNanos: Long,
+    /** [GcPauseClock.pauseNanos] when the session began, or -1 if it cannot be read. */
+    private val gcAtStartNanos: Long = -1,
 ) {
     var pausedNanos: Long = 0; private set
     var pauses: Long = 0; private set
     var longestNanos: Long = 0; private set
+
+    /** Paused time that both this thread saw and the JVM counted. Never more than either. */
+    var confirmedNanos: Long = 0; private set
 
     /** Called on every tick with when it was due and when it actually ran. */
     fun tick(dueNanos: Long, nowNanos: Long) {
@@ -38,6 +49,33 @@ internal class PauseTracker(
         pausedNanos += late
         pauses++
         if (late > longestNanos) longestNanos = late
+    }
+
+    /**
+     * Brings [confirmedNanos] up to date and returns how much it grew.
+     *
+     * The smaller of what the sampler lost and what the JVM says it spent collecting, both since
+     * the session began. Each is a floor on the time every thread really was stopped: lateness
+     * misses pauses under a step and the head of every longer one, and the JVM's count is
+     * collection alone. So the smaller of two floors is a floor, and taking it out of wall time can
+     * leave a pause in but can never take running time out - which is the direction a bound on the
+     * shares is allowed to be wrong in.
+     *
+     * It is also what makes a preempted sampler harmless. A sampler that lost its core while the
+     * workers ran on has lateness and no collection behind it; the JVM's count does not move, so
+     * nothing is confirmed and nothing is subtracted.
+     *
+     * Cumulative rather than per call, so a pause whose two halves land either side of a call - the
+     * JVM counts it when it ends, the sampler on its next tick - is matched on the following one.
+     *
+     * @param gcNowNanos [GcPauseClock.pauseNanos] now, or -1.
+     */
+    fun settle(gcNowNanos: Long): Long {
+        if (gcAtStartNanos < 0 || gcNowNanos < 0) return 0
+        val grew = min(pausedNanos, gcNowNanos - gcAtStartNanos) - confirmedNanos
+        if (grew <= 0) return 0
+        confirmedNanos += grew
+        return grew
     }
 }
 
@@ -100,16 +138,25 @@ internal fun gcPauseMillis(beans: List<Pair<String, Long>>): Long {
 /**
  * The JVM's own count of how long garbage collection has stopped the application.
  *
- * Read twice a session, at start and at stop. It is the check on [PauseTracker], which measures
- * the same thing from the outside and cannot say what caused it.
+ * Read at start and stop, and once per duty window in between. It is the check on [PauseTracker],
+ * which measures the same thing from the outside and cannot say what caused it.
  */
 internal object GcPauseClock {
+    /** Looked up once: the set of collectors does not change while a JVM runs. */
+    private val beans: List<GarbageCollectorMXBean>? by lazy {
+        try {
+            ManagementFactory.getGarbageCollectorMXBeans()
+        } catch (_: Throwable) {
+            // No java.management module, or a JVM that refuses. Either way the answer is "not known".
+            null
+        }
+    }
+
     /** Nanoseconds of stop-the-world collection since the JVM started, or -1 if it cannot be read. */
     fun pauseNanos(): Long = try {
-        val millis = gcPauseMillis(ManagementFactory.getGarbageCollectorMXBeans().map { it.name to it.collectionTime })
+        val millis = gcPauseMillis(beans.orEmpty().map { it.name to it.collectionTime })
         if (millis < 0) -1L else millis * 1_000_000L
     } catch (_: Throwable) {
-        // No java.management module, or a JVM that refuses. Either way the answer is "not known".
         -1L
     }
 }
@@ -123,52 +170,85 @@ class PauseReport internal constructor(
      * by the scheduler's doing, so its lateness says nothing about the threads it is watching.
      */
     val measured: Boolean,
-    /** Total lateness of the ticks that ran at least one whole step late. */
+    /** Total lateness of the ticks that ran at least one whole step late: what the sampler saw. */
     val pausedNanos: Long,
     val pauses: Long,
     val longestNanos: Long,
     /** Stop-the-world collection time by the JVM's own count over the session, or -1 if unreadable. */
     val gcNanos: Long,
+    /**
+     * The part of [pausedNanos] the JVM also counted - the paused time in `wall = run + paused`.
+     *
+     * The smaller of the two, so that the run time on the first line of the header is the same run
+     * time the duty cycle divides by. Lateness nobody confirmed stays in run time: it may have been
+     * the sampler alone that was stopped.
+     */
+    val confirmedNanos: Long = 0,
 ) {
     /**
-     * The header rows, or none at all on a run with nothing to report.
+     * The header rows: wall time split into run and paused, and what is known about the pauses.
      *
-     * A quiet run prints nothing rather than `Paused 0`: the row exists to explain a stretched step
-     * and a low time-on-CPU, and where neither happened it would be a line that teaches the reader
-     * to skip it.
+     * The split is printed on every run, paused or not, because `Time on CPU` further down is a
+     * share of *run time* and a reader has to have been shown what that is. The rows under it are
+     * only there when there is something to say.
      *
-     * @param spanNanos the sampling span, which is what the paused time is a share of.
+     * @param spanNanos the sampling span: the wall time being split.
      */
     fun lines(spanNanos: Long): List<String> {
-        if (!measured) return listOf(
-            row("Paused", "not measured - only a spinning sampler can tell a pause from its own lateness")
-        ) + listOfNotNull(if (gcNanos > 0) subRow("GC", gcCount()) else null)
-        if (pauses == 0L && gcNanos <= 0) return emptyList()
-        if (pauses == 0L) return listOf(
-            row("Paused", "none the sampler could see - a pause shorter than one step is not resolved"),
-            subRow("GC", gcCount()),
-        )
+        val paused = min(confirmedNanos, spanNanos).coerceAtLeast(0)
         val out = ArrayList<String>()
         out += row(
-            "Paused", String.format(
-                Locale.ROOT, "%s (%s) in %s, longest %s - every thread stopped, usually GC",
-                duration(pausedNanos.toDouble()),
-                percent(if (spanNanos > 0) pausedNanos * 100.0 / spanNanos else Double.NaN),
-                Report.plural(pauses, "pause"), duration(longestNanos.toDouble())
+            "Wall time",
+            if (paused == 0L) String.format(
+                Locale.ROOT, "%s = %s run + 0 paused",
+                duration(spanNanos.toDouble()), duration(spanNanos.toDouble())
+            )
+            else String.format(
+                Locale.ROOT, "%s = %s run + %s paused (%s)",
+                duration(spanNanos.toDouble()), duration((spanNanos - paused).toDouble()),
+                duration(paused.toDouble()), percent(paused * 100.0 / spanNanos)
             )
         )
+        if (!measured) {
+            out += subRow("Paused", "not measured - only a spinning sampler can tell a pause from its own lateness")
+            if (gcNanos > 0) out += subRow("GC", gcCount())
+            return out
+        }
+        if (pauses == 0L) {
+            // Collections the sampler could not see, each shorter than a step. Real pauses, and left
+            // in run time all the same: nothing here measured them but the JVM's word for it.
+            if (gcNanos > 0) out += subRow(
+                "GC", gcCount() + " - in pauses under one step, which the sampler cannot see; counted as run time"
+            )
+            return out
+        }
+        val counts = String.format(
+            Locale.ROOT, "%s, longest %s", Report.plural(pauses, "pause"), duration(longestNanos.toDouble())
+        )
+        if (gcNanos < 0) {
+            // The one case where what the sampler saw is not in the split above, so the total has to
+            // be said here or it is said nowhere.
+            out += subRow(
+                "Paused", String.format(
+                    Locale.ROOT, "%s in %s - seen by the sampler but not confirmed, so counted as run time",
+                    duration(pausedNanos.toDouble()), counts
+                )
+            )
+            out += subRow("GC", "not counted - this JVM's collectors are not ones the profiler can read")
+            return out
+        }
+        out += subRow("Paused", "$counts - every thread stopped, usually GC")
         out += subRow(
             "GC", when {
-                gcNanos < 0 -> "not counted - this JVM's collectors are not ones the profiler can read"
                 // The two are the same quantity measured from opposite sides, and they agree to a
                 // percent when the pauses were collections. Said only when they do not: a gap is
                 // the one case where the hint on the row above is wrong.
                 pausedNanos - gcNanos > slack(pausedNanos) -> gcCount() + String.format(
-                    Locale.ROOT, " - the other %s was not GC: another JVM pause, or the sampler kept off its core",
+                    Locale.ROOT, " - the other %s the sampler lost was not GC, and is counted as run time",
                     duration((pausedNanos - gcNanos).toDouble())
                 )
                 gcNanos - pausedNanos > slack(gcNanos) ->
-                    gcCount() + " - more than the sampler saw: a pause shorter than one step is not resolved"
+                    gcCount() + " - more than the sampler saw: a pause under one step is not resolved"
                 else -> gcCount()
             }
         )

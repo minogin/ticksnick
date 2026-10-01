@@ -1761,6 +1761,43 @@ The honest form is the one `working` adopted after that trial: build the number 
 the duty-cycle bound beside it so a reader can see when it cannot be supported. That is not a
 compromise reached for want of effort; it is what the platform allows.
 
+### A tick that runs late is a stopped JVM: lateness against the safepoint log
+
+**The sampler's own lateness measures stop-the-world pauses to within a percent.** Two runs,
+2026-10-01, on the graph benchmark (not a trial - but the truth here is the JVM's own log, which
+does not depend on whose code is running): one thread, 9 GB live, G1, 16 GB heap, 1 ms step,
+`-Xlog:safepoint,gc` beside the session. Both sides of each comparison come from the same run, so
+the machine's clock speed cancels.
+
+| | run 1 | run 2 |
+|---|---|---|
+| ticks, achieved step | 56,970 at 1.101 ms | 61,869 at 1.064 ms |
+| **sampler: time lost** | **5.75 s** (ticks x 0.101 ms, by hand) | **3.91 s** in 20 pauses (`Paused` row) |
+| **JVM: safepoints inside the session** | **5.72 s** over 26 | **3.917 s** over 23, 20 of them over 1 ms |
+| JVM: GC pause lines in the log | - | 3.913 s |
+| `GarbageCollectorMXBean`, pause beans | - | 3.91 s (`GC` row) |
+| longest pause, sampler / JVM | - / 1.815 s (a full GC) | 297 ms / 297 ms |
+
+**What it shows.** The sampler is a Java thread and stops at a safepoint with everything else. It
+does not catch up afterwards - it resyncs - so a pause of *P* loses *P* of ticks, and the achieved
+step stretches by exactly the paused share. In run 2 the three safepoints the sampler did not count
+were under a millisecond each, which is the threshold doing what it says.
+
+**Every safepoint in both runs was a collection.** So these runs cannot say what the row does when
+the two counts disagree; that path is covered by arithmetic in `PauseTest` and by nothing live.
+
+**`G1 Concurrent GC` reports pauses, not cycles.** Run 2 had concurrent mark cycles seconds long.
+Had the bean counted them the `GC` row would have read far above the log's 3.913 s; it read 3.91 s.
+
+**What it costs the other numbers** - by arithmetic on run 2, not by a separate measurement: shares
+are unmoved, because no sample is taken in a pause. Thread-time is `hits x achieved step`, so it and
+`Thread-time per call` are 6% high. And the duty cycle divides CPU by a wall time that includes the
+pauses: `Time on CPU 92.75%` and a bound of 7.82 pp, where the samples themselves were taken almost
+entirely on a CPU. The bound is sound and several times looser than it need be.
+
+**Not measured:** a loaded machine, where the sampler can lose its core while the workers keep
+running and the lateness is not a pause at all; any collector but G1; `PARK`.
+
 ## Open questions
 
 **What the bench's duration tolerance should be on a warm machine.** Settled above that `--coarse` is

@@ -1830,6 +1830,48 @@ printed two columns away - typically 0.2-0.5% - and the coarse percentiles come 
 that reports the top of a bucket, about 1%. `44.250%` invited comparisons between operations that
 differ by less than the error on either of them.
 
+## `Paused`: lateness summed, whatever caused it · 2026-10-01
+
+Came out of the first run on a workload that allocates - the graph benchmark, 9 GB live under G1 -
+where the header read `1.109 ms mean` against a 1 ms request and `Time on CPU 88.97%` with nothing
+on the page saying why. The measurement is in [findings.md](findings.md); this is what was decided.
+
+**What is built.** The sampler adds up how late each tick ran, counting only ticks a whole step
+late (`PauseTracker`, one subtraction and one compare per tick, sampler thread only). The header
+prints the total as `Paused`, under `Sampling`, and beside it `GC`: the JVM's own collection-pause
+count over the session, read from `GarbageCollectorMXBean` at `start()` and `stop()`.
+
+**Everything late is summed, with no attempt to say what it was.** Andrey: *"just sum up all lost
+time no matter what exactly that was."* The sampler cannot tell a collection from another safepoint
+or from losing its core, and a classification it cannot make is not one it should print.
+
+**The name is the observation.** `JVM Overhead` was the first candidate and was rejected for being
+wrong both ways: too broad, since a preempted sampler or a suspended laptop is not the JVM, and too
+narrow, since concurrent collection, JIT and barriers are JVM cost that never stops the sampler and
+so is not in the number. `Paused` says what was seen; *usually GC* is a hint, and the `GC` row is
+the check on it.
+
+**The threshold is one whole step.** Below that a tick was late but none was lost. It is also the
+condition the tick loop already used to resync.
+
+**GC beans are chosen by an allow-list of names, and one unknown bean makes the count unavailable.**
+`getCollectionTime()` means pause time for G1, Parallel and Serial and the length of a concurrent
+cycle for the `Cycles` beans of ZGC and Shenandoah, so summing every bean would report seconds of
+running time as pauses. Only G1 has been run; the other names are from memory of the JDK and have
+not been checked against a live JVM.
+
+**Spin only.** Under `PARK` or `SLEEP` the row prints *not measured*: parking is late on every tick.
+
+**Deliberately not built, and each is an ideas.md item:** subtracting the paused time from
+thread-time and time per call (38), taking it out of the duty windows so the bound stops charging
+pauses to the shares (39), telling a stopped JVM from a preempted sampler without the JVM's help
+(40), and saying which coarse execution a pause landed in (41). All four change numbers the report
+already prints or add a dependency, and this change was held to adding a row and moving nothing.
+
+**Not re-measured:** the bench. The hook, the slot and the walk are untouched - the diff adds one
+call on the sampling thread per tick - so `--verify` and `--hook` were argued unchanged rather than
+re-run. `./gradlew test` passes, 127 tests.
+
 ## Next session: the coarse output · opened 2026-09-02
 
 Written as a handover, because the work is Andrey's to start and the context is a day old.

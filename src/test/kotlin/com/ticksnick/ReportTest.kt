@@ -81,6 +81,7 @@ class ReportTest {
             untrackedSlots = 3, reclaimedSlots = 4, idleWaitingHits = 5,
             coarse = listOf(c), openContextsAtEnd = 1, labelledOutsideCoarse = 60,
             staleContextHits = 20, coarseSampleHits = 100,
+            pause = PauseReport(true, 90_000_000, 3, 60_000_000, gcNanos = 10_000_000),
         )
     }
 

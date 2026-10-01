@@ -17,6 +17,21 @@ the banner instead, which is where a caller meets it once rather than at every c
 
 Builds on Gradle 9.7.1 and Kotlin 2.4.0.
 
+### Paused
+
+The header says how long every thread was stopped, and the JVM's own count of how much of that was
+garbage collection:
+
+```
+Paused        3.91 s (5.93%) in 20 pauses, longest 297 ms - every thread stopped, usually GC
+  GC          3.91 s by the JVM's own count
+```
+
+It is the sampler's own lateness added up, so it costs nothing on the hot path and needs nothing
+from the JVM. Checked against `-Xlog:safepoint` it agrees to a percent. Printed only when there was
+a pause. Shares are unmoved by pauses; thread-time and time per call still include them, which the
+row now lets a reader see. `Report.pause` carries the figures.
+
 ### Crossing threads
 
 Work handed to a pool no longer leaves its logical operation behind. `captureCoarse()` on the thread

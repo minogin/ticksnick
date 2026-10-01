@@ -526,6 +526,8 @@ class Report internal constructor(
     val staleContextHits: Long = 0,
     /** Samples caught inside a coarse execution at all — the population [staleContextHits] is part of. */
     val coarseSampleHits: Long = 0,
+    /** How long every thread was stopped, which is what stretches [stepNanos] past the requested step. */
+    val pause: PauseReport = PauseReport.NONE,
 ) {
     /** False when a fatal finding stopped the session. See the severity ladder in plan.md. */
     val ok: Boolean get() = failure == null
@@ -1209,6 +1211,12 @@ class Report internal constructor(
         appendLine("  summed across threads, with waiting counted in full. NOT CPU - the time-on-CPU block above")
         appendLine("  bounds how much of it was waiting. The absolute one does not move when a label is added or")
         appendLine("  removed, which makes it the column to compare between two runs")
+        appendLine("paused is time the sampler itself was stopped for a whole step or more, summed whatever the")
+        appendLine("  cause. A spinning sampler is only ever stopped with every other thread, so it is time the")
+        appendLine("  whole JVM stood still - nearly always a garbage collection, and GC beside it is the JVM's")
+        appendLine("  own count of that. No sample is taken in a pause, so a share is a share of RUNNING time")
+        appendLine("  and a pause does not move it. Thread-time and time per call are scaled to the wall clock")
+        appendLine("  and so INCLUDE the pauses, spread over every operation in proportion to its samples")
         appendLine("runnable / wait are the two halves of the thread-time beside them and add to 100%: the")
         appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
         appendLine("  NOT working - a thread the scheduler merely preempted reads runnable, and so does one")
@@ -1651,6 +1659,10 @@ class Report internal constructor(
                 )
             )
         )
+        // Directly under the step it explains. A mean of 1.109 ms against a 1 ms request reads as a
+        // sampler that cannot keep time, and the cause is nothing of the kind: it kept time and was
+        // stopped, along with everything it was watching.
+        for (l in pause.lines(samplingSpanNanos)) appendLine(l)
         appendLine(
             row(
                 "Coverage", String.format(

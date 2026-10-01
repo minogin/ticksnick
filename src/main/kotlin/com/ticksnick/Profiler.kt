@@ -363,6 +363,9 @@ object Profiler {
     private var sampler: Sampler? = null
     private var startedAt: Long = 0
 
+    /** The JVM's collection-pause count when the current session began, or -1. See [GcPauseClock]. */
+    private var gcAtStart: Long = -1
+
     /**
      * Id for an operation name, assigned on first call and stable thereafter. Idempotent, so it is
      * safe to call from a static initialiser, a lazy holder, or once per call site.
@@ -816,6 +819,7 @@ object Profiler {
     ) {
         check(sampler == null) { "already sampling" }
         startedAt = System.nanoTime()
+        gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()
         untrackedAtStart = untrackedSlots()
         reclaimedAtStart = reclaimedSlots()
@@ -829,6 +833,9 @@ object Profiler {
         s.shutdown()
         sampler = null
         val duration = System.nanoTime() - startedAt
+        // Both ends or neither: a clock that could not be read at one of them has no difference.
+        val gcAtStop = GcPauseClock.pauseNanos()
+        val gcNanos = if (gcAtStart < 0 || gcAtStop < 0) -1L else gcAtStop - gcAtStart
         val stats = (0 until registeredCount()).map { id ->
             OperationStat(
                 id, nameOf(id), s.counters[id], s.sessionCalls(id), s.stuckHits[id], s.stuckInstances[id],
@@ -877,6 +884,7 @@ object Profiler {
             labelledOutsideCoarse = s.labelledOutsideCoarse,
             staleContextHits = s.staleContextHits,
             coarseSampleHits = s.coarseSampleHits,
+            pause = s.pauses(gcNanos),
         )
     }
 }

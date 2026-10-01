@@ -76,6 +76,9 @@ internal class Sampler(
      */
     private val duty = DutyCycle(dutyWindowNanos)
 
+    /** Time this thread was itself stopped, which is time every thread was. See [PauseTracker]. */
+    private val pause = PauseTracker(stepNanos)
+
     /** When to next look for slots whose thread died without releasing. See Profiler.reclaimDeadSlots. */
     private var nextReclaim = Long.MIN_VALUE
 
@@ -431,6 +434,7 @@ internal class Sampler(
             waitUntil(next)
             if (!running) break
             val now = System.nanoTime()
+            pause.tick(next, now)
 
             val walkStart = System.nanoTime()
             var live = 0
@@ -708,6 +712,21 @@ internal class Sampler(
     /** How much of the occupancy this session sampled was CPU. See [DutyCycle]. */
     internal fun duty(): DutyReport =
         duty.report(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting, sampleState)
+
+    /**
+     * How long this session spent with every thread stopped.
+     *
+     * Only a spinning sampler is punctual enough for its lateness to mean anything: parking drifts
+     * by more than half a step on a quiet machine and by thirteen steps on a loaded one, and every
+     * one of those would be counted as a pause that nobody else experienced.
+     *
+     * @param gcNanos the JVM's own count of collection pauses over the session, or -1.
+     */
+    internal fun pauses(gcNanos: Long): PauseReport = PauseReport(
+        measured = wait == WaitStrategy.SPIN,
+        pausedNanos = pause.pausedNanos, pauses = pause.pauses, longestNanos = pause.longestNanos,
+        gcNanos = gcNanos,
+    )
 
     private fun waitUntil(deadline: Long) {
         when (wait) {

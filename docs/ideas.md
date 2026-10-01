@@ -1227,6 +1227,52 @@ That also puts the reconciliation for the two `request` rows on one line: the 5.
 among them is the mixed-provenance table that [plan.md](plan.md) argued against when the tiers were
 merged. Left open rather than built because the coarse table is about to be reworked wholesale.
 
+## 38. Take the pauses out of thread-time and time per call · open
+
+One sample is worth the step the sampler achieved, and pauses stretch it: 1.064 ms on a run that was
+5.93% paused, so every `Thread-time` and `Thread-time per call` is 6% high
+([findings.md](findings.md)). `Paused` now measures exactly the amount. Subtracting it makes time per
+call the running time of a call, which is what a reader comparing it with a microbenchmark expects.
+
+**Why it is not simply done.** `Coverage` would stop adding up to the wall clock, and the coarse
+spans are timestamps and *do* include their pauses, so `mean - busy/exec` would start reporting
+pauses as waiting. Both are right, and both need the report to say so. It also moves a number that
+has been compared across runs.
+
+## 39. Take the pauses out of the duty windows · open
+
+The duty cycle divides CPU time by wall time, and the wall time includes pauses in which no sample
+was taken. The bound then charges the shares for time that is not in them: 7.82 pp on a run where
+the samples were on a CPU almost throughout, and a verdict one step down from the one deserved.
+
+**What it needs.** The pause total per window, subtracted from that window's wall time. The catch
+is the clock: CPU time advances in 15.6 ms steps on Windows, so a window that is mostly pause has a
+numerator made of two or three steps.
+
+## 40. Tell a stopped JVM from a preempted sampler, without asking the JVM · open
+
+`Paused` counts every late tick. On a quiet machine that is a stopped JVM to within a percent; on a
+loaded one the sampler can lose its core while the workers run on, and that is lateness with no
+pause behind it. Today the `GC` row is the only check, and it only knows about collections.
+
+**The free signal.** The sampler already reads each thread's call counter for the long-execution
+check. If the counters moved across a late tick, the workers were running. It says nothing for a
+thread inside one long call, so it bounds the answer rather than giving it.
+
+## 41. Say where the pauses landed · open
+
+The total is in the header. Which coarse execution sat through the 1.8 s collection is not, and it
+is the first thing a reader of the percentiles asks. The slot still holds its label and its context
+across a pause, so a late tick can be charged to both - worded as *stopped inside*, never *caused
+by*, because a pause stops every thread wherever it happens to be.
+
+GC notifications (`com.sun.management`) would add the cause and the collector's own duration per
+pause. HotSpot only, and a second module to depend on.
+
+**The harder version:** charging a collection to the operation that allocated. That needs allocated
+bytes per operation - far beyond the 2 ns the fine hook costs, possibly affordable at the 40 ns of a
+coarse context, and unmeasured.
+
 ## Promoted to plan.md
 
 **Phase 3.5** is item 9 above, reframed from detecting bad operations to bounding the error on every

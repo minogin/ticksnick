@@ -35,6 +35,39 @@ meaningless. `1.006 ms` is the step the sampler *achieved* against the one you a
 has drifted far above your `stepMillis`, the sampler could not get scheduled and the run is worth
 less than it looks.
 
+**`Paused` — a row that is only there when something stopped the JVM.**
+
+```
+Sampling      61,869 ticks at 1.064 ms mean (jittered) x 1 thread - one sample per thread per tick
+Paused        3.91 s (5.93%) in 20 pauses, longest 297 ms - every thread stopped, usually GC
+  GC          3.91 s by the JVM's own count
+```
+
+It sits under the step because it is what stretches the step. The sampler spins, so it wakes within
+microseconds of when it asked to; a tick that runs a whole step late was *stopped*, and a JVM thread
+is only ever stopped together with every other one. `Paused` is the sum of that lateness, whatever
+caused it — the name is the observation, and *usually GC* is a hint.
+
+`GC` is the check on the hint: the JVM's own count of collection pauses over the same session. When
+the two agree nothing more is said. When they do not, the row says which way — *"the other 4.00 s was
+not GC"* means another kind of JVM pause or a sampler kept off its core, and *"more than the sampler
+saw"* means pauses shorter than one step, which lose no tick and so are invisible to it. On a JVM
+whose collectors the profiler cannot read, the row says *not counted* rather than printing a figure.
+
+Three things follow, and the third is the one that changes how to read the tables:
+
+- **No sample is taken during a pause**, so a share is a share of *running* time and a pause does not
+  move it or the ranking.
+- **Coarse spans include their pauses**, because they are two timestamps. A request that sat through
+  a 1.8 s collection took 1.8 s longer, and its percentiles say so.
+- **Thread-time and time per call include the pauses too**, spread over every operation in proportion
+  to its samples — one sample is worth the step the sampler *achieved*, and that is the stretched
+  one. On the run above every `Thread-time per call` is about 6% high, and the operation that
+  allocated its way into the collection is charged no more of it than one that allocated nothing.
+
+A sampler that is not spinning prints *not measured*: parking is late on every tick by the
+scheduler's doing, and none of that is anybody's pause.
+
 **Line 2 — coverage.** *Labels cover 87.10 s of the 95.97 s observed.* The gap is time no label was
 open. A low figure is not automatically bad — it means your labels do not cover everything, which
 may be exactly what you intended — but it is the first place a misplaced label shows up. Reported in

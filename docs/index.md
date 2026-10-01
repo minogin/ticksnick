@@ -51,6 +51,16 @@ workload here that waits for anything, and `working` read **55× more CPU than t
 spent**: Java reports a thread stopped inside a native call as runnable. The report now prints the
 measured duty cycle beside the number and says so. [trial-jdbc.md](trial-jdbc.md).
 
+**Since then, 2026-10-01: the report says when the JVM was stopped.** The first workload that
+allocates - a graph benchmark in a separate project, `C:\idea\graph`, with TickSnick wired in as a
+composite build - printed a stretched step and a low time on CPU with nothing saying why. It was
+garbage collection. The header now splits wall time into *run* and *paused*, and `Time on CPU`, the
+bound and the verdict are taken over run time; on that workload the bound went from about 11 pp to
+0.61 pp. Decided and recorded in [plan.md](plan.md), the two entries dated 2026-10-01; measured in
+[findings.md](findings.md); explained in [output.md](output.md). **Left open:** thread-time and time
+per call still include the pauses ([ideas.md](ideas.md) item 38), and items 40 and 41. The bench was
+not re-run after either change. That project's `docs/handover.md` says where the work on it stands.
+
 **What to do next is [plan.md § Phase 6](plan.md#phase-6--thread-state-and-the-whole-application-coefficient--partly-done)** —
 the whole-application parallelism coefficient. Its design is settled and the measurement that settled
 it is recorded: reading a thread's CPU costs 285 ns, which is affordable, but the clock's resolution

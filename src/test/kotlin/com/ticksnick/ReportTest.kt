@@ -137,19 +137,22 @@ class ReportTest {
     // ---------------------------------------------------------------- shares and coverage
 
     /**
-     * Shares are over labelled samples, not over every sample.
+     * Shares are over every sample, so a share is a share of active time.
      *
-     * The denominator is the point: folding unlabelled time in would make every share depend on how
-     * much uninstrumented code happened to be running, so adding a label anywhere would move every
-     * other number in the report.
+     * Until 2026-10-11 they were over labelled samples, which kept a share still when idle time
+     * changed and moved every row whenever a label was added. Now unlabelled time is a row of its
+     * own, `(no operation)`, and the rows add up to the run.
      */
     @Test
-    fun `a share does not move when unlabelled time changes`() {
+    fun `a share is of every sample, and unlabelled time is the rest`() {
         val ops = listOf(stat("a", hits = 300, calls = 1000), stat("b", hits = 100, calls = 1000))
         val quiet = report(ops, idle = 0)
-        val noisy = report(ops, idle = 1_000_000)
+        val noisy = report(ops, idle = 400)
         assertEquals(0.75, quiet.shareOf(ops[0]), 1e-9)
-        assertEquals(quiet.shareOf(ops[0]), noisy.shareOf(ops[0]), 1e-9, "a share moved with idle time")
+        assertEquals(0.375, noisy.shareOf(ops[0]), 1e-9, "a share must be of every sample")
+        val text = noisy.render()
+        assertTrue(text.lines().any { it.startsWith("(no operation)") && "50.0%" in it }, text)
+        assertFalse(quiet.render().contains("(no operation)"), "a row for nothing")
     }
 
     /**
@@ -245,10 +248,9 @@ class ReportTest {
     fun `an unbounded duty explains itself instead of printing a number`() {
         val d = duty(labelled = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
         assertTrue(d.unbounded, "the Netty regime is no longer recognised as unbounded")
-        val lines = d.lines(runNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
-        assertTrue(lines.contains("Bound") && lines.contains("none -"), "no diagnosis for an unbounded run")
-        assertFalse(lines.contains("inside operations"), "printed a labelled duty it does not have")
-        assertFalse(lines.contains("at most"), "printed a bound it does not have")
+        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
+        assertTrue(lines.contains("unchecked") && lines.contains("label around the waiting"), "no diagnosis for an unbounded run")
+        assertFalse(lines.contains("overstates"), "printed a bound it does not have")
     }
 
     /** When the bound *did* find something, it prints it — and the diagnosis stays away. */
@@ -256,10 +258,9 @@ class ReportTest {
     fun `a real bound is printed as a bound`() {
         val d = duty(labelled = 0.9846, aggregate = 0.6927, invisible = 0.014, labelledFraction = 0.595)
         assertFalse(d.unbounded)
-        val lines = d.lines(runNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
-        assertTrue(lines.contains("inside operations"), "the labelled duty was not printed")
-        assertTrue(lines.contains("at most"), "the bound was not printed")
-        assertFalse(lines.contains("none -"), "printed the diagnosis over a real bound")
+        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
+        assertTrue(lines.contains("overstates CPU work by up to 1.56 pp"), "the bound was not printed")
+        assertFalse(lines.contains("unchecked"), "printed the diagnosis over a real bound")
         assertEquals(1.56, d.boundPp, 0.05, "Lucene's recorded 1.57 pp moved")
     }
 

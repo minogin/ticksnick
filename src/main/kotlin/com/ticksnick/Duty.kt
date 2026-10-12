@@ -460,18 +460,18 @@ class DutyReport internal constructor(
      * The fraction of wall time that was CPU, over every registered thread, pauses included.
      *
      * What the machine did to a thread, all of it - so a collection counts against it. The figure
-     * the report prints and bounds the shares with is [runDuty].
+     * the report prints and bounds the shares with is [activeDuty].
      */
     val duty: Double get() = if (wallNanos > 0) cpuNanos.toDouble() / wallNanos else Double.NaN
 
     /**
-     * The fraction of *run time* that was CPU: [duty] with the confirmed pauses taken out of the
+     * The fraction of *active time* that was CPU: [duty] with the confirmed pauses taken out of the
      * wall clock.
      *
      * Capped at 1, because the CPU counter moves in scheduler ticks and the pauses are subtracted
      * exactly, so a short run can read a hair over.
      */
-    val runDuty: Double
+    val activeDuty: Double
         get() = if (wallNanos - pausedNanos > 0) min(1.0, cpuNanos.toDouble() / (wallNanos - pausedNanos))
         else Double.NaN
 
@@ -483,7 +483,7 @@ class DutyReport internal constructor(
      * doing to every thread at once — [Report.machineFloor], [Report.offCpuSamples] — keeps using
      * [duty], because there the whole process is the subject and an idle thread belongs in it.
      */
-    val shareDuty: Double get() = if (labelledDuty.isNaN()) runDuty else labelledDuty
+    val shareDuty: Double get() = if (labelledDuty.isNaN()) activeDuty else labelledDuty
 
     /**
      * True when the bound has run out of evidence rather than found something.
@@ -514,128 +514,68 @@ class DutyReport internal constructor(
         max(0.0, (share - (1 - shareDuty)) / shareDuty) to min(1.0, share / shareDuty)
 
     /**
-     * @param runNanos how long the session actually sampled for, so the failure can name the
+     * The CPU check as a figure for a page that wants one: the bench prints it, the report does not.
+     */
+    fun summary(): String =
+        if (!available) "Time on CPU not measured: ${reason ?: "no window closed"}"
+        else String.format(
+            Locale.ROOT, "Time on CPU %.2f%% of active time, bound %s pp, %d windows over %d threads",
+            activeDuty * 100, threeDigits(boundPp), windows, threads
+        )
+
+    /**
+     * What is wrong with `Runnable`, if anything: `Careful` lines under the header, none on a
+     * healthy run.
+     *
+     * `Runnable` is the JVM's word and an upper bound on work - a thread the scheduler preempted
+     * reads runnable, and so does one stopped in a native call. The CPU clock is the only thing that
+     * says how much of it was real, and these lines are printed only when it says the gap matters,
+     * or when it could not be asked. Nothing is printed when the bound is under [CAREFUL_PP]: silence
+     * says "fine".
+     *
+     * @param activeNanos how long the session sampled for, pauses out, so a failure can name the
      *   condition it found rather than assuming the only cause it used to know about.
      * @param reclaimedSlots threads that exited during the run. The other way to get no window:
      *   the walk reads -1 from a dead thread's CPU clock, so it counts nothing.
      */
-    fun lines(runNanos: Long, reclaimedSlots: Int): List<String> {
-        // "Time on CPU" rather than "Duty cycle" in the report, while the code and the design docs
-        // keep the term: a reader meeting this row for the first time meets it on a short run, where
-        // it has no number to explain itself with, and a name that needs a glossary is then the whole
-        // of what they get. Same move as `share` -> `occupancy%` - carry the meaning in the label.
-        if (reason != null) return listOf(
-            row("Time on CPU", "not measured"),
-            subRow("What", MISSING_WHAT),
-            subRow("Why", reason),
-            subRow("Bound", MISSING_BOUND),
-        )
-        // The failure a first run hits, so it is the version most readers see first. It used to say
-        // why the number was missing without ever saying what the number was - the one case where
-        // the row has to introduce its own subject, because there is no figure beside it doing that.
+    fun careful(activeNanos: Long, reclaimedSlots: Int): List<String> {
+        val out = ArrayList<String>()
+        if (reason != null) out += "Runnable is unchecked against the CPU clock: $reason. $UNCHECKED"
         // Three ways to finish with no window, and the message used to assert the first one
         // whichever had happened. On a 1.7 s run against a 1.000 s window it therefore printed "the
         // run is shorter than the 1.000 s window" four lines under "3,178 taken over 1.7 s" - a
         // report contradicting its own numbers, which is worse than a report that says nothing.
-        if (!available) return listOf(
-            row("Time on CPU", "not measured"),
-            subRow("What", MISSING_WHAT),
-            subRow(
-                "Why", when {
-                    runNanos in 1..<windowNanos -> String.format(
-                        Locale.ROOT, "the %.1f s run is shorter than the %.3f s window",
-                        runNanos / 1e9, windowNanos / 1e9
-                    )
-                    // The clock reads -1 for a thread that has exited, so a walk that finds only
-                    // dead threads counts nothing - and the last walk happens at stop(), which is
-                    // when short-lived workers have already finished.
-                    reclaimedSlots > 0 -> String.format(
-                        Locale.ROOT,
-                        "no window closed: %d of the threads being measured exited before the run ended",
-                        reclaimedSlots
-                    )
-                    else -> String.format(
-                        Locale.ROOT, "no window closed in the %.1f s run", runNanos / 1e9
-                    )
-                }
-            ),
-            subRow("Bound", MISSING_BOUND),
-        )
-        val out = ArrayList<String>()
-        // The aggregate and the labelled figure on one line: the gap between them is how much of the
-        // process was idle, which is worth seeing and used to be silently charged to the shares.
-        // Starvation mode is the extreme - 18.83% aggregate against 96% inside the labels.
-        out += row(
-            "Time on CPU",
-            String.format(
-                Locale.ROOT, "%.2f%% of run time%s", runDuty * 100,
-                // Withheld when the bound is unusable: a labelled figure printed beside "none"
-                // reads as a measurement that was taken and then ignored, which is the opposite of
-                // what happened - the evidence ran out.
-                if (unbounded || labelledDuty.isNaN()) ""
-                else String.format(Locale.ROOT, "; %.2f%% inside operations", labelledDuty * 100)
+        else if (!available) out += "Runnable is unchecked against the CPU clock: " + when {
+            activeNanos in 1..<windowNanos -> String.format(
+                Locale.ROOT, "the %.1f s run is shorter than the %.3f s check window",
+                activeNanos / 1e9, windowNanos / 1e9
             )
-        )
-        out += subRow(
-            "Windows",
-            String.format(
-                Locale.ROOT, "%d over %d threads, each %.2f%%..%.2f%%",
-                windows, threads, minWindowDuty * 100, maxWindowDuty * 100
+            // The clock reads -1 for a thread that has exited, so a walk that finds only dead
+            // threads counts nothing - and the last walk happens at stop(), which is when
+            // short-lived workers have already finished.
+            reclaimedSlots > 0 -> String.format(
+                Locale.ROOT, "no window closed, %d of the threads being measured exited before the run ended",
+                reclaimedSlots
             )
+            else -> String.format(Locale.ROOT, "no window closed in the %.1f s run", activeNanos / 1e9)
+        } + ". $UNCHECKED"
+        // The bound has not found anything; it has run out of evidence, and that is a different
+        // sentence. It also names the fix, which is a label around the waiting rather than only
+        // around the work.
+        else if (unbounded) out += String.format(
+            Locale.ROOT,
+            "Runnable is unchecked: %.1f%% of thread-time was off the CPU while reading runnable - a native " +
+                    "call, an event loop in a poll, or the scheduler - and operations cover %.1f%% of these " +
+                    "threads, so all of it could be inside them. Put a label around the waiting, not only the work",
+            invisibleOffCpu * 100, labelledFraction * 100
         )
-        if (unbounded) {
-            // Printing 0.00% and 100 pp here would read as a measurement, and a reader would rightly
-            // distrust a report whose shares are probably fine. The bound has not found anything; it
-            // has run out of evidence, and that is a different sentence. It also names the fix, which
-            // is a label around the waiting rather than only around the work.
-            out += subRow(
-                "Bound",
-                String.format(
-                    Locale.ROOT,
-                    "none - %.1f%% of thread-time was off the CPU while still reading runnable",
-                    invisibleOffCpu * 100
-                )
-            )
-            out += subRow("Why", "a native call, an event loop in a poll, or the scheduler")
-            out += subRow(
-                "worst case",
-                String.format(
-                    Locale.ROOT, "operations cover %.1f%% of these threads, so all of it could be inside them",
-                    labelledFraction * 100
-                )
-            )
-            return out
-        }
-        // Not "is not CPU", which reads as an apology for having failed to measure CPU. Occupancy
-        // counts a wait in full and that is the right behaviour for the latency question - the
-        // reason the duty cycle exists is not that CPU was the goal, it is that a *sum* over threads
-        // is only additive when it is CPU.
-        out += subRow(
-            "Bound",
-            String.format(
-                Locale.ROOT, "at most %s pp of any share is a thread waiting rather than working",
-                threeDigits(boundPp)
-            )
-        )
-        out += subRow(
-            "Verdict", when {
-                shareDuty >= RANKING_SAFE -> "the ranking is trustworthy"
-                shareDuty >= OCCUPANCY_ONLY ->
-                    "a share is still roughly time, but small gaps between operations are not resolved"
-
-                else ->
-                    "read a share as where threads SIT, not where cycles GO - and beware of adding " +
-                            "two up, since one wait counts once per thread waiting on it"
-            }
-        )
-        out += subRow(
-            "Clock",
-            String.format(
-                Locale.ROOT, "getThreadCpuTime, %.3f ms resolution, %.3f s window, dearest walk %.1f us",
-                resolutionNanos / 1e6, windowNanos / 1e9, maxSampleNanos / 1e3
-            )
-        )
-        if (anomalies > 0) out += subRow("Dropped", "$anomalies thread readings went backwards")
+        else if (boundPp > CAREFUL_PP) out += String.format(
+            Locale.ROOT,
+            "Runnable overstates CPU work by up to %s pp of any share: blocking I/O, native calls or a busy machine",
+            threeDigits(boundPp)
+        ) + (if (shareDuty < OCCUPANCY_ONLY)
+            " - read a share as where threads SIT, not where cycles GO, and do not add two up" else "")
+        if (anomalies > 0) out += "$anomalies thread CPU readings went backwards and were dropped"
         return out
     }
 
@@ -655,10 +595,15 @@ class DutyReport internal constructor(
          * Both failure paths share it because a reader who hits either one is in the same position:
          * they have been told a measurement is missing without being told what it would have meant.
          */
-        private const val MISSING_WHAT =
-            "how much of the thread-time below was really CPU - it is what bounds every share"
+        private const val UNCHECKED =
+            "Read Runnable as an upper bound on work, with nothing saying how much of it was waiting"
 
-        private const val MISSING_BOUND =
-            "none - read the shares below as thread-time, with nothing limiting how much was waiting"
+        /**
+         * Below this bound nothing is said. Andrey's threshold, 2026-10-11: a point of any share is
+         * under the gap between any two rows worth acting on, and on the graph benchmark the bound
+         * reads 0.6 pp. The bench on this machine reads several points from preemption alone, and
+         * then the line is right to print.
+         */
+        const val CAREFUL_PP = 1.0
     }
 }

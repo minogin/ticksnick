@@ -1930,6 +1930,83 @@ per run"* with 0 for 1; it did not recur and was not explained. That test starts
 straight after `start()` while the sampler takes its baseline on its own thread, which is a race
 this change does not touch.
 
+## The five words, and what each one is for · 2026-10-11
+
+Decided with Andrey after a break: he reread the header and could not say what `Windows` or
+`Time on CPU` was for, and `run` beside `runnable` read as two spellings of one thing. This is the
+vocabulary the report uses from now on, and why a reader cares about each word. Built the same day;
+what was built is at the end of the entry.
+
+| word | what it is | why it matters |
+|---|---|---|
+| **paused** | the JVM stopped every thread, confirmed by its own GC count | how much the collector costs. Tuning it or cutting allocation attacks this directly, and on an allocation-heavy app it is the biggest win available without touching the logic |
+| **active** | the rest of wall time; the only time samples exist in | the time the code is responsible for. Every share in the fine table is a share of this, so 30% means 30% of active, not of wall |
+| **waiting** | the thread sat on a lock, a sleep or a park, by JVM state | locks and parked I/O. The cheapest wins after GC: removing a wait costs no CPU, only a design change |
+| **runnable** | the JVM thinks the thread is working | CPU work, the thing a better algorithm or layout speeds up. The catch: blocking socket and file reads are native calls and the JVM calls them RUNNABLE, so a high runnable share is not always compute |
+| **on CPU** | the OS clock says the thread was executing | the check on runnable. When it is well below runnable, the "compute" is really I/O, native calls or a busy machine, and an algorithmic optimisation would gain nothing. Not a phase to optimise, and only worth printing when it disagrees |
+
+**`run` becomes `active`.** `run` was Andrey's word on 2026-10-01, chosen because it pairs with
+`paused`; nobody checked it against `runnable`, which is the JVM's state and stays, because people
+know it. `wall = active + paused`, `waiting / runnable` per operation, `on CPU` as the check.
+
+**Could runnable and on CPU be one thing?** On Linux yes: read the thread's CPU clock every tick
+and call the sample on CPU if the clock moved a step. On Windows no, the clock moves in 15.6 ms
+jumps, fifteen steps at once, which is why the duty cycle averages over a second. Two code paths
+for one column, so not now; recorded in ideas.md.
+
+**Two criteria for what the report shows**, Andrey's: it matters for optimising performance, or it
+says the report is unreliable. Nothing else is printed.
+
+**What the report becomes.** The header is one line when all is well, `wall = active + paused`
+with the pause count and the longest pause, because GC tuning is about those. When something is
+off, one `Careful` line per problem under it, each naming the column it hits, so a warning is read
+before the numbers and not found after them:
+
+```
+Wall time  66.6 s = 60.2 s active + 6.4 s paused (10%) in 21 pauses, longest 2.6 s
+Careful    Runnable overstates CPU work by up to 12 pp: blocking I/O, native calls or a busy machine
+Careful    1,200 samples only, shares under 5% are noise
+```
+
+The tables follow, with no footnotes and no marks. The fine table is active time and says so:
+`Thread-time` becomes `Active-time`, headed `of 60.2 s active`. The coarse table is wall time
+and says so: headed `wall time, pauses included`, with a `Paused` column per row. Then one line of
+run facts at the end: samples, step, threads. The lines that only said fine - `Time on CPU 99%`,
+`Verdict trustworthy`, `Coverage >99.9%` - go, because silence says the same. In detail:
+
+- Fine table is active time: every column, `Thread-time` included, which today is scaled to wall
+  and smears the pauses over every operation.
+- Coarse table is wall time, because a span is two timestamps and the caller lived through its
+  pause; each coarse row says how much of it was paused, so `Runnable / Wait` beside it adds up.
+- `(no operation)` is a row in the fine table, not a `Coverage` line.
+- On CPU more than a point below runnable: a `Careful` line with the gap and what hides in it.
+- Too few samples, or the step drifted from the one asked: a `Careful` line.
+- The JVM's GC count disagrees with the sampler's lateness: a `Careful` line saying which way.
+- A run too short for the CPU check: a `Careful` line saying the shares are unchecked.
+- `Windows`, `Clock`, `dearest walk`, "one sample per thread per tick": dropped from the report,
+  kept in the docs.
+
+**What is built, 2026-10-11.** `PauseReport.headerLine` and `careful`, `DutyReport.careful` and a
+`summary` for the bench; `Report.stepNanos` is the step over active time, so every thread-time and
+time per call follows (ideas.md item 38, done); `Report.shareOf` is over every sample, and
+`(no operation)` is a row; `Runnable / Wait` is `Runnable / Waiting`, three characters wider; the
+coarse heading says wall time and how much of it was paused; `Sampled` after the tables; the legend
+and `output.md` say the same. `DutyReport.CAREFUL_PP = 1.0` is the threshold under which nothing is
+said. Three things a reader of the code should know:
+
+- **The count and the longest pause are left off the header line** when the JVM confirmed less
+  than one of the pauses the sampler saw: the demo printed *3.00 ms paused, longest 22.5 ms*, which
+  contradicts itself, and capping would fabricate.
+- **A share moving with idle time is now the intended behaviour.** `ReportTest` asserted the
+  opposite since the share was introduced, with the argument that folding unlabelled time in makes
+  every share depend on how much uninstrumented code was running. True, and the price of the row
+  adding up to the run; the absolute `Thread-time` column is still the one to compare between runs.
+- **`RegistryTest` "the thread count is per operation and not per run" failed once more**, 0 for 1,
+  on the first full run after the change, and passed on the second. The same race as on 2026-10-01,
+  and this change touches nothing it uses. Still not explained.
+
+Not re-measured: the bench. The hot path was not touched; only rendering and the step's divisor.
+
 ## Next session: the coarse output · opened 2026-09-02
 
 Written as a handover, because the work is Andrey's to start and the context is a day old.

@@ -411,7 +411,8 @@ private fun printDuty(
     println("\n--- CPU duty cycle: how much of the occupancy was CPU ---")
     // The bench keeps its threads for the whole run, so it never hits the reclaimed-thread case
     // that the sandbox found - passing 0 says so rather than guessing.
-    for (l in d.lines(runNanos, 0)) println("  $l")
+    println("  " + d.summary())
+    for (l in d.careful(runNanos, 0)) println("  Careful    $l")
     if (!d.available) return
 
     val s = bench.stalls()

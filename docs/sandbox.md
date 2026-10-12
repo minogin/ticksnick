@@ -47,6 +47,22 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### After a break, the header did not read
+*2026-10-11, Andrey, on the graph benchmark's report. **Acted on the same day: plan.md, "The five
+words".***
+
+Ten days away from the tool, then the header again: *"I don't get what Windows is"*, then *"what is
+Time on CPU for? And do we need it?"*, then *"this all sucks ... the profiler must profile. All we
+need is digits."* Thirteen lines, and the ones a reader stops on named the mechanism (`Windows`,
+`Clock`, `dearest walk`) or said "fine" (`Coverage >99.9%`, `Verdict trustworthy`). And `run`
+beside `runnable` read as one word spelled twice.
+
+Two criteria came out of it, and the header became one line plus `Careful` lines. The notes from
+the first run in that project's `profiler-notes.md` are closed by the same change: `Runnable / Wait
+100% / 0%` beside `Time on CPU 88.97%` no longer share a page, the "0%, of which 11%" footnote lost
+the line it contradicted, and "dearest walk" is not printed. The doubled separator under the coarse
+table was the fine table's rule after the coarse one, and is still there.
+
 ### `Workers 2` when three were dispatched, and the tool could not say why
 *2026-09-02, Andrey, on the pool sandbox. **Recorded as [ideas.md](ideas.md) item 36.***
 

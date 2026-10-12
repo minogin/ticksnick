@@ -15,157 +15,86 @@ a mistake on purpose.
 
 ---
 
-## The header: is this run worth reading at all
+## The header: one line, and a warning only when there is one
 
 ```
-Samples       95,412 taken over 12.1 s - 86,597 inside an operation, 8,815 outside every operation
-Sampling      11,933 ticks at 1.006 ms mean (jittered) x 8 threads - one sample per thread per tick
-Coverage      87.10 s of 95.97 s thread-time observed (90.8%)
-  Outside     8.87 s - 10.1 ms parked (0.1%), 8.86 s runnable inside no operation
-clock: getThreadCpuTime, resolution 15.625 ms measured, window 1.000 s, dearest walk 621.8 us
-threads were on CPU 98.68% of sampled wall time  (10 windows, 8 threads, per window 97.18%..99.35%)
-  inside labelled work it was 98.55%, and that is what bounds the shares
-at most 1.47 pp of any share is a thread waiting rather than working
-so the ranking is trustworthy
+Wall time     12.0 s = 12.0 s active + 3.00 ms paused (0.025%)
+Careful       Runnable overstates CPU work by up to 2.53 pp of any share: blocking I/O, native calls or a busy machine
 ```
 
-**Line 1 — how much evidence there is.** Everything downstream is counting, so the sample count is
-the precision. 86,597 samples is a lot; a thousand would make every share below a few percent
-meaningless. `1.006 ms` is the step the sampler *achieved* against the one you asked for — if it
-has drifted far above your `stepMillis`, the sampler could not get scheduled and the run is worth
-less than it looks.
+**Two criteria decide what the report prints**, Andrey's, 2026-10-11: it matters for optimising
+performance, or it says the report is unreliable. Nothing else. The header used to be thirteen lines
+- samples, the step, coverage, time on CPU, windows, a bound, a verdict, the clock - and after a
+break away from the tool Andrey could not say what `Windows` or `Time on CPU` was *for*. Most of it
+was mechanism, and the rest only said "fine". Silence says "fine" now.
 
-**`Wall time` — the run split into the part that ran and the part that was stopped.**
-
-```
-Sampling      60,117 ticks at 1.108 ms mean (jittered) x 1 thread - one sample per thread per tick
-Wall time     66.6 s = 60.2 s run + 6.42 s paused (9.64%)
-  Paused      21 pauses, longest 2.61 s - every thread stopped, usually GC
-  GC          6.43 s by the JVM's own count
-```
-
-**Paused** is time every thread was stopped. The sampler spins, so it wakes within microseconds of
-when it asked to; a tick that runs a whole step late was *stopped*, and a JVM thread is only ever
-stopped together with every other one. It sits under the step because it is what stretches the step.
-
-**Run** is the rest, and it is the time everything else in the header is about: no sample is taken
-during a pause, so every share is a share of run time, and `Time on CPU` further down is a share of
-run time for the same reason. The row is printed on every run, `+ 0 paused` included, so that the
-term is always on the page before it is used.
-
-**What goes into the split is only what the JVM confirms.** The sampler sums every late tick,
-whatever caused it, and `GC` is the JVM's own count of its collection pauses over the same session.
-The paused figure is the smaller of the two. That is what makes it safe to subtract: a sampler that
-lost its core while the workers ran on has lateness with no collection behind it, the JVM's count
-does not move, and nothing is taken out of run time. When the two disagree the `GC` row says which
-way, and where the difference went:
-
-- *"the other 4.00 s the sampler lost was not GC, and is counted as run time"* — another kind of JVM
-  pause, or the sampler kept off its core.
-- *"more than the sampler saw"* — pauses shorter than one step, which lose no tick.
-- *"not counted"* — a JVM whose collectors the profiler cannot read. Nothing is subtracted, and the
-  `Paused` row then gives the sampler's own total, since it appears nowhere else.
-
-Three things follow, and the third is the one that changes how to read the tables:
-
-- **A pause does not move a share or the ranking**, because no sample is taken in one.
-- **Coarse spans include their pauses**, because they are two timestamps. A request that sat through
-  a 2.6 s collection took 2.6 s longer, and its percentiles say so.
-- **Thread-time and time per call are still scaled to wall time**, so they include the pauses,
-  spread over every operation in proportion to its samples. On the run above every
-  `Thread-time per call` is about 10% high, and the operation that allocated its way into the
-  collection is charged no more of it than one that allocated nothing.
-
-A sampler that is not spinning prints *not measured*: parking is late on every tick by the
-scheduler's doing, and none of that is anybody's pause.
-
-**Line 2 — coverage.** *Labels cover 87.10 s of the 95.97 s observed.* The gap is time no label was
-open. A low figure is not automatically bad — it means your labels do not cover everything, which
-may be exactly what you intended — but it is the first place a misplaced label shows up. Reported in
-seconds and not only as a percentage, because *"87.10 s of 95.97 s"* is something you can act
-on and *"90.8%"* is not.
-
-**Line 3 — what the uncovered time was.** Two entirely different findings look identical in line 2:
-work nobody labelled, and threads doing nothing at all. This separates them. A pool that spends its
-life parked between tasks reads as a huge Outside share and means nothing is wrong.
-
-When the two differ by more than half a point, a fourth line appears giving coverage over *runnable*
-occupancy alone, with both sides restricted:
+**`Wall time` is the run split into the part that ran and the part that was stopped.** On the graph
+benchmark, the run this was built for:
 
 ```
-  Runnable    operations cover 240.94 s of 284.01 s (84.8%)
+Wall time     66.6 s = 60.2 s active + 6.42 s paused (9.64%) in 21 pauses, longest 2.61 s
 ```
 
-On Lucene that turns an alarming 59.3% into 84.8%, because most of the shortfall was pool threads
-parked between queries. Absent here because this workload never waits, so it would have said the
-same thing twice.
+- **Paused** is time every thread was stopped. The sampler spins, so it wakes within microseconds of
+  when it asked to; a tick that runs a whole step late was *stopped*, and a JVM thread is only ever
+  stopped together with every other one. Only what the JVM's own count of its collections confirms
+  is subtracted; lateness nobody confirmed stays in active time, since the sampler may have been
+  stopped alone. The count and the longest pause are on the line because they are the figures GC
+  tuning is about, and they are left off when the JVM confirmed less than one of the pauses the
+  sampler saw, rather than print a line that contradicts itself.
+- **Active** is the rest, and the fine table is over it: no sample is taken in a pause, so every
+  share, every thread-time and every time per call is a share of active time. The table heading
+  says so.
 
-**Lines 4–8 — `Time on CPU`, and the bound it puts on every share below.** This is the part that
-makes the report checkable rather than merely plausible. It is the **duty cycle** — the term the
-design docs, the trials and the code all use, and the one to search for; the report spells it out
-because the first time most readers meet this row is on a run too short to measure it, where there is
-no number beside it to explain what it was for.
+The line is printed on every run, `+ 0 paused` included, so that the word is on the page before the
+table heading uses it.
 
-The sampler counts a thread as inside an operation whether it is running, blocked, parked or
-descheduled — that is **occupancy**, not CPU. Occupancy counts waiting in full, which is the right
-behaviour for *"why is this slow"*. The catch is that occupancy is only additive across threads when
-it is CPU: a hundred threads parked one second on one lock is a hundred thread-seconds of occupancy
-and one second of real cost.
+**The five words, and why a reader cares about each.** `wall = active + paused` is the run;
+`runnable / waiting` is per operation; `on CPU` is the check.
 
-So the report measures the gap. *Threads were on CPU 98.68%* is over every registered thread;
-*inside labelled work it was 98.55%* is over the labelled samples the shares are actually taken
-over, and **that** is what bounds them. The two differ when some threads work while others idle —
-in a starvation test the first read 19.40% and the second 96.94%, and only the second is about the
-numbers in the table.
-
-*At most 1.47 pp of any share is a thread waiting rather than working* is the error bar: one number
-that holds for every row at once, needing nothing to be known about which operation stalled. Then a
-verdict:
-
-| verdict | duty | what it means |
+| word | what it is | why it matters |
 |---|---|---|
-| *so the ranking is trustworthy* | ≥ 95% | the bound is under a point; real gaps between rows are wider than that |
-| *a share is still roughly time, but small gaps between operations are not resolved* | ≥ 75% | trust the top of the list, not adjacent rows |
-| *read a share as where threads SIT, not where cycles GO* | < 75% | and beware of adding two shares up, since one wait can be counted once per thread waiting on it |
+| **paused** | the JVM stopped every thread | how much the collector costs. Tuning it or cutting allocation attacks this directly |
+| **active** | the rest of wall time; the only time samples exist in | the time the code is responsible for. 30% in the table means 30% of this |
+| **waiting** | the thread sat on a lock, a sleep or a park, by JVM state | locks and parked I/O. Removing a wait costs no CPU, only a design change |
+| **runnable** | the JVM thinks the thread is working | CPU work, the thing a better algorithm speeds up. The catch: a blocking socket or file read is a native call, and the JVM calls it RUNNABLE |
+| **on CPU** | the OS clock says the thread was executing | the check on runnable. Not a phase to optimise, and printed only when it disagrees |
 
-**On a short run it is missing entirely**, and then the row has to introduce its own subject, since
-there is no figure doing it:
+`run` was the word for active until 2026-10-11, and it read as a second spelling of `runnable`.
 
-```
-Time on CPU   not measured
-  What        how much of the thread-time below was really CPU - it is what bounds every share
-  Why         the 0.4 s run is shorter than the 1.000 s window
-  Bound       none - read the shares below as thread-time, with nothing limiting how much was waiting
-```
+**`Careful` is one line per thing that makes the numbers below less than they look**, each naming
+the column it hits, before the numbers and not in a footnote after them. A healthy run has none.
+What can appear:
 
-The window is one second, so **a run under about a second produces no bound on any share**. The
-shares themselves are still there and still thread-time; what is gone is the error bar on them.
+| line | what happened | what to do |
+|---|---|---|
+| *Runnable overstates CPU work by up to N pp of any share: blocking I/O, native calls or a busy machine* | the OS clock says the threads were on a CPU less than `Runnable` claims, by more than a point | the left half of `Runnable / Waiting` is an upper bound; the gap is I/O the JVM cannot see, or the scheduler. Under 5 pp the ranking holds; the line says when a share is only where threads *sat* |
+| *Runnable is unchecked against the CPU clock: ...* | no per-thread CPU clock, or no one-second window closed: the run was shorter than a second, or the threads exited first | read `Runnable` as an upper bound with nothing bounding it. Run for longer, or call `Profiler.release()` from threads that finish |
+| *Runnable is unchecked: N% of thread-time was off the CPU while reading runnable ... Put a label around the waiting* | more invisible off-CPU time than labelled time - Netty's event loops in `epoll_wait` - so the bound swallows everything | label the waiting, not only the work. A selector loop with a label on it turns invisible off-CPU into labelled occupancy and the bound becomes tight again |
+| *the sampler lost N s the JVM did not count as GC ... counted as active* | late ticks with no collection behind them: another kind of JVM pause, or the sampler kept off its core | active time is high by up to N s; nothing in the table is charged for it |
+| *the JVM counts N s of GC, more than the sampler saw ... inside active* | pauses shorter than one step, which lose no tick | the same, the other way: a little GC is inside active |
+| *pauses not measured: a parked sampler ...* | the sampler was not spinning, so its lateness says nothing | `wait = SPIN` if the split matters |
+| *N thread CPU readings went backwards and were dropped* | the OS clock misbehaved | rare; the bound is taken on the rest |
 
-`Why` names the condition it actually found, and there are three:
+**What the `Runnable` check is.** The sampler counts a thread as inside an operation whether it is
+running, blocked, parked or descheduled - that is **occupancy**, not CPU. Occupancy counts waiting in
+full, which is the right behaviour for *"why is this slow"*. The catch is that occupancy is only
+additive across threads when it is CPU: a hundred threads parked one second on one lock is a hundred
+thread-seconds of occupancy and one second of real cost. So the profiler reads each thread's CPU
+clock once a second - the **duty cycle**, the term the design docs, the trials and the code use -
+and the gap between CPU and runnable occupancy, worst case landed on one operation, is the bound the
+`Careful` line prints. With duty `d`, an operation reported at share `s` has a true CPU share
+somewhere in `[(s - (1 - d)) / d, s / d]`, and the widest either end can sit from `s` is
+`(1 - d) / d`: one number that holds for every row at once. In a starvation test the aggregate duty
+read 19.40% and the duty inside the labels 96.94%, and only the second is about the numbers in the
+table, which is why the bound is taken over labelled time where it can be.
 
-| what it says | what happened |
-|---|---|
-| *the 0.4 s run is shorter than the 1.000 s window* | not enough time for one window |
-| *no window closed: N of the threads being measured exited before the run ended* | the CPU clock reads −1 for a dead thread, so the walk counted nothing |
-| *no window closed in the N s run* | neither of the above — worth reporting |
-
-The middle one is the interesting case, and it was **printing the first message until 2026-09-01**:
-a 1.7 s run claiming to be shorter than a 1 s window, four lines under `3,178 taken over 1.7 s`.
-
-**And sometimes there is no bound at all:**
-
-```
-  nothing here bounds the shares: 34.4% of thread-time was off the CPU while the thread
-  still read runnable — a native call, an event loop in a poll, or the scheduler — and
-  Worst case  operations cover 13.9% of these threads, so all of it could be inside them
-```
-
-This is honest rather than broken. The JVM reports a thread in a native call — an event loop inside
-`epoll_wait`, a blocking socket read — as `RUNNABLE`, so the state read cannot see that waiting, and
-what cannot be seen has to be assumed worst case. When there is more invisible off-CPU time than
-there is labelled time, the assumption swallows everything. **What to do:** put a label around the
-waiting, not only around the work. A selector loop with a label on it turns invisible off-CPU into
-labelled occupancy and the bound becomes tight again.
+**What is no longer printed, and where it went.** The sample count, the step and the thread count
+are the `Sampled` line after the tables - they are the precision of what is above, and matter when
+a share looks too close to call, not before. Time outside every operation is a row, `(no
+operation)`, with its own `Runnable / Waiting`. `Coverage`, `Time on CPU 99%`, the verdict, the
+per-window range and the clock's resolution are gone: the first three said "fine", the last two were
+mechanism. The figures are still in `DutyReport` and the bench prints them.
 
 ---
 
@@ -175,9 +104,10 @@ Sections, in order, each with a heading and a blank line before it:
 
 ```
 (banner)            the title
-(summary)           key-value rows: samples, sampling, coverage, time on CPU
-FINE OPERATIONS     the fine table, or one line saying why it is empty
-COARSE OPERATIONS   the coarse table, present only if you placed a coarse label
+Wall time           one line, active + paused; then a Careful line per thing that is unreliable
+ALL OPERATIONS      the fine table over active time, or one line saying why it is empty
+COARSE OPERATIONS   the coarse table over wall time, present only if you placed a coarse label
+Sampled             samples, ticks, step, threads: the precision of everything above
 (warnings)          anything the run wants to tell you about itself
 HOW TO READ THIS    five lines: the things that will make you draw the wrong conclusion
 ```
@@ -213,8 +143,8 @@ async-profiler and pyroscope it is a thread-local tag, which is not this.
 
 **A sample is one photograph of one thread's label slot**, taken once per tick. So the count comes
 from `ticks x threads` — with the caveat that a thread which registers partway through the run
-contributes fewer, which is why `Sampling` says *one sample per thread per tick* rather than printing
-an equation. A short run makes the gap obvious: 7 ticks and 1 thread produced 4 samples, because the
+contributes fewer, which is why the `Sampled` line after the tables says *one sample per thread per
+tick* rather than printing an equation. A short run makes the gap obvious: 7 ticks and 1 thread produced 4 samples, because the
 slot is created on the first labelled call and the earlier ticks saw nothing to photograph.
 
 **The step printed there is the one achieved, and it is jittered on purpose** — hence *mean
@@ -223,36 +153,21 @@ onto a workload whose own rhythm is near the same period, catching the same phas
 long run the mean lands on the step; over a very short one it visibly does not, and that is arithmetic
 rather than a fault: 5 ticks means the mean of 4 draws, which printed 0.969 ms against a 1 ms request.
 
-**Unlabelled is not a fault by itself**, and the report splits it into the two cases that matter:
+**Unlabelled is not a fault by itself.** It is a row in the table, `(no operation)`, ranked with
+everything else, and its `Runnable / Waiting` splits it into the two cases that matter:
 
-- **parked** — threads sitting idle. Normal for a pool between requests, and nothing to fix. A run
+- **waiting** — threads sitting idle. Normal for a pool between requests, and nothing to fix. A run
   can be 95% outside every operation and perfectly healthy if that is where it is.
 - **runnable with no label** — the machine was doing real work you have not labelled. This is the
   number worth reading. Either you instrumented part of the program deliberately, or a label is in
   the wrong place, or work escaped the context that should have carried it.
 
-The `Runnable` row exists for exactly that second question: *of the thread-time that was doing
-anything at all, how much do the labels cover?* That is the coverage figure to judge instrumentation
-by, and it is usually a good deal lower than the headline one.
+The row has no calls, no wall time and no concurrency, because nothing counts the ticks with some
+thread inside no label; it has hits and a share, which is what it is for.
 
-**The summary is key-value rows, not prose.** It used to be four sentences that began the moment the
-banner ended, so a reader looking for *how many threads* had to read a clause to find it, and a
-reader looking for whether anything was wrong could not tell a fact from a caveat from a verdict —
-they were all just text. The left column now says what kind of line it is:
-
-```
-Samples       5,998 taken over 3.1 s - 5,526 inside an operation, 472 outside every operation
-Sampling      3,004 ticks at 0.999 ms mean (jittered) x 2 threads - one sample per thread per tick
-Coverage      5.52 s of 5.99 s thread-time observed (92.1%)
-  Outside     471.6 ms - 5.0 ms parked (1.1%), 466.6 ms runnable inside no operation
-Time on CPU   99.98% of run time; 100.00% inside operations
-  Bound       at most 0.00 pp of any share is a thread waiting rather than working
-  Verdict     the ranking is trustworthy
-```
-
-`Why`, `Bound`, `Verdict` and `Worst case` are the keys that carry a judgement rather than a
-measurement — so *is this a problem?* is answerable by looking at the left column instead of reading
-the right one.
+**The header is key-value rows, not prose**, and the left column says what kind of line it is:
+`Wall time` is a fact, `Careful` is a caveat. *Is this a problem?* is answerable by looking at the
+left column.
 
 **Both tables are sorted, and a `v` on the column head says which one by** — `Occupancy% v` in the
 fine table, `Total v` in the coarse one. On the column rather than in a heading sentence, because a
@@ -315,7 +230,7 @@ formatters that disagreed about where to stop - one printed an eight-minute coar
 
 ```
                            |                    Load                    |               Spread                |               Calls                |          Trust
-Operation                  | Thread-time% v Thread-time Runnable / Wait | Wall-time Concurrency Workers  Pool |         Calls Thread-time per call |     Hits  Noise Over 1t
+Operation                  | Thread-time% v Thread-time Runnable / Waiting | Wall-time Concurrency Workers  Pool |         Calls Thread-time per call |     Hits  Noise Over 1t
 ---------------------------+--------------------------------------------+-------------------------------------+------------------------------------+------------------------
 flushBatch                 |          38.4%       183 s       100% / 0% |    58.4 s        3.14       8     8 | 1,483,486,016               124 ns |   183317 0.234%  0.034%
 validateRecord             |          37.7%       180 s       100% / 0% |    58.4 s        3.08       8     8 | 1,483,486,016               121 ns |   180044 0.236%  0.074%
@@ -382,9 +297,10 @@ things sit in the gap:
   trial's defect, where a number read as CPU was **55× more than the machine had spent**
   ([trial-jdbc.md](trial-jdbc.md)).
 
-So the left half is an **upper bound on the work**, never the work. The `Time on CPU` block in the
-header is measured with a different instrument — `getThreadCpuTime`, not thread state — and it is
-the only thing that can bound this in turn. When it says *not measured*, nothing does.
+So the left half is an **upper bound on the work**, never the work. The CPU check behind the
+`Careful` line in the header is measured with a different instrument — `getThreadCpuTime`, not
+thread state — and it is the only thing that can bound this in turn. When the line says *unchecked*,
+nothing does.
 
 That is also why the column says `runnable` and not `run`: the `-able` is the distinction. Runnable
 means *not blocked*, not *executing*.
@@ -427,7 +343,7 @@ Present only if you placed a coarse label. It answers the question the table abo
 cannot: **how long did one execution take.**
 
 ```
-Coarse operation           Executions    Total v       Mean        p50        p90        p99        Max Runnable / Wait
+Coarse operation           Executions    Total v       Mean        p50        p90        p99        Max Runnable / Waiting
 -----------------------------------------------------------------------------------------------------------------------
 request                     3,203,348    95.78 s    29.9 us    20.5 us    45.1 us   180.2 us   17.01 ms   100.0% / 0.0%
 -----------------------------------------------------------------------------------------------------------------------
@@ -459,7 +375,7 @@ The `parallelism:` line carries three numbers, and the split matters more than a
 - **`n of it on a CPU`** — of those threads, the ones a sample caught running. `working = inside ×
   (1 − waiting)`, so it is what splitting the work actually *bought*: a caller parked on a join
   contributes nothing here, correctly. Printed as `0.08 (at most 0.31)` when the measured
-  time-on-CPU says the machine cannot have supported the figure.
+  time on CPU says the machine cannot have supported the figure.
 - **`n executions at once over k threads`** — **a property of your load,** not your code. How many
   of these were in the system simultaneously. Add threads or clients and it moves; change the code
   and it may not.

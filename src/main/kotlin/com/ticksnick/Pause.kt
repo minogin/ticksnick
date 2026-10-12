@@ -177,85 +177,91 @@ class PauseReport internal constructor(
     /** Stop-the-world collection time by the JVM's own count over the session, or -1 if unreadable. */
     val gcNanos: Long,
     /**
-     * The part of [pausedNanos] the JVM also counted - the paused time in `wall = run + paused`.
+     * The part of [pausedNanos] the JVM also counted - the paused time in `wall = active + paused`.
      *
-     * The smaller of the two, so that the run time on the first line of the header is the same run
-     * time the duty cycle divides by. Lateness nobody confirmed stays in run time: it may have been
-     * the sampler alone that was stopped.
+     * The smaller of the two, so that the active time on the first line of the header is the same
+     * active time the duty cycle divides by. Lateness nobody confirmed stays in active time: it may
+     * have been the sampler alone that was stopped.
      */
     val confirmedNanos: Long = 0,
 ) {
     /**
-     * The header rows: wall time split into run and paused, and what is known about the pauses.
+     * The header: one line, wall time split into active and paused.
      *
-     * The split is printed on every run, paused or not, because `Time on CPU` further down is a
-     * share of *run time* and a reader has to have been shown what that is. The rows under it are
-     * only there when there is something to say.
+     * Printed on every run, `+ 0 paused` included, so that the word is on the page before the table
+     * heading uses it. Everything the row used to say under itself - the JVM's own count, what the
+     * sampler saw but nothing confirmed - is now a [careful] line, and only when it is a warning.
      *
      * @param spanNanos the sampling span: the wall time being split.
      */
-    fun lines(spanNanos: Long): List<String> {
-        val paused = min(confirmedNanos, spanNanos).coerceAtLeast(0)
-        val out = ArrayList<String>()
-        out += row(
+    fun headerLine(spanNanos: Long): String {
+        val paused = confirmedPausedIn(spanNanos)
+        return row(
             "Wall time",
             if (paused == 0L) String.format(
-                Locale.ROOT, "%s = %s run + 0 paused",
+                Locale.ROOT, "%s = %s active + 0 paused",
                 duration(spanNanos.toDouble()), duration(spanNanos.toDouble())
             )
             else String.format(
-                Locale.ROOT, "%s = %s run + %s paused (%s)",
+                Locale.ROOT, "%s = %s active + %s paused (%s)%s",
                 duration(spanNanos.toDouble()), duration((spanNanos - paused).toDouble()),
-                duration(paused.toDouble()), percent(paused * 100.0 / spanNanos)
+                duration(paused.toDouble()), percent(paused * 100.0 / spanNanos),
+                // The count and the longest pause are the sampler's, the time is what the JVM
+                // confirmed. Usually one quantity from two sides; when the JVM confirmed less than
+                // one of the pauses the sampler saw, "3.00 ms paused, longest 22.5 ms" is a line
+                // contradicting itself, and the counts are left off rather than capped.
+                if (longestNanos <= paused) String.format(
+                    Locale.ROOT, " in %s, longest %s", Report.plural(pauses, "pause"), duration(longestNanos.toDouble())
+                ) else ""
             )
         )
-        if (!measured) {
-            out += subRow("Paused", "not measured - only a spinning sampler can tell a pause from its own lateness")
-            if (gcNanos > 0) out += subRow("GC", gcCount())
-            return out
-        }
-        if (pauses == 0L) {
-            // Collections the sampler could not see, each shorter than a step. Real pauses, and left
-            // in run time all the same: nothing here measured them but the JVM's word for it.
-            if (gcNanos > 0) out += subRow(
-                "GC", gcCount() + " - in pauses under one step, which the sampler cannot see; counted as run time"
-            )
-            return out
-        }
-        val counts = String.format(
-            Locale.ROOT, "%s, longest %s", Report.plural(pauses, "pause"), duration(longestNanos.toDouble())
-        )
-        if (gcNanos < 0) {
-            // The one case where what the sampler saw is not in the split above, so the total has to
-            // be said here or it is said nowhere.
-            out += subRow(
-                "Paused", String.format(
-                    Locale.ROOT, "%s in %s - seen by the sampler but not confirmed, so counted as run time",
-                    duration(pausedNanos.toDouble()), counts
-                )
-            )
-            out += subRow("GC", "not counted - this JVM's collectors are not ones the profiler can read")
-            return out
-        }
-        out += subRow("Paused", "$counts - every thread stopped, usually GC")
-        out += subRow(
-            "GC", when {
-                // The two are the same quantity measured from opposite sides, and they agree to a
-                // percent when the pauses were collections. Said only when they do not: a gap is
-                // the one case where the hint on the row above is wrong.
-                pausedNanos - gcNanos > slack(pausedNanos) -> gcCount() + String.format(
-                    Locale.ROOT, " - the other %s the sampler lost was not GC, and is counted as run time",
-                    duration((pausedNanos - gcNanos).toDouble())
-                )
-                gcNanos - pausedNanos > slack(gcNanos) ->
-                    gcCount() + " - more than the sampler saw: a pause under one step is not resolved"
-                else -> gcCount()
-            }
-        )
-        return out
     }
 
-    private fun gcCount(): String = duration(gcNanos.toDouble()) + " by the JVM's own count"
+    /** The paused time taken out of [spanNanos]: what the JVM confirmed, and never more than the span. */
+    fun confirmedPausedIn(spanNanos: Long): Long = min(confirmedNanos, spanNanos).coerceAtLeast(0)
+
+    /**
+     * What is wrong with the split, if anything. Each is a `Careful` line under the header, and a
+     * healthy run has none: a disagreement between the sampler and the JVM is the one case where
+     * the first line's figure is not the whole story.
+     */
+    fun careful(): List<String> {
+        if (!measured) return listOf(
+            "pauses not measured: a parked sampler is late on every tick, so none of them reads as a pause" +
+                    (if (gcNanos > 0) "; the JVM counts ${duration(gcNanos.toDouble())} of GC, and it is inside active"
+                    else "")
+        )
+        if (pauses == 0L) {
+            // Collections the sampler could not see, each shorter than a step. Real pauses, and left
+            // in active time all the same: nothing here measured them but the JVM's word for it.
+            return if (gcNanos > 0) listOf(
+                "the JVM counts ${duration(gcNanos.toDouble())} of GC in pauses under one step, which the " +
+                        "sampler cannot see; it is inside active"
+            ) else emptyList()
+        }
+        val seen = String.format(
+            Locale.ROOT, "%s in %s", duration(pausedNanos.toDouble()), Report.plural(pauses, "pause")
+        )
+        if (gcNanos < 0) return listOf(
+            "$seen seen by the sampler but not confirmed - this JVM's collectors cannot be read - so counted as active"
+        )
+        return when {
+            // The two are the same quantity measured from opposite sides, and they agree to a
+            // percent when the pauses were collections. Said only when they do not.
+            pausedNanos - gcNanos > slack(pausedNanos) -> listOf(
+                String.format(
+                    Locale.ROOT, "the sampler lost %s the JVM did not count as GC - another kind of pause, or " +
+                            "the sampler kept off its core - so it is counted as active",
+                    duration((pausedNanos - gcNanos).toDouble())
+                )
+            )
+            gcNanos - pausedNanos > slack(gcNanos) -> listOf(
+                "the JVM counts ${duration(gcNanos.toDouble())} of GC, more than the sampler saw: pauses under " +
+                        "one step are not resolved, and are inside active"
+            )
+            else -> emptyList()
+        }
+    }
 
     /** How far apart the two counts may be before the report says so. */
     private fun slack(nanos: Long): Long = max(nanos / 5, 50_000_000L)

@@ -1227,12 +1227,15 @@ That also puts the reconciliation for the two `request` rows on one line: the 5.
 among them is the mixed-provenance table that [plan.md](plan.md) argued against when the tiers were
 merged. Left open rather than built because the coarse table is about to be reworked wholesale.
 
-## 38. Take the pauses out of thread-time and time per call · open
+## 38. Take the pauses out of thread-time and time per call · **done 2026-10-11**
 
 One sample is worth the step the sampler achieved, and pauses stretch it: 1.064 ms on a run that was
 5.93% paused, so every `Thread-time` and `Thread-time per call` is 6% high
 ([findings.md](findings.md)). `Paused` now measures exactly the amount. Subtracting it makes time per
 call the running time of a call, which is what a reader comparing it with a microbenchmark expects.
+
+**Done:** `Report.stepNanos` is the step over active time, and every thread-time follows from it.
+Part of the one-line header, plan.md "The five words".
 
 **Why it is not simply done.** `Coverage` would stop adding up to the wall clock, and the coarse
 spans are timestamps and *do* include their pauses, so `mean - busy/exec` would start reporting
@@ -1291,3 +1294,12 @@ in [trial-calcite.md](trial-calcite.md#6-the-friction--what-the-trial-says-about
 - Documenting the id-caching pattern, which is not obvious and was rediscovered under pressure.
 - The coarse tier's shape: per-instance spans with percentiles, and the cross-tabulation that reads
   *of the 48 ms median plan, 40% is `FilterIntoJoinRule`*.
+
+## 42. On CPU per sample, replacing `Runnable / Wait` with `on CPU / off CPU`
+
+From the 2026-10-11 vocabulary discussion in plan.md. Read the thread's CPU clock on every tick;
+if it moved by about a step the sample was on CPU, if it did not the thread was off CPU whatever the
+JVM state says. That folds blocking I/O, native calls and descheduling into one measured column
+instead of a JVM-reported one with a footnote. Possible on Linux, where the clock is fine-grained;
+not on Windows, where `GetThreadTimes` moves in 15.6 ms jumps. Cost is one clock read per thread
+per tick. Two code paths for one column, which is why it waits.

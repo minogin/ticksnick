@@ -551,15 +551,39 @@ class Report internal constructor(
     /** Samples inside no label at all: [idleHits] is "no fine label", which includes span work. */
     val unlabelledHits: Long get() = (idleHits - coarseSelfHits).coerceAtLeast(0)
 
+    /** Every sample taken: the denominator of a share. */
+    val allHits: Long get() = labelledHits + unlabelledHits
+
+    /**
+     * A share of *all* samples, so it is a share of active time: 30% means 30% of the time the
+     * program was not paused, and the `(no operation)` row in the table is the rest.
+     *
+     * It was a share of labelled samples until 2026-10-11, which kept a share still when idle time
+     * changed and moved every row whenever a label was added. Over all samples it is the other way
+     * round, and that is the one a reader expects: adding a label moves samples out of
+     * `(no operation)` and nothing else. The absolute column is still the one to compare between
+     * runs - see the note on [occupancyNanosOf].
+     */
     fun shareOf(op: OperationStat): Double =
-        if (labelledHits == 0L) 0.0 else op.hits.toDouble() / labelledHits
+        if (allHits == 0L) 0.0 else op.hits.toDouble() / allHits
 
     /** Error chance alone would produce at this hit count — anything smaller is not measurable. */
     fun noiseFloorOf(op: OperationStat): Double =
         if (op.hits > 0) 1.0 / sqrt(op.hits.toDouble()) else Double.NaN
 
-    /** What one sample is worth in thread-time: the step the sampler actually achieved. */
-    val stepNanos: Double get() = if (ticks > 1) samplingSpanNanos.toDouble() / (ticks - 1) else Double.NaN
+    /** The sampling span with the confirmed pauses taken out: the time every sample was taken in. */
+    val activeNanos: Long get() = samplingSpanNanos - pause.confirmedPausedIn(samplingSpanNanos)
+
+    /**
+     * What one sample is worth in thread-time: the step the sampler achieved over *active* time.
+     *
+     * Over the whole span it was the wall step, and a pause stretched it: 1.108 ms on a run that
+     * asked for 1 ms, so every thread-time and time per call read about 10% high, with the pauses
+     * spread over every operation in proportion to its samples and the one that allocated its way
+     * into the collection charged no more than one that allocated nothing. No sample is taken in a
+     * pause, so the step a sample stands for is the active one.
+     */
+    val stepNanos: Double get() = if (ticks > 1) activeNanos.toDouble() / (ticks - 1) else Double.NaN
 
     /**
      * This operation's occupancy as thread-time rather than as a fraction — and it is the column to
@@ -1191,8 +1215,8 @@ class Report internal constructor(
         // Four lines, always. Not a summary of the rest — the four things that will make a reader
         // draw the wrong conclusion, and nothing else. Everything below them is reference, and
         // reference belongs in output.md where it can be read once rather than skipped thirty times.
-        appendLine("  thread-time is sampled and summed across threads, NOT CPU")
-        appendLine("  runnable/wait splits the thread-time beside it; runnable is NOT the same as working")
+        appendLine("  thread-time is sampled and summed across threads over ACTIVE time, NOT CPU")
+        appendLine("  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working")
         appendLine("  concurrency is threads INSIDE at once, running or parked - not a speedup")
         appendLine("  a share is where time went, NOT what removing the operation would save")
         if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
@@ -1208,22 +1232,22 @@ class Report internal constructor(
         appendLine("  removed, because it was creating work for everything else as well as doing its own. The")
         appendLine("  two numbers are different questions and the gap can be orders of magnitude")
         appendLine("thread-time% and thread-time are the same quantity, relative and absolute: sampled and")
-        appendLine("  summed across threads, with waiting counted in full. NOT CPU - the time-on-CPU block above")
-        appendLine("  bounds how much of it was waiting. The absolute one does not move when a label is added or")
-        appendLine("  removed, which makes it the column to compare between two runs")
-        appendLine("wall time = run + paused. Paused is time every thread was stopped: ticks the sampler ran a")
-        appendLine("  whole step late, as far as the JVM's own count of its collections confirms them. A late")
-        appendLine("  tick nobody confirmed stays in run time - the sampler may have been stopped alone. No")
-        appendLine("  sample is taken in a pause, so a share is a share of RUN time and a pause does not move")
-        appendLine("  it, and time on CPU is a share of run time for the same reason. Thread-time and time per")
-        appendLine("  call are still scaled to WALL time and so include the pauses, spread over every operation")
-        appendLine("  in proportion to its samples")
-        appendLine("runnable / wait are the two halves of the thread-time beside them and add to 100%: the")
+        appendLine("  summed across threads, with waiting counted in full. NOT CPU - a Careful line under the")
+        appendLine("  header says when the gap matters. The share is of every sample, so it is a share of active")
+        appendLine("  time and '(no operation)' is the rest; the absolute one is the column to compare between")
+        appendLine("  two runs")
+        appendLine("wall time = active + paused. Paused is time every thread was stopped: ticks the sampler ran")
+        appendLine("  a whole step late, as far as the JVM's own count of its collections confirms them. A late")
+        appendLine("  tick nobody confirmed stays in active time - the sampler may have been stopped alone. No")
+        appendLine("  sample is taken in a pause, so the fine table is ACTIVE time throughout: a pause does not")
+        appendLine("  move a share, and thread-time and time per call are scaled to the active step. The coarse")
+        appendLine("  table is WALL time, two timestamps per execution, so a span includes the pauses inside it")
+        appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
         appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
         appendLine("  NOT working - a thread the scheduler merely preempted reads runnable, and so does one")
         appendLine("  stopped inside a native call, which the JVM cannot see into. So the left half is an UPPER")
-        appendLine("  BOUND on the work and the time-on-CPU block above is the only thing that bounds it in turn;")
-        appendLine("  the right half is waiting that some other thread caused")
+        appendLine("  BOUND on the work and the CPU clock is the only thing that bounds it in turn, which is what")
+        appendLine("  the Careful line about it says; the right half is waiting that some other thread caused")
         appendLine("wall-time is the clock with at least one thread inside, and it is NOT summed across threads,")
         appendLine("  which thread-time is. Not latency either: it is every execution's interval unioned, so it")
         appendLine("  says nothing about any single one of them")
@@ -1266,7 +1290,16 @@ class Report internal constructor(
         val seen = coarse.filter { it.count > 0 || it.inclusiveHits > 0 }
         if (seen.isEmpty()) return
         appendLine()
-        appendLine("COARSE OPERATIONS - inclusive time")
+        // Wall time, not active: a span is two timestamps, and a request that sat through a 2.6 s
+        // collection took 2.6 s longer. Said in the heading, with the total it includes, because
+        // the table above is over active time and nothing else on the page says they differ. Per
+        // row would be better and needs the pause timestamps against each span, which nothing
+        // records - ideas.md item 41.
+        val pausedInSpan = pause.confirmedPausedIn(samplingSpanNanos)
+        appendLine(
+            "COARSE OPERATIONS - inclusive wall time" +
+                    if (pausedInSpan > 0) ", ${duration(pausedInSpan.toDouble())} of pauses included" else ""
+        )
         appendLine(
             String.format(
                 // `busy/exec` is gone: it was `working x mean`, both of which are printed beside it,
@@ -1289,9 +1322,9 @@ class Report internal constructor(
                 // columns answer - does one execution use several threads, and how many executions
                 // run at once - were adjacent columns with nothing saying they were different
                 // questions. A prose line can say both, and a column head cannot.
-                Locale.ROOT, "%-25s %11s %10s %10s %10s %10s %10s %10s %15s",
+                Locale.ROOT, "%-25s %11s %10s %10s %10s %10s %10s %10s %18s",
                 "Coarse operation", "Executions", "Total v", "Mean", "p50", "p90", "p99", "Max",
-                "Runnable / Wait"
+                "Runnable / Waiting"
             )
         )
         appendLine("-".repeat(COARSE_WIDTH))
@@ -1301,7 +1334,7 @@ class Report internal constructor(
                 else (c.inclusiveHits - c.runningInclusiveHits).toDouble() / c.inclusiveHits
             appendLine(
                 String.format(
-                    Locale.ROOT, "%-25s %,11d %10s %10s %10s %10s %10s %10s %15s",
+                    Locale.ROOT, "%-25s %,11d %10s %10s %10s %10s %10s %10s %18s",
                     c.name, c.count,
                     duration(c.spanSumNanos.toDouble()),
                     duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
@@ -1492,7 +1525,7 @@ class Report internal constructor(
         /** The name as printed: a star marks a row whose full span is in the coarse table. */
         val label: String get() = if (coarse) "$name *" else name
 
-        fun shareOf(): Double = if (labelledHits == 0L) 0.0 else hits.toDouble() / labelledHits
+        fun shareOf(): Double = if (allHits == 0L) 0.0 else hits.toDouble() / allHits
 
         val waitingShare: Double get() = if (hits == 0L) 0.0 else (hits - runningHits).toDouble() / hits
 
@@ -1607,7 +1640,6 @@ class Report internal constructor(
      * @param legend every column explained, at the bottom. Off by default: see [renderLegend].
      */
     fun render(legend: Boolean = false): String = buildString {
-        val achieved = if (ticks > 1) samplingSpanNanos.toDouble() / (ticks - 1) / 1e6 else Double.NaN
         if (failure != null) {
             appendLine("!".repeat(WIDTH))
             appendLine("PROFILING STOPPED - these numbers were not going to be right:")
@@ -1628,96 +1660,15 @@ class Report internal constructor(
         appendLine("  | |  | | |___| . \\ ___) | |\\  || | |___| . \\")
         appendLine("  |_| |___\\____|_|\\_\\____/|_| \\_|___\\____|_|\\_\\")
         appendLine()
-        appendLine(
-            row(
-                // "3 labelled, 1 unlabelled" read as a count of labels rather than of samples of
-                // labelled work, which is the wrong noun and the one a first-time reader lands on.
-                // A sample is one photograph of one thread, so saying how many were taken and then
-                // where they landed makes the total the subject and the split a property of it.
-                "Samples", String.format(
-                    Locale.ROOT, "%,d taken over %.1f s - %,d inside an operation, %,d outside every operation",
-                    labelledHits + unlabelledHits, durationNanos / 1e9, labelledHits, unlabelledHits
-                )
-            )
-        )
-        appendLine(
-            row(
-                // Where the sample count comes from, which the report never said and which is the
-                // arithmetic everything below rests on. Deliberately "one per thread per tick"
-                // rather than an equation: a thread that registers partway through the run
-                // contributes fewer, so ticks x threads is a ceiling and not an identity - 7 ticks
-                // and 1 thread produced 4 samples on a short run, and that gap is the slot
-                // registering on the first labelled call.
-                //
-                // "mean (jittered)" because this is the achieved interval, not the requested step,
-                // and the two differ on purpose: the interval is drawn +/-25% around the step so
-                // the sampler cannot lock onto a workload with a rhythm of its own. Over a short
-                // run the mean of a handful of draws is visibly off the step - 5 ticks printed
-                // 0.969 ms against a 1 ms request - and without this word that reads as a defect.
-                "Sampling", String.format(
-                    Locale.ROOT, "%,d ticks at %.3f ms mean (jittered) x %s - one sample per thread per tick",
-                    ticks, achieved, plural(threads.toLong(), "thread")
-                )
-            )
-        )
-        // Wall time split into run and paused, directly under the step the pauses stretch. A mean of
-        // 1.109 ms against a 1 ms request reads as a sampler that cannot keep time, and the cause is
-        // nothing of the kind: it kept time and was stopped, along with everything it was watching.
-        // On every run, paused or not, because "run time" is what `Time on CPU` below is a share of.
-        for (l in pause.lines(samplingSpanNanos)) appendLine(l)
-        appendLine(
-            row(
-                "Coverage", String.format(
-                    Locale.ROOT, "%s of %s thread-time observed (%s)",
-                    threadTime(labelledNanos), threadTime(observedNanos),
-                    percent(labelledHits * 100.0 / (labelledHits + unlabelledHits).coerceAtLeast(1))
-                )
-            )
-        )
-        // What the unlabelled time *was* is the reader's first question and the one they have no
-        // other instrument for. "Most of the run is outside every label" means two opposite things,
-        // and which one it is decides whether the labels are in the wrong place or the program is
-        // simply idle.
-        if (stateSampled && unlabelledHits > 0) {
-            val parked =
-                unlabelledWaitingHits * (observedNanos - labelledNanos) / unlabelledHits.toDouble()
-            appendLine(
-                subRow(
-                    "Outside", String.format(
-                        Locale.ROOT, "%s - %s parked (%s), %s runnable inside no operation",
-                        threadTime(observedNanos - labelledNanos), threadTime(parked),
-                        percent(unlabelledWaitingHits * 100.0 / unlabelledHits),
-                        threadTime(observedNanos - labelledNanos - parked)
-                    )
-                )
-            )
-            val runnable = observedNanos - parked
-            // Only when it differs from `Coverage` above. It exists to answer a second question -
-            // of the thread-time that was doing anything at all, how much do the labels cover -
-            // and when almost nothing was parked it is the same figure to a decimal place, which
-            // is a line that teaches the reader the block repeats itself.
-            val sameAsCoverage =
-                observedNanos > 0 && runnable > 0 &&
-                        Math.round(labelledNanos * 1000.0 / runnable) ==
-                        Math.round(labelledNanos * 1000.0 / observedNanos)
-            if (runnable > 0 && !sameAsCoverage) appendLine(
-                subRow(
-                    "Runnable", String.format(
-                        Locale.ROOT, "operations cover %s of %s (%s)",
-                        threadTime(labelledNanos), threadTime(runnable), percent(labelledNanos * 100.0 / runnable)
-                    )
-                )
-            )
-        } else if (unlabelledHits > 0) {
-            appendLine(
-                subRow(
-                    "Outside",
-                    "${threadTime(observedNanos - labelledNanos)} - thread state was not sampled"
-                )
-            )
-        }
-
-        for (l in duty.lines(durationNanos, reclaimedSlots)) appendLine(l)
+        // One line: wall time split into active and paused. Andrey's two criteria for what the
+        // report shows, 2026-10-11: it matters for optimising performance, or it says the report is
+        // unreliable. The split is the first - GC tuning is about those figures - and everything
+        // the header used to carry besides it was either a mechanism (the step, the clock, the
+        // windows) or a line that only said "fine" (coverage, time on CPU, a verdict). Silence
+        // says "fine" now, and a `Careful` line says what is unreliable, before the numbers it is
+        // about and not in a footnote after them.
+        appendLine(pause.headerLine(samplingSpanNanos))
+        for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots)) appendLine(row("Careful", c))
         appendLine()
         // FINE, not bare OPERATIONS. `OPERATIONS` beside `COARSE OPERATIONS` makes one tier the
         // default and the other the exception, which is the asymmetry `registerFine`/`registerCoarse`
@@ -1726,7 +1677,10 @@ class Report internal constructor(
         // operation appears in both with different numbers - `request` at 5.03% of its own work
         // here and 99.6% including everything it contains below - and without the two words that
         // reads as a contradiction rather than as two questions.
-        appendLine("ALL OPERATIONS - own time")
+        // The clock the table is over, said once in the heading and not in every column name: a
+        // thread-time is a sum over threads and `active` is the span it was summed in, and on one
+        // thread the two figures match, which is the reader's check that they have understood it.
+        appendLine("ALL OPERATIONS - own time, thread-time over ${duration(activeNanos.toDouble())} active")
         // The band over the column heads. Eleven columns is more than anyone reads as a list, and
         // the groups are the reading order: how much time went here, how it was spread over
         // threads, and how far the row can be trusted.
@@ -1741,13 +1695,25 @@ class Report internal constructor(
         // that test was "any fine operation was sampled", which printed a headerless table of
         // coarse rows the first time a sandbox labelled everything coarse.
         val (seen, unseen) = rows().partition { it.hits > 0 }
-        if (seen.isNotEmpty()) appendLine(
+        // Time inside no label, as a row rather than a `Coverage` line: it is the time the reader
+        // has no information about, and it belongs in the ranking with everything else. Its
+        // `Runnable / Waiting` is the first question about it - idle threads, or work nobody
+        // labelled - and the row answers it where the header used to.
+        val outside = if (unlabelledHits > 0) listOf(
+            OperationRow(
+                NO_OPERATION, coarse = false, hits = unlabelledHits,
+                runningHits = if (stateSampled) unlabelledHits - unlabelledWaitingHits else unlabelledHits,
+                activeTicks = 0, peakInside = 0, threads = 0, calls = 0, stuckShare = null,
+            )
+        ) else emptyList()
+        val anyRow = seen.isNotEmpty() || outside.isNotEmpty()
+        if (anyRow) appendLine(
             band(
                 FINE_COLUMNS, FINE_BREAKS,
                 1..3 to "Load", 4..7 to "Spread", 8..9 to "Calls", 10..12 to "Trust"
             )
         )
-        if (seen.isNotEmpty()) appendLine(
+        if (anyRow) appendLine(
             String.format(
                 // `v` marks the column the table is sorted by, which nothing said before - and at
                 // two rows a reader cannot tell a sorted table from an unsorted one by looking.
@@ -1760,7 +1726,7 @@ class Report internal constructor(
                 // had differed - 20/14 against 26/8 - so that `Thread-time% v` could sit over an
                 // 8-wide number without shifting everything after it, and that trick is invisible
                 // until a vertical line is drawn through it and comes out crooked.
-                Locale.ROOT, "%-26s | %14s %11s %15s | %9s %11s %7s %5s | %13s %20s | %8s %6s %7s",
+                Locale.ROOT, "%-26s | %14s %11s %18s | %9s %11s %7s %5s | %13s %20s | %8s %6s %7s",
                 // `occupancy%` and not `share`, because it is the same quantity as the column beside
                 // it — one relative, one absolute. Calling one of them `share` invented a
                 // distinction that does not exist and hid the one that does: neither is CPU. A
@@ -1826,7 +1792,7 @@ class Report internal constructor(
                 // configured.* `Max`, `Peak` and `Most` name a statistic and leave the reader to
                 // supply the noun; `Workers` names what was counted, and says "detected" rather
                 // than "measured", which is what a sampled maximum honestly is.
-                "Operation", "Thread-time% v", "Thread-time", "Runnable / Wait", "Wall-time",
+                "Operation", "Thread-time% v", "Thread-time", "Runnable / Waiting", "Wall-time",
                 "Concurrency", "Workers", "Pool",
                 // `Impl/call` sits beside `Calls` because it is hits x step / calls, and it had
                 // been stranded among the statistics.
@@ -1839,7 +1805,7 @@ class Report internal constructor(
                 "Calls", "Thread-time per call", "Hits", "Noise", "Over 1t"
             )
         )
-        if (seen.isNotEmpty()) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
+        if (anyRow) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
         // Operations the sampler never caught are folded away rather than printed as a screen of
         // zeroes — Calcite's report carried twenty-five rules at 0.000%. Folded, not dropped: the
         // count says how many there were, and a *called* operation with no samples is a real
@@ -1855,7 +1821,7 @@ class Report internal constructor(
         // of 0.04 ms to reach fifty, which measures the sampler rather than the program, and fifty
         // samples still says nothing. Lowering the step is real advice for an operation that is
         // called but never caught in a run long enough to be real - that case is the fold below.
-        if (seen.isEmpty()) {
+        if (!anyRow) {
             appendLine(
                 if (labelledHits == 0L && ticks < MIN_TICKS_FOR_A_TABLE)
                     "  nothing was sampled - $ticks ticks is too few for the sampler to catch anything. " +
@@ -1863,14 +1829,18 @@ class Report internal constructor(
                 else "  nothing was sampled."
             )
         }
-        for (r in seen.sortedByDescending { it.hits }) {
+        for (r in (seen + outside).sortedByDescending { it.hits }) {
             appendLine(
                 String.format(
-                    Locale.ROOT, "%-26s | %14s %11s %15s | %9s %11s %7s %5s | %,13d %20s | %8d %6s %7s",
+                    Locale.ROOT, "%-26s | %14s %11s %18s | %9s %11s %7s %5s | %13s %20s | %8d %6s %7s",
                     r.label, percent(r.shareOf() * 100), threadTime(r.hits * stepNanos),
-                    runnableSplit(r.waitingShare), threadTime(r.activeTicks * stepNanos),
+                    runnableSplit(r.waitingShare),
+                    // Nothing counts the ticks with some thread inside no label, so the row has no
+                    // wall time rather than a wall time of zero.
+                    if (r.name == NO_OPERATION) "-" else threadTime(r.activeTicks * stepNanos),
                     r.concurrency(), r.workers(), r.pool(),
-                    r.calls, duration(r.perCallNanos()),
+                    if (r.name == NO_OPERATION) "-" else String.format(Locale.ROOT, "%,d", r.calls),
+                    duration(r.perCallNanos()),
                     r.hits, percent(r.noiseFloor() * 100),
                     // Blank for a coarse row rather than 0.00%: the long-execution detector is a
                     // fine-tier instrument, and a coarse operation has percentiles below, which
@@ -1879,7 +1849,7 @@ class Report internal constructor(
                 )
             )
         }
-        if (seen.isNotEmpty()) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
+        if (anyRow) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
         if (unseen.isNotEmpty()) {
             val called = unseen.filter { it.calls > 0 }
             // Named, in both branches: "1 operation never sampled" leaves the reader to work out
@@ -1912,6 +1882,21 @@ class Report internal constructor(
             )
         )
         renderCoarse()
+        // The run's own facts, after the tables: how much evidence there is, which is the precision
+        // of everything above. It was the first two lines of the header and said nothing a reader
+        // acts on before the numbers; it says something after them, when a share looks too close
+        // to call. "mean (jittered)": the interval is drawn +/-25% around the step so the sampler
+        // cannot lock onto a workload with a rhythm of its own, and over a short run the mean of a
+        // handful of draws is visibly off the step.
+        appendLine()
+        appendLine(
+            row(
+                "Sampled", String.format(
+                    Locale.ROOT, "%,d samples - %,d ticks at %.3f ms mean (jittered) x %s, one sample per thread per tick",
+                    allHits, ticks, stepNanos / 1e6, plural(threads.toLong(), "thread")
+                )
+            )
+        )
         renderWarnings()
         // A leaked label does not look like an error. It looks like a finding: one operation
         // quietly accumulating everybody else's samples, with a plausible number beside it.
@@ -1986,6 +1971,9 @@ class Report internal constructor(
 
         const val FLOOR_NANOS = 50.0
 
+        /** The fine table's row for samples inside no label. */
+        const val NO_OPERATION = "(no operation)"
+
         /** How many warnings are printed before the rest are counted rather than listed. */
         const val MAX_WARNINGS = 10
 
@@ -2016,12 +2004,6 @@ class Report internal constructor(
          */
         const val OUTSIDE_COARSE_MIN_SHARE = 0.01
 
-        /**
-         * How far coverage-over-runnable must sit from plain coverage before it is worth a line of
-         * its own. Below this the two are the same number twice — see where it is used.
-         */
-        const val COVERAGE_GAP = 0.005
-
         /** How wide the report's rules and column layout are. */
         /** Below this many ticks, an empty table is the run being short rather than a finding. */
         const val MIN_TICKS_FOR_A_TABLE = 50
@@ -2041,7 +2023,7 @@ class Report internal constructor(
          * which is true and is in the friction log. Then the parallelism columns left and took
          * more than `Total` had added.
          */
-        const val COARSE_WIDTH = 119
+        const val COARSE_WIDTH = 122
 
         /**
          * The fine table, likewise drawn to itself.
@@ -2056,7 +2038,7 @@ class Report internal constructor(
          * Operation, thread-time% and thread-time, runnable/wait, wall-time,
          * concurrency/threads, calls, implied per call, hits, noise, over one tick.
          */
-        val FINE_COLUMNS = intArrayOf(26, 14, 11, 15, 9, 11, 7, 5, 13, 20, 8, 6, 7)
+        val FINE_COLUMNS = intArrayOf(26, 14, 11, 18, 9, 11, 7, 5, 13, 20, 8, 6, 7)
 
         /** After which columns a group bar comes down. */
         val FINE_BREAKS = intArrayOf(0, 3, 7, 9)

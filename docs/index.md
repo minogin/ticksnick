@@ -54,12 +54,20 @@ measured duty cycle beside the number and says so. [trial-jdbc.md](trial-jdbc.md
 **Since then, 2026-10-01: the report says when the JVM was stopped.** The first workload that
 allocates - a graph benchmark in a separate project, `C:\idea\graph`, with TickSnick wired in as a
 composite build - printed a stretched step and a low time on CPU with nothing saying why. It was
-garbage collection. The header now splits wall time into *run* and *paused*, and `Time on CPU`, the
-bound and the verdict are taken over run time; on that workload the bound went from about 11 pp to
-0.61 pp. Decided and recorded in [plan.md](plan.md), the two entries dated 2026-10-01; measured in
-[findings.md](findings.md); explained in [output.md](output.md). **Left open:** thread-time and time
-per call still include the pauses ([ideas.md](ideas.md) item 38), and items 40 and 41. The bench was
-not re-run after either change. That project's `docs/handover.md` says where the work on it stands.
+garbage collection. The header now splits wall time into *active* and *paused*, and the CPU bound is
+taken over active time; on that workload it went from about 11 pp to 0.61 pp. Decided and recorded
+in [plan.md](plan.md), the two entries dated 2026-10-01; measured in [findings.md](findings.md).
+
+**Then, 2026-10-11: the header is one line.** After a break Andrey reread it and could not say what
+`Windows` or `Time on CPU` was for. Two criteria now decide what is printed - it matters for
+optimising performance, or it says the report is unreliable - and the header is `Wall time` plus a
+`Careful` line per thing that is unreliable, none on a healthy run. The fine table is over active
+time throughout (item 38 done), shares are of every sample with `(no operation)` as a row, the coarse
+table says it is wall time, and the sample count moved to a `Sampled` line after the tables. The
+vocabulary - paused, active, waiting, runnable, on CPU - and why each matters are in
+[plan.md](plan.md), "The five words", and in [output.md](output.md). **Left open:** items 40 to 42.
+The bench was not re-run after any of these changes. That project's `docs/handover.md` says where
+the work on it stands.
 
 **What to do next is [plan.md § Phase 6](plan.md#phase-6--thread-state-and-the-whole-application-coefficient--partly-done)** —
 the whole-application parallelism coefficient. Its design is settled and the measurement that settled

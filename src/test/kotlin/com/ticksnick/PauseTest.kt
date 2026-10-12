@@ -216,77 +216,79 @@ class PauseTest {
         confirmed: Long = if (gc < 0) 0 else minOf(paused, gc), measured: Boolean = true,
     ) = PauseReport(measured, paused, count, longest, gc, confirmed)
 
-    /** `Time on CPU` is a share of run time, so run time has to be on the page whatever happened. */
+    /** The table heading says "over N s active", so the word has to be on the page whatever happened. */
     @Test
     fun `wall time is split on a run with no pause too`() {
         for (quiet in listOf(PauseReport.NONE, pause(0, 0, 0, gc = 0))) {
-            val lines = quiet.lines(60 * second)
-            assertEquals(1, lines.size, lines.toString())
-            assertTrue(lines[0].startsWith("Wall time"), lines[0])
-            assertTrue("60.0 s = 60.0 s run + 0 paused" in lines[0], lines[0])
+            val line = quiet.headerLine(60 * second)
+            assertTrue(line.startsWith("Wall time"), line)
+            assertTrue("60.0 s = 60.0 s active + 0 paused" in line, line)
+            assertTrue(quiet.careful().isEmpty(), quiet.careful().toString())
         }
     }
 
+    /** One line, with the count and the longest pause on it: the figures GC tuning is about. */
     @Test
-    fun `wall time is run plus paused, and the pauses are counted under it`() {
-        val lines = pause(5_780_000_000, 22, 1_850_000_000, gc = 5_790_000_000).lines(66 * second)
-        assertEquals(3, lines.size, lines.toString())
-        assertTrue("66.0 s = 60.2 s run + 5.78 s paused (8.76%)" in lines[0], lines[0])
-        assertTrue(lines[1].trim().startsWith("Paused"), lines[1])
-        for (part in listOf("22 pauses", "1.85 s")) assertTrue(part in lines[1], "$part in: ${lines[1]}")
-        assertTrue("5.79 s" in lines[2], lines[2])
+    fun `wall time is active plus paused, with the pauses counted on the line`() {
+        val p = pause(5_780_000_000, 22, 1_850_000_000, gc = 5_790_000_000)
+        val line = p.headerLine(66 * second)
+        assertTrue("66.0 s = 60.2 s active + 5.78 s paused (8.76%) in 22 pauses, longest 1.85 s" in line, line)
+        assertTrue(p.careful().isEmpty(), "a healthy split printed a warning: ${p.careful()}")
     }
 
     /** They are one quantity seen from two sides, so agreement needs no comment. */
     @Test
     fun `the two counts agreeing is not remarked on`() {
-        val gc = pause(5_750_000_000, 26, 1_815_000_000, gc = 5_720_000_000).lines(62_700_000_000)[2]
-        assertFalse("not GC" in gc, gc)
-        assertFalse("more than" in gc, gc)
+        val careful = pause(5_750_000_000, 26, 1_815_000_000, gc = 5_720_000_000).careful()
+        assertTrue(careful.isEmpty(), careful.toString())
     }
 
     /**
-     * The split shows what was confirmed, so the page agrees with itself: the run time on the first
-     * line is the run time the duty cycle divides by. What the sampler lost beyond that is named,
-     * and said to be in run time, rather than dropped.
+     * The split shows what was confirmed, so the page agrees with itself: the active time on the
+     * first line is the active time the duty cycle divides by. What the sampler lost beyond that is
+     * named, and said to be in active time, rather than dropped.
      */
     @Test
-    fun `paused time the JVM did not count as collection stays in run time and is called out`() {
-        val lines = pause(5 * second, 10, 1 * second, gc = 1 * second).lines(60 * second)
-        assertTrue("60.0 s = 59.0 s run + 1.00 s paused" in lines[0], lines[0])
-        assertTrue("the other 4.00 s the sampler lost was not GC" in lines[2], lines[2])
-        assertTrue("run time" in lines[2], lines[2])
+    fun `paused time the JVM did not count as collection stays in active time and is called out`() {
+        val p = pause(5 * second, 10, 1 * second, gc = 1 * second)
+        assertTrue("60.0 s = 59.0 s active + 1.00 s paused" in p.headerLine(60 * second), p.headerLine(60 * second))
+        val careful = p.careful().single()
+        assertTrue("the sampler lost 4.00 s the JVM did not count as GC" in careful, careful)
+        assertTrue("counted as active" in careful, careful)
     }
 
     @Test
     fun `collection the sampler could not see is called out`() {
-        val gc = pause(1 * second, 10, 200 * ms, gc = 3 * second).lines(60 * second)[2]
+        val gc = pause(1 * second, 10, 200 * ms, gc = 3 * second).careful().single()
         assertTrue("more than the sampler saw" in gc, gc)
         // And when every pause was under a step, so the sampler saw none at all.
-        val none = pause(0, 0, 0, gc = 300 * ms).lines(60 * second)
-        assertTrue("+ 0 paused" in none[0], none[0])
-        assertTrue("300 ms" in none[1], none[1])
-        assertTrue("run time" in none[1], none[1])
+        val none = pause(0, 0, 0, gc = 300 * ms)
+        assertTrue("+ 0 paused" in none.headerLine(60 * second), none.headerLine(60 * second))
+        val careful = none.careful().single()
+        assertTrue("300 ms" in careful, careful)
+        assertTrue("inside active" in careful, careful)
     }
 
     /** Never a number where the evidence is missing: the same rule the bound follows. */
     @Test
     fun `an unreadable collector subtracts nothing and says what the sampler saw`() {
-        val lines = pause(5 * second, 10, 1 * second, gc = -1).lines(60 * second)
-        assertTrue("60.0 s = 60.0 s run + 0 paused" in lines[0], lines[0])
-        assertTrue("5.00 s in 10 pauses" in lines[1], lines[1])
-        assertTrue("not confirmed" in lines[1], lines[1])
-        assertTrue("not counted" in lines[2], lines[2])
-        assertFalse("by the JVM's own count" in lines[2], lines[2])
+        val p = pause(5 * second, 10, 1 * second, gc = -1)
+        assertTrue("60.0 s = 60.0 s active + 0 paused" in p.headerLine(60 * second), p.headerLine(60 * second))
+        val careful = p.careful().single()
+        assertTrue("5.00 s in 10 pauses" in careful, careful)
+        assertTrue("not confirmed" in careful, careful)
+        assertTrue("cannot be read" in careful, careful)
+        assertFalse("by the JVM's own count" in careful, careful)
     }
 
     /** A parked sampler is late on every tick, and none of that lateness is anybody's pause. */
     @Test
     fun `a sampler that was not spinning claims no pauses`() {
-        val lines = pause(9 * second, 9_000, 20 * ms, gc = -1, measured = false).lines(60 * second)
-        assertEquals(2, lines.size, lines.toString())
-        assertTrue("not measured" in lines[1], lines[1])
-        assertFalse(lines.any { "9.00 s" in it }, lines.toString())
+        val p = pause(9 * second, 9_000, 20 * ms, gc = -1, measured = false)
+        assertTrue("+ 0 paused" in p.headerLine(60 * second), p.headerLine(60 * second))
+        val careful = p.careful().single()
+        assertTrue("not measured" in careful, careful)
+        assertFalse("9.00 s" in careful, careful)
     }
 
     // ---------------------------------------------------------------- time on CPU, of run time
@@ -307,17 +309,20 @@ class PauseTest {
     fun `time on CPU is taken over run time`() {
         val d = duty(cpu = 59_560_000_000, wall = 66_000_000_000, paused = 5_780_000_000)
         assertEquals(0.9024, d.duty, 0.0001, "the wall-clock figure must not move: the machine floor reads it")
-        assertEquals(0.9890, d.runDuty, 0.0001)
+        assertEquals(0.9890, d.activeDuty, 0.0001)
         assertEquals(1.11, d.boundPp, 0.01)
-        val line = d.lines(66_000_000_000, 0).first()
-        assertTrue("98.90% of run time" in line, line)
+        val line = d.summary()
+        assertTrue("98.90% of active time" in line, line)
         assertFalse("wall time" in line, line)
+        // 1.11 pp is over the point the report keeps quiet below, so this run gets the line.
+        val careful = d.careful(60_220_000_000, 0).single()
+        assertTrue("overstates CPU work by up to 1.11 pp" in careful, careful)
     }
 
     @Test
     fun `with no pause run time is wall time and nothing moves`() {
         val d = duty(cpu = 59_560_000_000, wall = 66_000_000_000, paused = 0)
-        assertEquals(d.duty, d.runDuty, 1e-12)
+        assertEquals(d.duty, d.activeDuty, 1e-12)
         assertEquals(10.8, d.boundPp, 0.05)
     }
 
@@ -325,7 +330,7 @@ class PauseTest {
     @Test
     fun `time on CPU never reads over a hundred percent`() {
         val d = duty(cpu = 1_010_000_000, wall = 2_000_000_000, paused = 1_000_000_000)
-        assertEquals(1.0, d.runDuty, 1e-12)
+        assertEquals(1.0, d.activeDuty, 1e-12)
         assertEquals(0.0, d.boundPp, 1e-9)
     }
 
@@ -346,7 +351,7 @@ class PauseTest {
      * collection takes is the machine's business and not a property of this code.
      */
     @Test
-    fun `a forced collection shows up as a pause and comes out of run time`() {
+    fun `a forced collection shows up as a pause and comes out of active time`() {
         val live = Array(4_000_000) { LongArray(4) }
         val work = Profiler.registerFine("pauseTestWork")
         val stop = AtomicBoolean(false)
@@ -409,8 +414,8 @@ class PauseTest {
         if (d.available) {
             assertTrue(d.pausedNanos > 0, "no pause reached the duty windows")
             assertTrue(d.pausedNanos <= d.wallNanos)
-            assertTrue(d.runDuty > d.duty, "run ${d.runDuty} against wall ${d.duty}")
-            assertTrue("of run time" in rendered, rendered)
+            assertTrue(d.activeDuty > d.duty, "run ${d.activeDuty} against wall ${d.duty}")
+            assertTrue(" active" in rendered.lines().first { it.startsWith("ALL OPERATIONS") }, rendered)
         }
     }
 }

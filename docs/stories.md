@@ -51,21 +51,27 @@ that may be the more honest article.
 
 ## Nice ones: interesting on their own
 
-### One hash lookup costs half as much as twelve set inserts
+### A lookup and an insert cost the same: one miss into a boxed hash table
 *2026-10-12, the graph benchmark, one query at depth 5. Numbers in its `docs/profiler-notes.md`.*
 
-Per visited node, `graph.node(id)` on a boxed `HashMap<Long, Node>` against 12.5 `visited.add`
-calls on average (250,035,321 edges over 20,000,000 nodes):
+Fine labels on the two steps of the BFS, `node` around `graph.node(id)` on a boxed
+`HashMap<Long, Node>` and `addUnvisited` around the edge loop with `times = node.targets.size`:
 
-| step | share | per node | per unit |
+| step | share | calls | per call |
 |---|---|---|---|
-| `addUnvisited`, the edge loop | 65.8% | 413 ns | 33 ns per edge |
-| `node`, the lookup | 32.7% | 205 ns | 205 ns per lookup |
-| the filter and the loop itself | 1.4% | 9 ns | |
+| `addUnvisited`, the edge loop | 66.0% | 32,374,539 edges | 203 ns per edge |
+| `node`, the lookup | 32.0% | 16,038,234 nodes | 199 ns per lookup |
+| the filter and the loop itself | 2.0% | 16,038,234 nodes | 12 ns per node |
 
-One lookup is half the cost of twelve inserts; per unit it is six times dearer. The reason is the
-pointer chase - bucket, entry, boxed key, node, list, backing array, each waiting for the last -
-and that chain is exactly what CSR removes. Conjecture until CSR is measured.
+One `visited.add` of a boxed `Long` into a set growing to 16 million costs the same as one lookup in
+a map of 20 million: about 200 ns, one random access into a hash table that does not fit in cache,
+with the pointer chase and the boxing behind each. The edge loop wins on count, not on unit cost -
+and the count is 32 million, not 250 million: only levels 0 to 4 expand, 2.6 million of the 16
+million visited nodes, and the 13 million at level 5 are looked up and never expanded.
+
+The first reading of this was wrong - "a lookup is half the cost of twelve inserts, six times
+dearer per unit" - because the edge count was assumed from the graph's average degree instead of
+counted. The `times` label counted it.
 
 Also in that report, not yet explained: 13.8% of the edge loop's time is inside executions that
 lasted over a tick, against a machine floor of 2.8%. One node's edge loop is 413 ns, so an

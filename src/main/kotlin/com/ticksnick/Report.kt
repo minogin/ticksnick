@@ -1696,11 +1696,14 @@ class Report internal constructor(
         // band downwards is printed only if some row survived - and until the tiers shared a table
         // that test was "any fine operation was sampled", which printed a headerless table of
         // coarse rows the first time a sandbox labelled everything coarse.
-        // A coarse row stays in the table at 0% when its span was sampled but every sample was
-        // inside a child label: it was not "never sampled", and the fold line would say it was.
-        // Andrey's case, 2026-10-12: `runQuery` inside `runBatch` takes all of the batch's own
-        // time, and the batch must not vanish from the table it is starred in.
-        val (seen, unseen) = rows().partition { it.hits > 0 || (it.coarse && it.inclusiveHits > 0) }
+        // A coarse operation with no own time is not a row: three rows of zeros at the bottom are
+        // not digits. It is one line under the table, worded for what happened - all of its time
+        // was inside other operations, which is the ordinary state of a span around labelled work -
+        // and not as "never sampled", which it was not. Andrey's case, 2026-10-12: `query` inside
+        // `runBatch` inside `run`, each taking all of the time of the one around it.
+        val allRows = rows()
+        val contained = allRows.filter { it.coarse && it.hits == 0L && it.inclusiveHits > 0 }
+        val (seen, unseen) = allRows.filter { it !in contained }.partition { it.hits > 0 }
         // Time inside no label, as a row rather than a `Coverage` line: it is the time the reader
         // has no information about, and it belongs in the ranking with everything else. Its
         // `Runnable / Waiting` is the first question about it - idle threads, or work nobody
@@ -1856,6 +1859,13 @@ class Report internal constructor(
             )
         }
         if (anyRow) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
+        if (contained.isNotEmpty()) {
+            appendLine(
+                "  " + contained.sortedByDescending { it.inclusiveHits }.joinToString { it.label } +
+                        ": coarse, with no own time - every sample inside " +
+                        (if (contained.size == 1) "it" else "them") + " was in an operation above"
+            )
+        }
         if (unseen.isNotEmpty()) {
             val called = unseen.filter { it.calls > 0 }
             // Named, in both branches: "1 operation never sampled" leaves the reader to work out
@@ -1875,7 +1885,7 @@ class Report internal constructor(
         }
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.
-        if (seen.any { it.coarse }) {
+        if (seen.any { it.coarse } || contained.isNotEmpty()) {
             appendLine("  * a coarse operation, showing its OWN work - its full span is in the table below")
         }
         // A note and not a warning: it is the baseline the `Over 1t` column is read against, so it

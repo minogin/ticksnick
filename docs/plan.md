@@ -2014,11 +2014,19 @@ said. Three things a reader of the code should know:
 
 Not re-measured: the bench. The hot path was not touched; only rendering and the step's divisor.
 
-**2026-10-12: a coarse row with no own time stays in the fine table at 0%.** Andrey put `runQuery`
-inside `runBatch` and the batch lost all its own time, which is how own time works and is fine; but
-the batch then dropped into the fold line as "never sampled and folded away; called anyway", which
-is false for a span with a full row in the coarse table. Coarse rows now stay when their span was
-sampled at all; fine rows fold as before, since for them no own time is no samples.
+**2026-10-12: a coarse operation with no own time is one line under the table.** Andrey put
+`query` inside `runBatch` and the batch lost all its own time, which is how own time works and is
+fine; but the batch then dropped into the fold line as "never sampled and folded away; called
+anyway", which is false for a span with a full row in the coarse table. The first fix kept such
+rows at 0%, and the next run showed three of them at the bottom of the table, which are not digits.
+Now they are one line: *"run *, runBatch *, query *: coarse, with no own time - every sample inside
+them was in an operation above"*. Fine rows fold as before, since for them no own time is no
+samples; a coarse span that caught no sample at all still folds as never sampled, which is true.
+
+Considered and kept: one table for both tiers. The tier is a property of the instrument, not of
+the operation - fine means "I cannot afford 40 ns here" - so a user who is unsure picks one and the
+report says when it was wrong; promoting is one word and the row stays where it was. Splitting the
+tables would move a row for a reason that has nothing to do with the program.
 
 ## Operation families: `level[depth]` · 2026-10-12
 

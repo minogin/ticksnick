@@ -537,17 +537,17 @@ class CoarseTest {
     }
 
     /**
-     * A span whose every sample fell inside a child label has no own time, and it used to drop
-     * into the fold line as "never sampled" - false for an operation with a full row in the coarse
-     * table. Andrey's case: `runQuery` inside `runBatch`.
+     * A span whose every sample fell inside a child label has no own time. It is not a row of
+     * zeros and it is not "never sampled": it is one line saying its time was in the operations
+     * above. Andrey's case: `query` inside `runBatch` inside `run`.
      */
     @Test
-    fun `a coarse operation with no own time stays in the fine table at zero`() {
+    fun `a coarse operation with no own time is one line under the table, not a zero row`() {
         val batch = stat(count = 2, sumNanos = 2_000_000_000, hits = 0, running = 0, inclusive = 2000, runningInclusive = 2000, name = "runBatch")
         val text = report(listOf(batch), labelled = 2000).render()
-        val row = text.lines().firstOrNull { it.startsWith("runBatch *") }
-        assertTrue(row != null, "runBatch is not in the fine table: $text")
-        assertTrue("0%" in row!!, row)
+        assertTrue(text.lines().none { it.startsWith("runBatch *") }, "a zero row was printed: $text")
+        assertTrue("runBatch *: coarse, with no own time - every sample inside it was in an operation above" in text, text)
+        assertTrue("* a coarse operation" in text, "the star is used and not explained")
         assertFalse("never sampled" in text, "a sampled span was folded away as never sampled")
     }
 

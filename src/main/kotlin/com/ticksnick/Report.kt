@@ -1671,6 +1671,24 @@ class Report internal constructor(
         // about and not in a footnote after them.
         appendLine(pause.headerLine(samplingSpanNanos))
         for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots)) appendLine(row("Careful", c))
+        // The warnings here, before the tables, for the same reason `Careful` is: a warning is read
+        // before the numbers it is about, not found thirty lines after them. They used to close the
+        // report, and Andrey met one - a coarse label on a 40 ns lookup - under the second table.
+        // A leaked label does not look like an error. It looks like a finding: one operation
+        // quietly accumulating everybody else's samples, with a plausible number beside it.
+        if (imbalances > 0 || openAtEnd > 0) {
+            appendLine()
+            if (imbalances > 0) appendLine(
+                "! $imbalances operation labels were still open at a point the caller said should be quiescent - " +
+                        "everything after each leak was billed to the leaked operation"
+            )
+            if (openAtEnd > 0) appendLine(
+                "! $openAtEnd threads were still inside a hand-placed operation label when sampling stopped, " +
+                        "nothing can close now"
+            )
+            appendLine("  an operation label placed with enter/exit has no finally: a body that throws leaves it set")
+        }
+        renderWarnings()
         appendLine()
         // FINE, not bare OPERATIONS. `OPERATIONS` beside `COARSE OPERATIONS` makes one tier the
         // default and the other the exception, which is the asymmetry `registerFine`/`registerCoarse`
@@ -1917,21 +1935,6 @@ class Report internal constructor(
                 )
             )
         )
-        renderWarnings()
-        // A leaked label does not look like an error. It looks like a finding: one operation
-        // quietly accumulating everybody else's samples, with a plausible number beside it.
-        if (imbalances > 0 || openAtEnd > 0) {
-            appendLine("-".repeat(WIDTH))
-            if (imbalances > 0) appendLine(
-                "! $imbalances operation labels were still open at a point the caller said should be quiescent - " +
-                        "everything after each leak was billed to the leaked operation"
-            )
-            if (openAtEnd > 0) appendLine(
-                "! $openAtEnd threads were still inside a hand-placed operation label when sampling stopped, " +
-                        "nothing can close now"
-            )
-            appendLine("  an operation label placed with enter/exit has no finally: a body that throws leaves it set")
-        }
         appendLine("-".repeat(WIDTH))
         // Said in the output rather than in a document, because the one time it mattered it was
         // worth a factor of 275 and nothing on the screen hinted at it.

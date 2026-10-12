@@ -2023,6 +2023,11 @@ Now they are one line: *"run *, runBatch *, query *: coarse, with no own time - 
 them was in an operation above"*. Fine rows fold as before, since for them no own time is no
 samples; a coarse span that caught no sample at all still folds as never sampled, which is true.
 
+**Same day: the warnings moved above the tables.** Andrey put a coarse label on the node lookup,
+which is about 40 ns, and the report said so - under the second table, where he found it after
+reading the numbers it was about. Same rule as `Careful`: a warning is read before the numbers.
+Order now: `Wall time`, `Careful`, leaks, `WARNINGS`, the tables, `Sampled`, the legend.
+
 Considered and kept: one table for both tiers. The tier is a property of the instrument, not of
 the operation - fine means "I cannot afford 40 ns here" - so a user who is unsure picks one and the
 report says when it was wrong; promoting is one word and the row stays where it was. Splitting the

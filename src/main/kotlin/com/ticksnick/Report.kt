@@ -1656,6 +1656,11 @@ class Report internal constructor(
         // Five lines against a report of twenty-three is not free, and it was chosen knowing that.
         // Backslashes are doubled here and nowhere else in this file, which is the one way this
         // block can be broken by a well-meaning edit.
+        // One long rule before the logo and one after the legend: the report lands in a console
+        // full of the program's own output, and its first and last lines should say so. No rules
+        // between sections - the headings and the tables' own rules do that, and a rule beside a
+        // table's rule is the doubled separator from the first graph run.
+        appendLine("=".repeat(WIDTH))
         appendLine(" _____ ___ ____ _  ______  _   _ ___ ____ _  __")
         appendLine("|_   _|_ _/ ___| |/ / ___|| \\ | |_ _/ ___| |/ /")
         appendLine("  | |  | | |   | ' /\\___ \\|  \\| || | |   | ' /")
@@ -1939,6 +1944,7 @@ class Report internal constructor(
         // Said in the output rather than in a document, because the one time it mattered it was
         // worth a factor of 275 and nothing on the screen hinted at it.
         renderLegend(legend)
+        appendLine("=".repeat(WIDTH))
     }
 
     companion object {

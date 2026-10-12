@@ -1514,6 +1514,8 @@ class Report internal constructor(
         val name: String,
         val coarse: Boolean,
         val hits: Long,
+        /** Samples anywhere inside the span, for a coarse row; equal to [hits] for a fine one. */
+        val inclusiveHits: Long,
         val runningHits: Long,
         val activeTicks: Long,
         val peakInside: Int,
@@ -1552,13 +1554,13 @@ class Report internal constructor(
     fun rows(): List<OperationRow> =
         operations.map {
             OperationRow(
-                it.name, coarse = false, hits = it.hits, runningHits = it.hits - it.waitingHits,
+                it.name, coarse = false, hits = it.hits, inclusiveHits = it.hits, runningHits = it.hits - it.waitingHits,
                 activeTicks = it.activeTicks, peakInside = it.peakInside, threads = it.threads,
                 calls = it.calls, stuckShare = it.stuckShare,
             )
         } + coarse.map {
             OperationRow(
-                it.name, coarse = true, hits = it.selfHits, runningHits = it.selfRunningHits,
+                it.name, coarse = true, hits = it.selfHits, inclusiveHits = it.inclusiveHits, runningHits = it.selfRunningHits,
                 activeTicks = it.selfActiveTicks, peakInside = it.selfPeak, threads = it.threads,
                 calls = it.count, stuckShare = null,
             )
@@ -1694,14 +1696,18 @@ class Report internal constructor(
         // band downwards is printed only if some row survived - and until the tiers shared a table
         // that test was "any fine operation was sampled", which printed a headerless table of
         // coarse rows the first time a sandbox labelled everything coarse.
-        val (seen, unseen) = rows().partition { it.hits > 0 }
+        // A coarse row stays in the table at 0% when its span was sampled but every sample was
+        // inside a child label: it was not "never sampled", and the fold line would say it was.
+        // Andrey's case, 2026-10-12: `runQuery` inside `runBatch` takes all of the batch's own
+        // time, and the batch must not vanish from the table it is starred in.
+        val (seen, unseen) = rows().partition { it.hits > 0 || (it.coarse && it.inclusiveHits > 0) }
         // Time inside no label, as a row rather than a `Coverage` line: it is the time the reader
         // has no information about, and it belongs in the ranking with everything else. Its
         // `Runnable / Waiting` is the first question about it - idle threads, or work nobody
         // labelled - and the row answers it where the header used to.
         val outside = if (unlabelledHits > 0) listOf(
             OperationRow(
-                NO_OPERATION, coarse = false, hits = unlabelledHits,
+                NO_OPERATION, coarse = false, hits = unlabelledHits, inclusiveHits = unlabelledHits,
                 runningHits = if (stateSampled) unlabelledHits - unlabelledWaitingHits else unlabelledHits,
                 activeTicks = 0, peakInside = 0, threads = 0, calls = 0, stuckShare = null,
             )

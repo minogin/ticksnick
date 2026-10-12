@@ -2014,6 +2014,12 @@ said. Three things a reader of the code should know:
 
 Not re-measured: the bench. The hot path was not touched; only rendering and the step's divisor.
 
+**2026-10-12: a coarse row with no own time stays in the fine table at 0%.** Andrey put `runQuery`
+inside `runBatch` and the batch lost all its own time, which is how own time works and is fine; but
+the batch then dropped into the fold line as "never sampled and folded away; called anyway", which
+is false for a span with a full row in the coarse table. Coarse rows now stay when their span was
+sampled at all; fine rows fold as before, since for them no own time is no samples.
+
 ## Next session: the coarse output · opened 2026-09-02
 
 Written as a handover, because the work is Andrey's to start and the context is a day old.

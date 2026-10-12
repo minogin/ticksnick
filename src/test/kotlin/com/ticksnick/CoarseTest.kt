@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -533,6 +534,21 @@ class CoarseTest {
         // Hits come from `report`'s own filler operation, so the covered one is checked directly:
         // naming an operation whose samples are all accounted for would be a false accusation.
         assertTrue(covered.hits <= r.coarse[0].fine[0])
+    }
+
+    /**
+     * A span whose every sample fell inside a child label has no own time, and it used to drop
+     * into the fold line as "never sampled" - false for an operation with a full row in the coarse
+     * table. Andrey's case: `runQuery` inside `runBatch`.
+     */
+    @Test
+    fun `a coarse operation with no own time stays in the fine table at zero`() {
+        val batch = stat(count = 2, sumNanos = 2_000_000_000, hits = 0, running = 0, inclusive = 2000, runningInclusive = 2000, name = "runBatch")
+        val text = report(listOf(batch), labelled = 2000).render()
+        val row = text.lines().firstOrNull { it.startsWith("runBatch *") }
+        assertTrue(row != null, "runBatch is not in the fine table: $text")
+        assertTrue("0%" in row!!, row)
+        assertFalse("never sampled" in text, "a sampled span was folded away as never sampled")
     }
 
     @Test

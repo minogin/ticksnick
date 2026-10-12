@@ -1994,6 +1994,12 @@ coarse heading says wall time and how much of it was paused; `Sampled` after the
 and `output.md` say the same. `DutyReport.CAREFUL_PP = 1.0` is the threshold under which nothing is
 said. Three things a reader of the code should know:
 
+- **The `Over 1t` baseline line stays over wall time.** A pause inside an execution stretches it
+  past a tick, so GC is a cause of `Over 1t` even though it is out of active time. Only the wording
+  changed: it names the column, since "run-wide 0%, of which the machine itself accounts for up to
+  11%" read as "0%, of which 11%".
+- **The fine heading is "own time, out of 52.3 s active"**, Andrey's reading of the first version
+  ("thread-time over 53.0 s active": how do I read this sentence?).
 - **The count and the longest pause are left off the header line** when the JVM confirmed less
   than one of the pauses the sampler saw: the demo printed *3.00 ms paused, longest 22.5 ms*, which
   contradicts itself, and capping would fabricate.

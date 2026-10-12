@@ -1680,7 +1680,7 @@ class Report internal constructor(
         // The clock the table is over, said once in the heading and not in every column name: a
         // thread-time is a sum over threads and `active` is the span it was summed in, and on one
         // thread the two figures match, which is the reader's check that they have understood it.
-        appendLine("ALL OPERATIONS - own time, thread-time over ${duration(activeNanos.toDouble())} active")
+        appendLine("ALL OPERATIONS - own time, out of ${duration(activeNanos.toDouble())} active")
         // The band over the column heads. Eleven columns is more than anyone reads as a list, and
         // the groups are the reading order: how much time went here, how it was spread over
         // threads, and how far the row can be trusted.
@@ -1873,11 +1873,15 @@ class Report internal constructor(
             appendLine("  * a coarse operation, showing its OWN work - its full span is in the table below")
         }
         // A note and not a warning: it is the baseline the `Over 1t` column is read against, so it
-        // belongs under the table that has that column rather than in the warning section.
+        // belongs under the table that has that column rather than in the warning section. It
+        // names the column, because "run-wide 0%, of which the machine itself accounts for up to
+        // 11%" read as "0%, of which 11%" and needed a second read (graph profiler-notes, first
+        // run). The floor stays over wall time on purpose: a pause inside an execution stretches it
+        // past a tick, so GC is a cause of `Over 1t` even though it is out of active time.
         appendLine(
             String.format(
                 Locale.ROOT,
-                "  run-wide %s, of which the machine itself accounts for up to %s (preemption and GC pauses)",
+                "  Over 1t is %s run-wide; preemption and GC pauses alone could put it at %s",
                 percent(stuckBaseline * 100), percent(machineFloor * 100)
             )
         )

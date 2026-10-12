@@ -1023,6 +1023,7 @@ Printed unconditionally under the coarse table:
 
 ```
   run-wide 99.86%, of which the machine itself accounts for up to 99.93% (preemption and GC pauses)
+  (as it read then; since 2026-10-11: "Over 1t is 99.86% run-wide; preemption and GC pauses alone could put it at 99.93%")
 ```
 
 On the sandbox run this is true and useless. Every execution was 1.4 seconds against a 1 ms step, so

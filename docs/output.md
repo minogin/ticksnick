@@ -105,7 +105,7 @@ Sections, in order, each with a heading and a blank line before it:
 ```
 (banner)            the title
 Wall time           one line, active + paused; then a Careful line per thing that is unreliable
-ALL OPERATIONS      the fine table, "own time, out of N s active", or one line saying why it is empty
+COARSE AND FINE OPERATIONS   the fine table, "own time, out of N s active time", or one line saying why it is empty
 COARSE OPERATIONS   the coarse table over wall time, present only if you placed a coarse label
 Sampled             samples, ticks, step, threads: the precision of everything above
 (warnings)          anything the run wants to tell you about itself

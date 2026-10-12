@@ -1680,7 +1680,7 @@ class Report internal constructor(
         // The clock the table is over, said once in the heading and not in every column name: a
         // thread-time is a sum over threads and `active` is the span it was summed in, and on one
         // thread the two figures match, which is the reader's check that they have understood it.
-        appendLine("ALL OPERATIONS - own time, out of ${duration(activeNanos.toDouble())} active")
+        appendLine("COARSE AND FINE OPERATIONS - own time, out of ${duration(activeNanos.toDouble())} active time")
         // The band over the column heads. Eleven columns is more than anyone reads as a list, and
         // the groups are the reading order: how much time went here, how it was spread over
         // threads, and how far the row can be trusted.

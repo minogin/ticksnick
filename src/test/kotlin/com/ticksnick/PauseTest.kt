@@ -415,7 +415,7 @@ class PauseTest {
             assertTrue(d.pausedNanos > 0, "no pause reached the duty windows")
             assertTrue(d.pausedNanos <= d.wallNanos)
             assertTrue(d.activeDuty > d.duty, "run ${d.activeDuty} against wall ${d.duty}")
-            assertTrue(" active" in rendered.lines().first { it.startsWith("ALL OPERATIONS") }, rendered)
+            assertTrue(" active" in rendered.lines().first { it.startsWith("COARSE AND FINE OPERATIONS") }, rendered)
         }
     }
 }

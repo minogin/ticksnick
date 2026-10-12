@@ -1998,8 +1998,9 @@ said. Three things a reader of the code should know:
   past a tick, so GC is a cause of `Over 1t` even though it is out of active time. Only the wording
   changed: it names the column, since "run-wide 0%, of which the machine itself accounts for up to
   11%" read as "0%, of which 11%".
-- **The fine heading is "own time, out of 52.3 s active"**, Andrey's reading of the first version
-  ("thread-time over 53.0 s active": how do I read this sentence?).
+- **The fine heading is `COARSE AND FINE OPERATIONS - own time, out of 53.0 s active time`**,
+  Andrey's, after "thread-time over 53.0 s active" ("how do I read this sentence?") and my "out of
+  53.0 s active". It names both tiers, which `ALL` only implied.
 - **The count and the longest pause are left off the header line** when the JVM confirmed less
   than one of the pauses the sampler saw: the demo printed *3.00 ms paused, longest 22.5 ms*, which
   contradicts itself, and capping would fabricate.

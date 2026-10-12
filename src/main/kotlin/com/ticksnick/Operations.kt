@@ -56,3 +56,29 @@ value class CoarseOp internal constructor(val id: Int) {
     /** `coarse#0`, and deliberately distinguishable from `fine#0`, which is a different operation. */
     override fun toString(): String = "coarse#$id"
 }
+
+/**
+ * A family of fine operations indexed by a small integer: `level[depth]`, `byType[type]`.
+ *
+ * One registration reserves [arity] consecutive ids, so the hot path is `base + i` and a bounds
+ * check - no map, no string, no allocation. The index has to be a small number known up front:
+ * a depth, a type, a size bucket. Not a node id. See [Profiler.registerFine].
+ */
+class FineOps internal constructor(val base: Int, val arity: Int) {
+    operator fun get(i: Int): FineOp {
+        if (i < 0 || i >= arity) throw IndexOutOfBoundsException("index $i of a family of $arity")
+        return FineOp(base + i)
+    }
+
+    override fun toString(): String = "fine#$base[0..${arity - 1}]"
+}
+
+/** A family of coarse operations indexed by a small integer. The coarse twin of [FineOps]. */
+class CoarseOps internal constructor(val base: Int, val arity: Int) {
+    operator fun get(i: Int): CoarseOp {
+        if (i < 0 || i >= arity) throw IndexOutOfBoundsException("index $i of a family of $arity")
+        return CoarseOp(base + i)
+    }
+
+    override fun toString(): String = "coarse#$base[0..${arity - 1}]"
+}

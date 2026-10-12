@@ -2020,6 +2020,27 @@ the batch then dropped into the fold line as "never sampled and folded away; cal
 is false for a span with a full row in the coarse table. Coarse rows now stay when their span was
 sampled at all; fine rows fold as before, since for them no own time is no samples.
 
+## Operation families: `level[depth]` · 2026-10-12
+
+Andrey's finding, on where to put labels in the graph BFS: a label on one level of the loop
+separates nothing from the query, but a label *per depth* would give time per depth, which is how a
+BFS cost grows - and that is a parameterised label, which the API did not have.
+
+**What is built.** `registerFine(name, arity)` and `registerCoarse(name, arity)` reserve `arity`
+consecutive ids in one `getAndAdd` and return a `FineOps` / `CoarseOps` with `operator get`:
+`level[depth]` is `base + depth` behind a bounds check, no map, no string, no allocation. Members
+are named `name[i]` in the report. A single registration is a family of one through the same code
+and keeps its bare name. Idempotent for the same name and arity; the same name with another arity,
+or as a single after a family, is an `IllegalStateException`, since the ids were already handed out.
+
+**The index is a small number known up front, not a value.** A depth, a type, a size bucket. The
+family comes out of the 256 fine and 64 coarse ids like everything else, so a family keyed by node
+id is wrong by construction, and the limit says so at registration.
+
+**Not measured:** the hot-path cost of `base + i` and the compare. An add and a predictable branch
+against about 40 ns for a coarse context and 2 to 3 ns for a fine hook, which is an argument; the
+bench with the CPU clock beside it is the measurement, and it has not been run with an indexed op.
+
 ## Next session: the coarse output · opened 2026-09-02
 
 Written as a handover, because the work is Andrey's to start and the context is a day old.

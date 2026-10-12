@@ -4,6 +4,7 @@ import java.util.concurrent.CountDownLatch
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -57,6 +58,32 @@ class RegistryTest {
         val b = Profiler.registerFine("test:idempotent")
         assertEquals(a, b)
         assertEquals("test:idempotent", Profiler.nameOf(a))
+    }
+
+    /** `level[depth]` is `base + depth`: consecutive ids, each with its own row name. */
+    @Test
+    fun `a family reserves consecutive ids and names each member`() {
+        val level = Profiler.registerFine("test:level", arity = 3)
+        val next = Profiler.registerFine("test:after-level")
+        for (i in 0 until 3) {
+            assertEquals(level.base + i, level[i].id)
+            assertEquals("test:level[$i]", Profiler.nameOf(level[i]))
+        }
+        assertEquals(level.base + 3, next.id, "the family's ids are not consecutive")
+        assertEquals(level.base, Profiler.registerFine("test:level", arity = 3).base, "not idempotent")
+        assertFailsWith<IndexOutOfBoundsException> { level[3] }
+        assertFailsWith<IndexOutOfBoundsException> { level[-1] }
+        assertFailsWith<IllegalStateException> { Profiler.registerFine("test:level", arity = 4) }
+        assertFailsWith<IllegalStateException> { Profiler.registerFine("test:level") }
+        assertFailsWith<IllegalArgumentException> { Profiler.registerFine("test:empty", arity = 0) }
+    }
+
+    @Test
+    fun `a coarse family works the same way`() {
+        val stage = Profiler.registerCoarse("test:stage", arity = 2)
+        assertEquals(stage.base + 1, stage[1].id)
+        assertEquals("test:stage[1]", Profiler.nameOf(stage[1]))
+        assertFailsWith<IndexOutOfBoundsException> { stage[2] }
     }
 
     /** One slot per thread, and it is the same object every time that thread asks. */

@@ -183,6 +183,18 @@ it. `Profiler.enter(op)` / `Profiler.exit(op)` exist for a boundary that is two 
 — they have no `finally`, so pair them with `Profiler.expectBalanced()` at a point the thread should
 be quiescent, which for a coarse label means *between* requests and not inside one.
 
+**A label with an index.** When the same step runs at several depths, types or sizes and you want
+them apart, register a family once and index it on the hot path:
+
+```kotlin
+val level = Profiler.registerCoarse("level", arity = 6)   // ids reserved once, rows level[0]..level[5]
+
+for (depth in 0..5) op(level[depth]) { expand(depth) }   // base + depth, and a bounds check
+```
+
+The index is a small number known up front, not a value: the family comes out of the same
+256-operation budget as everything else. `registerFine(name, arity)` is the fine twin.
+
 **If the work is handed to a pool, carry the context with it.** A context lives in the slot of the
 thread that made it, so a request that fans out leaves it behind: the helper threads run under no
 context, and the caller's span reports the time they spent as *waiting*. Wrap the pool once —

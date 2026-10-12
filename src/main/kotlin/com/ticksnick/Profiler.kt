@@ -375,12 +375,47 @@ object Profiler {
      */
     fun registerFine(name: String): FineOp = FineOp(registerFineId(name))
 
+    /**
+     * A family of [arity] fine operations under one name, indexed on the hot path: `level[depth]`.
+     *
+     * The ids are consecutive, reserved here in one step, and the rows in the report are
+     * `name[0]` to `name[arity - 1]`. The index is a small number known at registration - a depth,
+     * a type, a size bucket - and not a value: the family comes out of the same [MAX_OPERATIONS]
+     * budget as everything else. Idempotent for the same name and arity; the same name with a
+     * different arity is an error, since the ids were already handed out.
+     */
+    fun registerFine(name: String, arity: Int): FineOps =
+        FineOps(reserve(name, arity, ids, arities, nextId, names, MAX_OPERATIONS, "operations"), arity)
+
     /** The raw id, for the internals that index arrays by it. See [registerFine]. */
-    internal fun registerFineId(name: String): Int = ids.computeIfAbsent(name) {
-        val id = nextId.getAndIncrement()
-        check(id < MAX_OPERATIONS) { "more than $MAX_OPERATIONS distinct operations registered" }
-        names[id] = name
-        id
+    internal fun registerFineId(name: String): Int = reserve(name, 1, ids, arities, nextId, names, MAX_OPERATIONS, "operations")
+
+    /** Arity per registered name, so a second registration can be checked against the first. */
+    private val arities = ConcurrentHashMap<String, Int>()
+    private val coarseArities = ConcurrentHashMap<String, Int>()
+
+    /**
+     * [arity] consecutive ids for [name], once. A single operation is a family of one, and keeps
+     * its bare name; a family's members are named `name[i]`.
+     */
+    private fun reserve(
+        name: String, arity: Int, ids: ConcurrentHashMap<String, Int>, arities: ConcurrentHashMap<String, Int>,
+        next: AtomicInteger, names: Array<String?>, max: Int, what: String,
+    ): Int {
+        require(arity > 0) { "a family needs at least one member, not $arity" }
+        val base = ids.computeIfAbsent(name) {
+            val b = next.getAndAdd(arity)
+            check(b + arity <= max) { "more than $max distinct $what registered" }
+            if (arity == 1) names[b] = name
+            else for (i in 0 until arity) names[b + i] = "$name[$i]"
+            arities[name] = arity
+            b
+        }
+        val registered = arities[name]
+        check(registered == arity) {
+            "$name was registered with arity $registered and is asked for again with arity $arity"
+        }
+        return base
     }
 
     internal fun nameOf(id: Int): String = if (id in 0 until MAX_OPERATIONS) names[id] ?: "op#$id" else "op#$id"
@@ -415,13 +450,15 @@ object Profiler {
      */
     fun registerCoarse(name: String): CoarseOp = CoarseOp(registerCoarseId(name))
 
+    /** A family of coarse operations, indexed on the hot path. The coarse twin of [registerFine] with an arity. */
+    fun registerCoarse(name: String, arity: Int): CoarseOps = CoarseOps(
+        reserve(name, arity, coarseIds, coarseArities, nextCoarseId, coarseNames, MAX_COARSE_TYPES, "coarse operations"),
+        arity,
+    )
+
     /** The raw id, for the internals that index arrays by it. See [registerCoarse]. */
-    internal fun registerCoarseId(name: String): Int = coarseIds.computeIfAbsent(name) {
-        val id = nextCoarseId.getAndIncrement()
-        check(id < MAX_COARSE_TYPES) { "more than $MAX_COARSE_TYPES distinct coarse operations registered" }
-        coarseNames[id] = name
-        id
-    }
+    internal fun registerCoarseId(name: String): Int =
+        reserve(name, 1, coarseIds, coarseArities, nextCoarseId, coarseNames, MAX_COARSE_TYPES, "coarse operations")
 
     internal fun coarseNameOf(type: Int): String =
         if (type in 0 until MAX_COARSE_TYPES) coarseNames[type] ?: "coarse#$type" else "coarse#$type"

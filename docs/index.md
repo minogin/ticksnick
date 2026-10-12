@@ -92,6 +92,7 @@ with the duty-cycle bound printed beside it.
 | [plan.md](plan.md) | work we committed to, phase by phase, rewritten as each closes to say what was actually built | you want to know where we are |
 | [findings.md](findings.md) | only things we measured, each with the measurement that produced it | you want to know what is true, and why we believe it |
 | [case.md](case.md) | observations of existing tools failing at something, and where they are better than us | you want to know why this exists at all |
+| [stories.md](stories.md) | findings the profiler made about programs, kept for the articles, talks and workshop: "nice" and "top" | you are writing about it |
 | [trial-calcite.md](trial-calcite.md) |  Apache Calcite — the first end-to-end result on foreign code, and where the coarse tier was checked against a stopwatch the harness already had | you want the first end-to-end result on code we did not write |
 | [trial-lucene.md](trial-lucene.md) | the same, Apache Lucene — concurrent, the first head-to-head against a timed-wrapper profiler, and where the coarse tier meets the edge of its own tier | you want the second, and the strongest argument for sampling we have |
 | [trial-netty.md](trial-netty.md) | the same, Netty — event loops, the first test of the thread-state column on foreign code, and the negative control for the coarse tier's waiting column: it reads 0.0% because a loopback request really does not wait | you want the third, and what a flame graph does with a handler chain |

@@ -73,6 +73,11 @@ Each doc has one job. Write to the right one as you go, not at the end.
   the docs are read by people who do not. This rule exists because the project was renamed and the
   reasoning behind it lived nowhere else for six commits.
 * `docs/findings.md` — only things we measured, with the measurement.
+* `docs/stories.md` — **whenever the profiler finds something about a program** that a reader would
+  want to know, record it there for the articles, the talks and the workshop: "nice" if a standard
+  tool could have found it too, "top" if the information is not in a stack and no flame graph could.
+  Say where it was seen and where the numbers are. Findings about the profiler itself stay in
+  `findings.md`.
 
 ## Do not spend time on unnecessary builds
 * If you only changed the docs, do not run the build and test.

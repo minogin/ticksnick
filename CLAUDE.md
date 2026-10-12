@@ -47,6 +47,10 @@
   wording or naming. When you do ask, the options must be actually different, not shades of the same
   idea. Never bury a real choice in a paragraph, which is what this rule originally existed to stop.
 
+## Coding rules
+* Constants go at the top of the file, as top-level `const val` above the class, not in a companion
+  object at the bottom. They are the knobs a reader tunes, so they should be the first thing seen.
+
 ## Keeping the docs
 Each doc has one job. Write to the right one as you go, not at the end.
 * `docs/case.md` — **whenever a session shows an existing tool failing at something**, record it:

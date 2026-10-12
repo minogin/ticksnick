@@ -208,11 +208,11 @@ class OpSlot(
      * keep small. The work here is a handful of plain writes with a single writer.
      */
     @PublishedApi
-    internal fun recordSpan(type: Int, nanos: Long) {
+    internal fun recordSpan(type: Int, nanos: Long, parentType: Int = -1) {
         if (type < 0 || type >= MAX_COARSE_TYPES) return
         val aggs = coarseAgg ?: arrayOfNulls<CoarseAgg>(MAX_COARSE_TYPES).also { coarseAgg = it }
         val a = aggs[type] ?: CoarseAgg(type).also { aggs[type] = it }
-        a.record(nanos)
+        a.record(nanos, parentType)
     }
 
     /** How deeply this thread is nested in coarse executions. Zero when it is inside none. */
@@ -643,7 +643,7 @@ object Profiler {
         if (ctx.type != op.id) mismatch(nameOf(op), coarseNameOf(ctx.type))
         s.setContextOpaque(ctx.parent)
         ctx.markClosed()
-        s.recordSpan(ctx.type, System.nanoTime() - ctx.startNanos)
+        s.recordSpan(ctx.type, System.nanoTime() - ctx.startNanos, ctx.parent?.type ?: -1)
     }
 
     /** One closing call that did not match what was open. Counted with the leaks, and fatal under strict. */
@@ -908,6 +908,8 @@ object Profiler {
                 activeTicks = s.coarseActiveTicks[t],
                 fine = LongArray(MAX_OPERATIONS + 1) { s.pairHits[t * (MAX_OPERATIONS + 1) + it] },
                 staleHits = s.coarseStaleHits[t],
+                byParentCount = a?.byParentCount ?: LongArray(MAX_COARSE_TYPES + 1),
+                byParentNanos = a?.byParentNanos ?: LongArray(MAX_COARSE_TYPES + 1),
             )
         }
         return Report(

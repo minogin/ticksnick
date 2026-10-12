@@ -2033,6 +2033,34 @@ the operation - fine means "I cannot afford 40 ns here" - so a user who is unsur
 report says when it was wrong; promoting is one word and the row stays where it was. Splitting the
 tables would move a row for a reason that has nothing to do with the program.
 
+## The coarse tree · 2026-10-12
+
+Andrey, reading the `was:` lines on the graph benchmark: *"would it not be more clear if we put
+them in the table as kind of hierarchy?"* The lines were a flat cross-tabulation standing in for a
+tree the report could not draw: `run`, `runBatch` and `query` each printed the same breakdown,
+because nothing said one contained the next.
+
+**What is built.** `CoarseAgg` records, beside each span, the type of the execution it was nested
+in: two longs per span, `byParentCount` and `byParentNanos`, indexed `parent + 1` with 0 for none.
+`recordSpan` takes the parent type; both closers pass `ctx.parent?.type`. `CoarseStat` carries the
+two arrays and exposes `rootCount`, `countUnder(parent)`, `spanNanosUnder(parent)`. The report
+draws the tree under the coarse table in place of the `was:` lines: roots are types with executions
+under no parent, children are types with executions under this one, ordered by span under it, with
+executions and span **per parent** and exact. The fine breakdown is per type and sampled, so it is
+printed on the leaves only; a parent's would be its children's over again. A type under two parents
+appears under each; a type nested in itself is cut at the type. The `parallelism:` line sits under a
+root. The *"N% of thread-time inside operations INCLUDING what it contains"* line went with the
+`was:` lines; the fine table's starred rows and the tree between them say the same.
+
+**Cost.** Two array increments per coarse span, on a path that already pays an allocation and two
+clock reads. 1 KB per type per thread, lazily, beside the 2.5 KB histogram. Not measured by the
+bench, for the reason the families were not: an argument, and a small one.
+
+**A limit, known.** A parent whose own fine work is not under any child - a lookup in `query`
+outside every `level` - shows nothing of it in the tree, since the fine breakdown is inclusive and
+printed on leaves. The starred row in the fine table has that own time. If it matters, the sampler
+can credit fine hits to the innermost coarse type only, and the tree can print a parent's own line.
+
 ## Operation families: `level[depth]` · 2026-10-12
 
 Andrey's finding, on where to put labels in the graph BFS: a label on one level of the loop

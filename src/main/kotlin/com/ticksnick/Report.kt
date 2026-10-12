@@ -372,7 +372,20 @@ class CoarseStat internal constructor(
     val selfPeak: Int = 0,
     /** Distinct threads that ran an execution of this operation. See [Profiler.coarseThreadsOf]. */
     val threads: Int = 0,
+    /** Executions by the type they were nested in, index `parent + 1`, 0 for none. See [CoarseAgg]. */
+    internal val byParentCount: LongArray = LongArray(MAX_COARSE_TYPES + 1),
+    /** The spans of those executions, summed the same way. */
+    internal val byParentNanos: LongArray = LongArray(MAX_COARSE_TYPES + 1),
 ) {
+    /** Executions that were nested in no coarse operation. */
+    val rootCount: Long get() = byParentCount[0]
+
+    /** Executions nested in an execution of [parent]. */
+    fun countUnder(parent: Int): Long = byParentCount[parent + 1]
+
+    /** Their spans, summed. */
+    fun spanNanosUnder(parent: Int): Long = byParentNanos[parent + 1]
+
     /** Mean measured duration of one execution. Exact, not sampled. */
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -1280,7 +1293,8 @@ class Report internal constructor(
             appendLine("    is an upper bound on the speedup rather than the speedup itself")
             appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
             appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
-            appendLine("  the 'was:' lines are the cross-tabulation: which fine operations ran under this one")
+            appendLine("  the tree under the table is which coarse operation ran under which, with the exact spans")
+            appendLine("    under each parent; the fine steps on a leaf are its cross-tabulation, sampled")
         }
     }
 
@@ -1343,50 +1357,56 @@ class Report internal constructor(
             )
         }
         appendLine("-".repeat(COARSE_WIDTH))
-        // Share and occupancy, which the fine table has had all along and this one did not.
+        // The tree: which coarse operation ran under which, with the exact spans under each parent,
+        // and the fine steps as the leaves. It replaces the `was:` lines, which were a flat
+        // cross-tabulation standing in for a tree the report could not draw: `run`, `runBatch` and
+        // `query` each printed the same breakdown, because nothing said one contained the next.
+        // Andrey, 2026-10-12: "would it not be more clear if we put them in the table as kind of
+        // hierarchy?"
         //
-        // **A coarse label gives you everything a fine one does and more** — the same hits, the same
-        // ticks, plus measured spans and this breakdown — so the only reason to choose fine is the
-        // ~40 ns a context costs. That was true of the data and not of the printed report, which
-        // silently lost two columns when an operation was promoted. Nothing was missing; nobody had
-        // printed it.
-        //
-        // On its own line rather than in the table because these two need nineteen more columns,
-        // and the table had already grown once to take `Total`. Grouped with the `was:` line, since
-        // "how much of the run" and "what it was made of" are the same question at two levels of
-        // detail. This occupancy is also no longer the sort key: the table is ordered by the exact
-        // span total above, and these lines follow that order.
-        for (c in seen.sortedByDescending { it.spanSumNanos }) {
-            if (c.inclusiveHits == 0L) continue
+        // Executions and spans are per (parent, child) and exact. The fine breakdown is per type
+        // and sampled, so it is printed on the leaves only - a parent's would be its children's
+        // over again. A type under two parents appears under each with its figures under that one.
+        // Nesting of a type inside itself is cut at the type, not followed.
+        val byId = seen.associateBy { it.type }
+        fun childrenOf(parent: Int): List<CoarseStat> =
+            seen.filter { it.type != parent && it.countUnder(parent) > 0 }
+                .sortedByDescending { it.spanNanosUnder(parent) }
+
+        fun StringBuilder.node(c: CoarseStat, parent: Int?, depth: Int, path: Set<Int>) {
+            val count = if (parent == null) c.rootCount else c.countUnder(parent)
+            val nanos = if (parent == null) {
+                c.spanSumNanos - (0 until MAX_COARSE_TYPES).sumOf { c.spanNanosUnder(it) }
+            } else c.spanNanosUnder(parent)
+            val children = if (depth >= MAX_COARSE_DEPTH) emptyList() else childrenOf(c.type).filter { it.type !in path }
+            val leaf = children.isEmpty()
+            val fine = if (!leaf || c.inclusiveHits == 0L) "" else {
+                val parts = operations
+                    .map { it.name to c.fine[it.id] }
+                    .plus("unlabelled" to c.fine[NO_OP_INDEX])
+                    .filter { it.second > 0 }
+                    .sortedByDescending { it.second }
+                val shown = parts.take(6).joinToString(", ") {
+                    it.first + " " + percent(it.second * 100.0 / c.inclusiveHits)
+                }
+                val rest = parts.size - 6
+                if (parts.isEmpty()) "" else "   " + shown + (if (rest > 0) ", and $rest more" else "")
+            }
             appendLine(
                 String.format(
-                    Locale.ROOT,
-                    "  %s: %s of the thread-time inside operations INCLUDING what it contains, %s of it",
-                    c.name, percent(shareOf(c) * 100), threadTime(c.inclusiveHits * stepNanos)
+                    Locale.ROOT, "%-30s %,11d %10s%s",
+                    "  ".repeat(depth + 1) + c.name, count, duration(nanos.toDouble()), fine
                 )
             )
-            // The word the report never said, and the reason a reader with a parallelism question
-            // could not answer it from three columns about parallelism. Two questions, not one, and
-            // in prose they can be told apart:
-            //
-            //   - threads per execution - a property of the code. Is *this request* split at all?
-            //   - executions at once     - a property of the load. How many are in the system?
-            //
-            // `inside 1.00` reads as "no parallelism" and is compatible with a program running as
-            // parallel as its thread count allows, which is exactly what the sandbox was doing.
-            // Not on a single-threaded run, where every number on it is fixed by construction:
-            // one thread per execution, one execution at once, over the one thread there was. The
-            // only figure that would vary is `on a CPU`, and with one thread inside it is exactly
-            // `1 - waiting`, which is a column in the table above. A line that can only restate its
-            // neighbours is how a report earns the wall-of-text complaint - three of them per
-            // operation, in the report a first run produces.
-            if (threads > 1 && (!c.inside.isNaN() || !c.inFlight.isNaN())) {
+            // The two parallelism questions, under the node they are about, and only on a run
+            // with more than one thread: on one thread every number on the line is fixed by
+            // construction, and a line that can only restate its neighbours is how a report earns
+            // the wall-of-text complaint.
+            if (parent == null && threads > 1 && (!c.inside.isNaN() || !c.inFlight.isNaN())) {
                 val perExecution =
                     if (c.inside.isNaN()) "thread count per execution unknown"
                     else String.format(
                         Locale.ROOT, "%.2f thread per execution%s", c.inside,
-                        // The ceiling idiom the column used, kept: a `working` the duty cycle
-                        // contradicts is printed over the most the machine can support.
                         if (c.working.isNaN()) ""
                         else if (workingIsContradicted(c))
                             String.format(
@@ -1401,20 +1421,19 @@ class Report internal constructor(
                         Locale.ROOT, "; %.2f executions at once over %s",
                         c.inFlight, plural(threads.toLong(), "thread")
                     )
-                appendLine("  ${c.name} parallelism: $perExecution$atOnce")
+                appendLine("  ".repeat(depth + 1) + "  parallelism: $perExecution$atOnce")
             }
-            val parts = operations
-                .map { it.name to c.fine[it.id] }
-                .plus("unlabelled" to c.fine[NO_OP_INDEX])
-                .filter { it.second > 0 }
-                .sortedByDescending { it.second }
-            if (parts.isEmpty()) continue
-            val shown = parts.take(6).joinToString(", ") {
-                it.first + " " + percent(it.second * 100.0 / c.inclusiveHits)
-            }
-            val rest = parts.size - 6
-            appendLine("  ${c.name} was: $shown" + if (rest > 0) ", and $rest more" else "")
+            for (child in children) node(child, c.type, depth + 1, path + c.type)
         }
+        val roots = seen.filter { it.rootCount > 0 }.sortedByDescending { it.spanSumNanos }
+        if (roots.isNotEmpty()) {
+            appendLine(String.format(Locale.ROOT, "%-30s %11s %10s   %s", "  Nested as", "Executions", "Total", "made of, on the leaves"))
+            for (r in roots) node(r, null, 0, emptySet())
+        }
+        // An operation whose every execution was nested in one that did not complete has no root
+        // and no parent in `seen`; it is still in the table above, and said here so it is not lost.
+        val orphans = seen.filter { c -> c.rootCount == 0L && (0 until MAX_COARSE_TYPES).none { p -> c.countUnder(p) > 0 && byId.containsKey(p) } }
+        if (orphans.isNotEmpty()) appendLine("  not in the tree, nested in nothing that completed: " + orphans.joinToString { it.name })
         if (seen.any { it.inclusiveHits > 0 }) appendLine("-".repeat(COARSE_WIDTH))
         // The one signal for work escaping its context, which neither the floor check nor the
         // balance check can see. Stated as a measurement with both readings, because it cannot tell

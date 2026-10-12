@@ -116,7 +116,7 @@ HOW TO READ THIS    five lines: the things that will make you draw the wrong con
 you — that `thread-time` is summed across threads and is not CPU, that `waiting` is waiting another
 thread caused, that `wall-time` is *not* summed and dividing the two gives the threads inside at
 once, that a share is not a counterfactual, and that *on a CPU* bounds the speedup from above rather
-than being it. Everything else — how `noise` is computed, the convoy arithmetic, what the `was:`
+than being it. Everything else — how `noise` is computed, the convoy arithmetic, what the tree's
 lines are — is reference, and reference belongs here, where it is read once instead of skipped thirty
 times.
 
@@ -347,9 +347,22 @@ Coarse operation           Executions    Total v       Mean        p50        p9
 -----------------------------------------------------------------------------------------------------------------------
 request                     3,203,348    95.78 s    29.9 us    20.5 us    45.1 us   180.2 us   17.01 ms   100.0% / 0.0%
 -----------------------------------------------------------------------------------------------------------------------
-  request: 90.834% of thread-time inside operations, 95.78 s occupancy
-  request parallelism: 1.00 thread per execution, 1.00 of it on a CPU; 7.96 executions at once over 8 threads
-  request was: flushBatch 38.7%, validateRecord 37.9%, parseRecord 10.3%, unlabelled 7.2%, indexRecord 5.9%
+  Nested as                     Executions      Total   made of, on the leaves
+  request                        2,058,556     47.8 s   flushBatch 36.3%, validateRecord 35.2%, parseRecord 12.9%, unlabelled 8.14%, indexRecord 7.51%
+    parallelism: 1.00 thread per execution, 1.00 of it on a CPU; 7.97 executions at once over 8 threads
+```
+
+With nested labels the tree is the point. The graph benchmark, `run` around the measured batches,
+`runBatch` around each, `query` around each query and a family `level[0..5]` around each depth:
+
+```
+  Nested as                     Executions      Total   made of, on the leaves
+  run                                    1     12.2 s
+    runBatch                             1     12.2 s
+      query                              1     12.2 s
+        level[4]                         1     9.06 s   visitedAdd 81.3%, node 11.8%, nextAdd 1.95%, id 0.994%
+        level[5]                         1     2.55 s   node 95.0%, id 5.05%
+        level[3]                         1     584 ms   visitedAdd 71.0%, node 17.7%, nextAdd 6.52%, id 1.72%
 ```
 
 | column | what it is | what to watch for |
@@ -358,8 +371,9 @@ request                     3,203,348    95.78 s    29.9 us    20.5 us    45.1 u
 | **total** | the measured spans summed, and what the table is sorted by | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** — a parent contains its children, so the outermost span always leads. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
 | **mean, p50, p90, p99, max** | **measured**, two timestamps per execution | the only numbers in the whole report that are not sampled. Percentiles come from a log-bucket histogram: **at most 12.5% high, never low** |
 | **runnable / wait** | the same split as the fine table, over the samples caught anywhere inside the span | `0.0%` waiting here because the demo never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
-| **`… parallelism:` line** | the two parallelism questions, in words | see below — they are different questions and used to be adjacent columns |
-| **`… was:` line** | the cross-tabulation | which fine operations ran under this one. Neither tier produces this alone |
+| **the tree** | which coarse operation ran under which: executions and spans under each parent, **exact** | a type under two parents appears under each. The figures are per parent, so a child's rows add up to its row in the table |
+| **made of, on the leaves** | the cross-tabulation, **sampled**: which fine operations ran under this one | on the leaves only. A parent's would be its children's over again. Neither tier produces this alone |
+| **`parallelism:` line** | the two parallelism questions, in words, under a root | see below — they are different questions and used to be adjacent columns |
 
 ### The two parallelisms, which are not the same question
 

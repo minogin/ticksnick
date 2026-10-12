@@ -184,12 +184,24 @@ internal class CoarseAgg(@JvmField val type: Int) {
     @JvmField var maxNanos: Long = 0
     @JvmField val hist = LongArray(SpanHistogram.BUCKETS)
 
-    fun record(nanos: Long) {
+    /**
+     * Executions and their spans by the type of the execution they were nested in, index
+     * `parent + 1`, with 0 for "none". The report draws the coarse tree from this: which operation
+     * ran under which, with the exact spans under each parent. Two more longs per span, on a path
+     * that already pays for an allocation and two clock reads.
+     */
+    @JvmField val byParentCount = LongArray(MAX_COARSE_TYPES + 1)
+    @JvmField val byParentNanos = LongArray(MAX_COARSE_TYPES + 1)
+
+    fun record(nanos: Long, parentType: Int) {
         count++
         sumNanos += nanos
         if (nanos < minNanos) minNanos = nanos
         if (nanos > maxNanos) maxNanos = nanos
         hist[SpanHistogram.bucketOf(nanos)]++
+        val p = if (parentType in 0 until MAX_COARSE_TYPES) parentType + 1 else 0
+        byParentCount[p]++
+        byParentNanos[p] += nanos
     }
 
     fun mergeFrom(o: CoarseAgg) {
@@ -198,6 +210,10 @@ internal class CoarseAgg(@JvmField val type: Int) {
         if (o.minNanos < minNanos) minNanos = o.minNanos
         if (o.maxNanos > maxNanos) maxNanos = o.maxNanos
         for (i in hist.indices) hist[i] += o.hist[i]
+        for (i in byParentCount.indices) {
+            byParentCount[i] += o.byParentCount[i]
+            byParentNanos[i] += o.byParentNanos[i]
+        }
     }
 
     fun reset() {
@@ -206,6 +222,8 @@ internal class CoarseAgg(@JvmField val type: Int) {
         minNanos = Long.MAX_VALUE
         maxNanos = 0
         hist.fill(0L)
+        byParentCount.fill(0L)
+        byParentNanos.fill(0L)
     }
 }
 
@@ -242,6 +260,6 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
         // window is a nanosecond or two against a 1 ms sampling step, so swapping these two lines
         // leaves the suite green. Reasoned, not measured, and left in the safe order.
         ctx.markClosed()
-        slot.recordSpan(op.id, System.nanoTime() - ctx.startNanos)
+        slot.recordSpan(op.id, System.nanoTime() - ctx.startNanos, parent?.type ?: -1)
     }
 }

@@ -331,18 +331,22 @@ class CoarseTest {
         assertTrue("NOT CPU" in text, "the traps went missing")
         assertTrue("noise is 1/sqrt(hits)" in text, "the full legend was not printed")
         assertTrue("worth 275x when" in text, "the counterfactual argument was not printed")
-        assertTrue("the 'was:' lines are the cross-tabulation" in text, "the coarse half was not printed")
+        assertTrue("the tree under the table is which coarse operation ran under which" in text, "the coarse half was not printed")
     }
 
     private fun stat(
         count: Long, sumNanos: Long, hits: Long, running: Long,
         inclusive: Long = hits, runningInclusive: Long = running,
         instanceTicks: Long = inclusive, activeTicks: Long = instanceTicks,
-        staleHits: Long = 0, name: String = "req",
+        staleHits: Long = 0, name: String = "req", id: Int = 0,
+        /** Which coarse type every execution was nested in; -1 for none. */
+        parent: Int = -1,
     ) = CoarseStat(
-        0, name, count, sumNanos, 0, 0, LongArray(SpanHistogram.BUCKETS),
+        id, name, count, sumNanos, 0, 0, LongArray(SpanHistogram.BUCKETS),
         hits, running, inclusive, runningInclusive, instanceTicks, activeTicks,
         LongArray(MAX_OPERATIONS + 1), staleHits,
+        byParentCount = LongArray(MAX_COARSE_TYPES + 1).also { it[parent + 1] = count },
+        byParentNanos = LongArray(MAX_COARSE_TYPES + 1).also { it[parent + 1] = sumNanos },
     )
 
     /**
@@ -550,6 +554,27 @@ class CoarseTest {
         assertTrue("runBatch *: coarse, with no own time - every sample inside it was in an operation above" in text, text)
         assertTrue("* a coarse operation" in text, "the star is used and not explained")
         assertFalse("never sampled" in text, "a sampled span was folded away as never sampled")
+    }
+
+    /**
+     * The tree: `query` nested in `batch` nested in `run`, each taking all of the time of the one
+     * around it. Three rows, indented, the fine steps on the leaf only, and no `was:` line.
+     */
+    @Test
+    fun `nested coarse operations are drawn as a tree with the fine steps on the leaves`() {
+        val run = stat(count = 1, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "run", id = 0)
+        val batch = stat(count = 1, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "batch", id = 1, parent = 0)
+        val query = stat(count = 3, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "query", id = 2, parent = 1)
+        query.fine[0] = 3000   // every sample under query was inside the one fine operation
+        val text = report(listOf(run, batch, query), labelled = 3000).render()
+        val lines = text.lines()
+        val iRun = lines.indexOfFirst { it.startsWith("  run ") }
+        val iBatch = lines.indexOfFirst { it.startsWith("    batch ") }
+        val iQuery = lines.indexOfFirst { it.startsWith("      query ") }
+        assertTrue(iRun in 0 until iBatch && iBatch < iQuery, "the tree is not drawn in order: $text")
+        assertTrue("fine 100%" in lines[iQuery], "the leaf carries no fine breakdown: ${lines[iQuery]}")
+        assertFalse("fine 100%" in lines[iBatch], "a parent repeats its children's breakdown: ${lines[iBatch]}")
+        assertFalse(" was: " in text, "the flat lines are still printed")
     }
 
     @Test

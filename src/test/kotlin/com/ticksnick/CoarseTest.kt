@@ -320,7 +320,7 @@ class CoarseTest {
         assertTrue("noise is 1/sqrt(hits)" !in text, "the full legend printed by default")
         // The legend section itself, which is the thing that was thirty-seven lines.
         val legendLines = text.lines().dropWhile { !it.startsWith("HOW TO READ THIS") }
-            .filter { it.isNotBlank() }
+            .filter { it.isNotBlank() && !it.startsWith("=") }   // the report's closing rule is not legend
         assertTrue(legendLines.size <= 7, "the default legend is ${legendLines.size} lines, not a handful")
     }
 

@@ -27,6 +27,24 @@ and level 5, with six times the nodes, is 19.8%: the cost of a level is its edge
 level has none. The same frames run at every depth, so a flame graph shows one BFS; the depth is a
 loop variable, not a frame.
 
+### The resizes, found by a column: a quarter of a 13 ns step is in executions over a millisecond
+*2026-10-12, the graph benchmark. Numbers in its `docs/profiler-notes.md`.*
+
+`Over 1t` is the share of an operation's time inside executions that outlived a sampling tick.
+`next.add(toId)` on an `ArrayList` is 13 ns a call and reads 27.5% there; `visited.add` on a
+`HashSet` is 227 ns and reads 11%, 0.8 s of the query. Those are the doublings: copying a
+reference array of up to 13 million, and rehashing a set of 16 million. A stack profiler sees
+`ArrayList.grow` and `HashMap.resize` as frames with a share; it cannot say that share is a handful
+of executions a hundred thousand times longer than the rest. Conjecture on the cause; the number
+is measured.
+
+### A BFS level is made of different steps at different depths
+*2026-10-12, the graph benchmark. Numbers in its `docs/profiler-notes.md`.*
+
+The coarse family `level[0..5]` crossed with the fine steps: level 5 is 95% node lookup, level 4
+is 81% hash insert, level 1 is 100% hash insert. One run, one table. A flame graph has the same
+frames at every depth and no way to split them by a loop variable.
+
 ### The identity that matters is a field, not a frame
 *Lucene trial, [trial-lucene.md](trial-lucene.md); the general case in [case.md](case.md).*
 
@@ -63,8 +81,9 @@ Fine labels on the two steps of the BFS, `node` around `graph.node(id)` on a box
 | `node`, the lookup | 32.0% | 16,038,234 nodes | 199 ns per lookup |
 | the filter and the loop itself | 2.0% | 16,038,234 nodes | 12 ns per node |
 
-One `visited.add` of a boxed `Long` into a set growing to 16 million costs the same as one lookup in
-a map of 20 million: about 200 ns, one random access into a hash table that does not fit in cache,
+A later run split the edge loop: `visited.add` alone is 227 ns per edge and the `ArrayList` append
+13 ns, so the hash insert is the whole of it. One `visited.add` of a boxed `Long` into a set growing
+to 16 million costs the same as one lookup in a map of 20 million: about 200 ns, one random access into a hash table that does not fit in cache,
 with the pointer chase and the boxing behind each. The edge loop wins on count, not on unit cost -
 and the count is 32 million, not 250 million: only levels 0 to 4 expand, 2.6 million of the 16
 million visited nodes, and the 13 million at level 5 are looked up and never expanded.

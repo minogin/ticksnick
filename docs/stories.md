@@ -52,12 +52,25 @@ that may be the more honest article.
 ## Nice ones: interesting on their own
 
 ### One hash lookup costs half as much as twelve set inserts
-*2026-10-12, the graph benchmark. Numbers to be added from Andrey's report.*
+*2026-10-12, the graph benchmark, one query at depth 5. Numbers in its `docs/profiler-notes.md`.*
 
-Per visited node, `graph.node(id)` on a boxed `HashMap<Long, Node>` against about twelve
-`visited.add` calls: the lookup is half the cost of all twelve. Per unit, six times dearer. The
-reason is the pointer chase - bucket, entry, boxed key, node, list, backing array, each waiting for
-the last - and that chain is exactly what CSR removes. Conjecture until CSR is measured.
+Per visited node, `graph.node(id)` on a boxed `HashMap<Long, Node>` against 12.5 `visited.add`
+calls on average (250,035,321 edges over 20,000,000 nodes):
+
+| step | share | per node | per unit |
+|---|---|---|---|
+| `addUnvisited`, the edge loop | 65.8% | 413 ns | 33 ns per edge |
+| `node`, the lookup | 32.7% | 205 ns | 205 ns per lookup |
+| the filter and the loop itself | 1.4% | 9 ns | |
+
+One lookup is half the cost of twelve inserts; per unit it is six times dearer. The reason is the
+pointer chase - bucket, entry, boxed key, node, list, backing array, each waiting for the last -
+and that chain is exactly what CSR removes. Conjecture until CSR is measured.
+
+Also in that report, not yet explained: 13.8% of the edge loop's time is inside executions that
+lasted over a tick, against a machine floor of 2.8%. One node's edge loop is 413 ns, so an
+execution over a millisecond is something else - a `HashSet` rehash at 16 million entries is the
+candidate. Conjecture.
 
 ### GC pauses are a tenth of the run, and the sampler stops with everything else
 *2026-10-01, the graph benchmark, `docs/profiler-notes.md` there; the measurement in

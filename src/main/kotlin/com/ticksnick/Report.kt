@@ -60,24 +60,25 @@ fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, required
     // different complaints with different remedies. Saying "the number would describe the
     // instrument" about an operation whose per-execution overhead is a comfortable 4% is simply
     // false, and a warning that misdiagnoses is worse than one that does not fire.
+    //
+    // Three lines: the fact, the reason, the fix. It was five, and Andrey read it on a label he had
+    // put on a 40 ns lookup: "shorter, less verbose and more clear".
     val shareBound = requiredNanos > Report.COARSE_FLOOR_NANOS
+    val overhead = Report.COARSE_CONTEXT_NANOS / meanNanos * 100
     val why = if (shareBound) String.format(
         Locale.ROOT,
-        "    It runs often enough that %,d contexts at about %.0f ns come to over 1%% of the whole run,%n" +
-                "    so the program you measured is not the program you started with. Per execution the%n" +
-                "    overhead is only %.1f%%, so the label is accurate - there is just too much of it.",
-        count, Report.COARSE_CONTEXT_NANOS, Report.COARSE_CONTEXT_NANOS / meanNanos * 100
+        "    Accurate per execution (%.1f%% overhead), but %,d contexts at %.0f ns are over 1%% of the run.",
+        overhead, count, Report.COARSE_CONTEXT_NANOS
     ) else String.format(
         Locale.ROOT,
-        "    A context costs about %.0f ns to allocate, timestamp and stamp, which is %.0f%% of an%n" +
-                "    operation this size - the number would describe the instrument as much as the code.",
-        Report.COARSE_CONTEXT_NANOS, Report.COARSE_CONTEXT_NANOS / meanNanos * 100
+        "    A context costs about %.0f ns, which is %.0f%% of an operation this size.",
+        Report.COARSE_CONTEXT_NANOS, overhead
     )
     return String.format(
         Locale.ROOT,
-        "%s: %,d executions averaging %s, under the %s a coarse label needs here.%n%s%n" +
-                "    Use a fine label, op(id) { }, or move the coarse label out to a batch of these.",
-        name, count, duration(meanNanos), duration(requiredNanos), why
+        "%s: %,d coarse executions of %s; a coarse label needs %s here.%n%s%n" +
+                "    Use a fine label, op(%s) { }, or put the coarse label around a batch of these.",
+        name, count, duration(meanNanos), duration(requiredNanos), why, name
     )
 }
 

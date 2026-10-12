@@ -451,7 +451,8 @@ class CoarseTest {
         // "200 ns" and not "200.0 ns": durations print to three significant digits, so the fourth
         // one - which for a sampled or bucketed number is noise - never reaches the page.
         assertTrue(msg.contains("200 ns"), "the message does not name the measured duration: $msg")
-        assertTrue(msg.contains("op(id)"), "the message does not say what to do instead: $msg")
+        assertTrue(msg.contains("op(req) { }"), "the message does not say what to do instead: $msg")
+        assertTrue(msg.lines().size == 3, "three lines - the fact, the reason, the fix: $msg")
     }
 
     @Test

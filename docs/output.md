@@ -596,8 +596,15 @@ from `hits ÷ calls`, so it carries a statistical bound and a bias allowance to 
 innocent label. Here the duration is measured, so no slack is needed. The only sampled input is the
 share, and it is taken a standard error low before the second condition can fire.
 
-**What to do:** use a fine label — `op(id) { }` — or move the coarse label outward to a batch of
-these. A warning, never fatal.
+Three lines: the fact, the reason, the fix.
+
+```
+  1. id: 16,038,234 coarse executions of 938 ns; a coarse label needs 3.71 us here.
+     Accurate per execution (4.3% overhead), but 16,038,234 contexts at 40 ns are over 1% of the run.
+     Use a fine label, op(id) { }, or put the coarse label around a batch of these.
+```
+
+**What to do:** what the last line says. A warning, never fatal.
 
 ### `! N executions lasted over a tick`
 

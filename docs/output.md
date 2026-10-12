@@ -567,8 +567,9 @@ Same-thread operations — a query planner, a synchronous handler chain — are 
 ### `! … below the 50 ns floor`
 
 ```
-  ! parseRecord: 288,514,362 calls at under 29.3 ns each, below the 50 ns floor.
-    Label the enclosing loop instead and divide by the iteration count.
+  1. parseRecord: 305,407,552 calls at under 39.0 ns each, below the 50 ns floor.
+     The hook is a visible fraction of it, the sampler reads it 5-9% low, and C2 can move work across adjacent short labels.
+     Label the enclosing loop instead, op(parseRecord, times = n) { }, and the per-call figures stay in this operation's units.
 ```
 
 The label is on something too small for the instrument to describe: the hook is a visible fraction

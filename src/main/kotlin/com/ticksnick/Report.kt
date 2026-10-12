@@ -18,14 +18,11 @@ fun isTooSmall(hits: Long, calls: Long, stepNanos: Double): Boolean =
  * they cannot check for themselves.
  */
 fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): String = String.format(
+    // Three lines: the fact, the reason, the fix. Same shape as the coarse floor's message.
     Locale.ROOT,
     "%s: %,d calls at under %s each, below the %.0f ns floor.%n" +
-            "    The hook is a large fraction of an operation that size, the sampler reads it low by " +
-            "5-9%%,%n" +
-            "    and C2 can move work across the boundaries of adjacent short labels without leaving a " +
-            "trace in the numbers.%n" +
-            "    Put the label on the enclosing loop instead, as op(%s, times = n) { }, which keeps the%n" +
-            "    calls and the per-call duration in this operation's own units, not the loop's.",
+            "    The hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels.%n" +
+            "    Label the enclosing loop instead, op(%s, times = n) { }, and the per-call figures stay in this operation's units.",
     name, calls, duration(upperNanos), Report.FLOOR_NANOS, name
 )
 

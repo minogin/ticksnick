@@ -569,7 +569,7 @@ Same-thread operations — a query planner, a synchronous handler chain — are 
 ```
   1. parseRecord: 305,407,552 calls at under 39.0 ns each, below the 50 ns floor.
      The hook is a visible fraction of it, the sampler reads it 5-9% low, and C2 can move work across adjacent short labels.
-     Label the enclosing loop instead, op(parseRecord, times = n) { }, and the per-call figures stay in this operation's units.
+     Label the enclosing loop instead, op(parseRecord, times = n) { }, or drop it if its share has already answered the question.
 ```
 
 The label is on something too small for the instrument to describe: the hook is a visible fraction
@@ -578,7 +578,9 @@ adjacent short labels without leaving a trace in the numbers. In the demo this c
 **95% of itself**.
 
 **What to do:** `op(id, times = n) { … }` around the enclosing loop, and the report speaks in your
-units. **Not fatal** — it warns and the run finishes, because the check is machine-dependent: the
+units. Or nothing: a label below the floor still reads its share, only 5-9% low, and if that share
+is negligible the label has answered its question and can come off. Andrey's `filter` in the graph
+BFS was that case - three steps interleaved per node, no loop holding only one of them. **Not fatal** — it warns and the run finishes, because the check is machine-dependent: the
 same label reads 17.8 ns at one thread and 55.4 ns at eight on one laptop.
 
 ### `! … under the N a coarse label needs here`

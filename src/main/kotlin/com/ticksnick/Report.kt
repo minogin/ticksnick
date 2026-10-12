@@ -22,7 +22,7 @@ fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): String = Str
     Locale.ROOT,
     "%s: %,d calls at under %s each, below the %.0f ns floor.%n" +
             "    The hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels.%n" +
-            "    Label the enclosing loop instead, op(%s, times = n) { }, and the per-call figures stay in this operation's units.",
+            "    Label the enclosing loop instead, op(%s, times = n) { }, or drop it if its share has already answered the question.",
     name, calls, duration(upperNanos), Report.FLOOR_NANOS, name
 )
 

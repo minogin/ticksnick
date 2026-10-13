@@ -2223,6 +2223,11 @@ Where to pick up, after the entries dated 2026-10-11 to 13 above and v0.2.0.
    was measured with `--coarsecost` only. `RegistryTest` "the thread count is per operation and not
    per run" has failed twice in many runs and is not explained.
 4. Ideas 40, 41 (the allocator-charged pause), 42, and 28 (self time for coarse operations).
+5. **JitPack has no artifact.** The v0.2.0 tag was requested on 2026-10-13 and JitPack's build
+   failed on a transient `429 Too Many Requests` from Maven Central while fetching the Kotlin
+   plugin; JitPack caches the failure, so it has to be deleted and rebuilt from jitpack.io while
+   logged in, or a v0.2.1 tag pushed. v0.1.0 shows no build at all there, so the README's "on
+   JitPack" has never been checked by anyone pulling the artifact.
 
 **What the next article needs from the tool:** several runs per arm with the clock traced, since
 `node` moved by 600 ms between two baseline runs on its own; and the `Long` artefact above fixed,

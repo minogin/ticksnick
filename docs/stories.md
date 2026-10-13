@@ -81,6 +81,17 @@ that may be the more honest article.
 
 ## Nice ones: interesting on their own
 
+### The same labels on two implementations, and the diff reads row for row
+*2026-10-13, the graph benchmark, `C:\idea\graph`. Numbers in its `docs/profiler-notes.md`.*
+
+A boxed BFS and a CSR one carry the same four fine labels and the same `level` family, and the
+diff of their profiles is the whole story in five rows: the hash insert 230 ns to 8 ns, the lookup
+205 ns to 55 ns, calls equal on every row so it is the step that changed and not the work, 12.2 s
+to 1.75 s, and the 673 ms of GC pauses gone because nothing is allocated per edge. The same diff,
+run on the pre-sized set the day's first idea, said 7.7% and showed the node lookups paying for the
+bigger table. A flame graph of each would have shown two different call trees; it is the labels
+that make them one table.
+
 ### A lookup and an insert cost the same: one miss into a boxed hash table
 *2026-10-12, the graph benchmark, one query at depth 5. Numbers in its `docs/profiler-notes.md`.*
 

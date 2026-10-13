@@ -273,6 +273,13 @@ class OperationStat internal constructor(
     val threads: Int = 0,
     /** The most threads seen inside it at one tick. See [Sampler.peakInside]. */
     val peakInside: Int = 0,
+    /**
+     * The longest execution seen, in ticks: a lower bound on its length, since the sampler counts
+     * the ticks it was seen open at and not the clock. See [Sampler.longestStuckTicks].
+     */
+    val longestStuckTicks: Long = 0,
+    /** Long executions by length in ticks, [STUCK_BUCKETS] log-2 buckets. See [Sampler.stuckRunHist]. */
+    internal val stuckRuns: LongArray = LongArray(STUCK_BUCKETS),
 ) {
     /** The fraction of this operation's occupancy spent inside executions longer than a tick. */
     val stuckShare: Double get() = if (hits == 0L) 0.0 else stuckHits.toDouble() / hits
@@ -1564,9 +1571,21 @@ class Report internal constructor(
         val peakInside: Int,
         val threads: Int,
         val calls: Long,
-        /** Null for a coarse row: `Over 1t` is a fine-tier instrument. */
+        /** Null for a coarse row: the long-execution detector is a fine-tier instrument. */
         val stuckShare: Double?,
+        /** The `Long` group: executions over a tick, the thread-time in them, the longest. Fine rows only. */
+        val stuckInstances: Long = 0,
+        val stuckHits: Long = 0,
+        val longestStuckTicks: Long = 0,
     ) {
+        /**
+         * Whether the `Long` group prints for this row: a fine row whose share in long executions
+         * is above what preemption and GC alone could give it. At or under the floor the three
+         * columns are a dash, and the line under the table says what the floor was.
+         */
+        val longShown: Boolean
+            get() = stuckShare != null && stuckInstances > 0 && stuckShare > machineFloor
+
         /** The name as printed: a star marks a row whose full span is in the coarse table. */
         val label: String get() = if (coarse) "$name *" else name
 
@@ -1600,6 +1619,7 @@ class Report internal constructor(
                 it.name, coarse = false, hits = it.hits, inclusiveHits = it.hits, runningHits = it.hits - it.waitingHits,
                 activeTicks = it.activeTicks, peakInside = it.peakInside, threads = it.threads,
                 calls = it.calls, stuckShare = it.stuckShare,
+                stuckInstances = it.stuckInstances, stuckHits = it.stuckHits, longestStuckTicks = it.longestStuckTicks,
             )
         } + coarse.map {
             OperationRow(
@@ -1784,8 +1804,14 @@ class Report internal constructor(
         val anyRow = seen.isNotEmpty() || outside.isNotEmpty()
         if (anyRow) appendLine(
             band(
+                // `Load` runs through the calls: thread-time, calls and per call are one line of
+                // arithmetic, and the `Calls` band only ever repeated its first column (ideas 29).
+                // `Long` sits right after them so the sentence continues - so many calls at this
+                // much each, of which these ran long - and `Spread` follows, because how the time
+                // lay across threads is a different question and on one thread a column of ones.
+                // Andrey, 2026-10-13.
                 FINE_COLUMNS, FINE_BREAKS,
-                1..3 to "Load", 4..7 to "Spread", 8..9 to "Calls", 10..12 to "Trust"
+                1..5 to "Load", 6..8 to "Long", 9..12 to "Spread", 13..14 to "Trust"
             )
         )
         if (anyRow) appendLine(
@@ -1801,7 +1827,7 @@ class Report internal constructor(
                 // had differed - 20/14 against 26/8 - so that `Thread-time% v` could sit over an
                 // 8-wide number without shifting everything after it, and that trick is invisible
                 // until a vertical line is drawn through it and comes out crooked.
-                Locale.ROOT, "%-26s | %14s %11s %18s | %9s %11s %7s %5s | %13s %20s | %8s %6s %7s",
+                Locale.ROOT, "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s",
                 // `occupancy%` and not `share`, because it is the same quantity as the column beside
                 // it — one relative, one absolute. Calling one of them `share` invented a
                 // distinction that does not exist and hid the one that does: neither is CPU. A
@@ -1867,8 +1893,7 @@ class Report internal constructor(
                 // configured.* `Max`, `Peak` and `Most` name a statistic and leave the reader to
                 // supply the noun; `Workers` names what was counted, and says "detected" rather
                 // than "measured", which is what a sampled maximum honestly is.
-                "Operation", "Thread-time% v", "Thread-time", "Runnable / Waiting", "Wall-time",
-                "Concurrency", "Workers", "Pool",
+                "Operation", "Thread-time% v", "Thread-time", "Runnable / Waiting",
                 // `Impl/call` sits beside `Calls` because it is hits x step / calls, and it had
                 // been stranded among the statistics.
                 // `Thread-time per call` and not `Impl/call`, which was Andrey's: "implied" singled
@@ -1877,7 +1902,16 @@ class Report internal constructor(
                 // instead - both operands are columns on the same row - and inherits the caveat
                 // that `Thread-time` already carries. It also drops a third meaning for the slash,
                 // which reads as "per" here and as "two values" twice to its left.
-                "Calls", "Thread-time per call", "Hits", "Noise", "Over 1t"
+                "Calls", "Thread-time per call",
+                // The long executions, read off the calls they are part of: how many ran over a
+                // tick, the thread-time inside them, and the longest. `Over 1t` was the share
+                // alone, in Trust, and the resizes on the graph benchmark were read out of it as
+                // a finding nobody else could follow: "you make conclusions out of 'Trust'
+                // column, which looks more like a secondary column". The count tells a resize
+                // from a lock; the time is what fixing it is worth; the longest tells two dozen
+                // of ten milliseconds from one of two seconds.
+                "Execs", "Time", "Longest",
+                "Wall-time", "Concurrency", "Workers", "Pool", "Hits", "Noise"
             )
         )
         if (anyRow) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
@@ -1907,20 +1941,23 @@ class Report internal constructor(
         for (r in (seen + outside).sortedByDescending { it.hits }) {
             appendLine(
                 String.format(
-                    Locale.ROOT, "%-26s | %14s %11s %18s | %9s %11s %7s %5s | %13s %20s | %8d %6s %7s",
+                    Locale.ROOT, "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8d %6s",
                     r.label, percent(r.shareOf() * 100), threadTime(r.hits * stepNanos),
                     runnableSplit(r.waitingShare),
+                    if (r.name == NO_OPERATION) "-" else String.format(Locale.ROOT, "%,d", r.calls),
+                    duration(r.perCallNanos()),
+                    // A dash for a coarse row rather than figures: the long-execution detector is
+                    // a fine-tier instrument, and a coarse operation has percentiles below, which
+                    // answer the same question exactly instead of by a threshold. And a dash at
+                    // or under the machine floor, where the figures would be preemption.
+                    if (r.longShown) String.format(Locale.ROOT, "%,d", r.stuckInstances) else "-",
+                    if (r.longShown) threadTime(r.stuckHits * stepNanos) else "-",
+                    if (r.longShown) duration(r.longestStuckTicks * stepNanos.toDouble()) else "-",
                     // Nothing counts the ticks with some thread inside no label, so the row has no
                     // wall time rather than a wall time of zero.
                     if (r.name == NO_OPERATION) "-" else threadTime(r.activeTicks * stepNanos),
                     r.concurrency(), r.workers(), r.pool(),
-                    if (r.name == NO_OPERATION) "-" else String.format(Locale.ROOT, "%,d", r.calls),
-                    duration(r.perCallNanos()),
                     r.hits, percent(r.noiseFloor() * 100),
-                    // Blank for a coarse row rather than 0.00%: the long-execution detector is a
-                    // fine-tier instrument, and a coarse operation has percentiles below, which
-                    // answer the same question exactly instead of by a threshold.
-                    if (r.stuckShare == null) "-" else percent(r.stuckShare * 100)
                 )
             )
         }
@@ -1954,16 +1991,14 @@ class Report internal constructor(
         if (seen.any { it.coarse } || contained.isNotEmpty()) {
             appendLine("  * a coarse operation, showing its OWN work - its full span is in the table below")
         }
-        // A note and not a warning: it is the baseline the `Over 1t` column is read against, so it
-        // belongs under the table that has that column rather than in the warning section. It
-        // names the column, because "run-wide 0%, of which the machine itself accounts for up to
-        // 11%" read as "0%, of which 11%" and needed a second read (graph profiler-notes, first
-        // run). The floor stays over wall time on purpose: a pause inside an execution stretches it
-        // past a tick, so GC is a cause of `Over 1t` even though it is out of active time.
+        // A note and not a warning: it is the threshold the `Long` group is printed against, so it
+        // belongs under the table that has those columns rather than in the warning section. The
+        // floor stays over wall time on purpose: a pause inside an execution stretches it past a
+        // tick, so GC is a cause of a long execution even though it is out of active time.
         appendLine(
             String.format(
                 Locale.ROOT,
-                "  Over 1t is %s run-wide; preemption and GC pauses alone could put it at %s",
+                "  Long: executions over a tick hold %s of thread-time run-wide; preemption and GC pauses alone could put it at %s, and a row at or under that shows -",
                 percent(stuckBaseline * 100), percent(machineFloor * 100)
             )
         )
@@ -2113,10 +2148,10 @@ class Report internal constructor(
          * Operation, thread-time% and thread-time, runnable/wait, wall-time,
          * concurrency/threads, calls, implied per call, hits, noise, over one tick.
          */
-        val FINE_COLUMNS = intArrayOf(26, 14, 11, 18, 9, 11, 7, 5, 13, 20, 8, 6, 7)
+        val FINE_COLUMNS = intArrayOf(26, 14, 11, 18, 13, 20, 7, 8, 8, 9, 11, 7, 5, 8, 6)
 
         /** After which columns a group bar comes down. */
-        val FINE_BREAKS = intArrayOf(0, 3, 7, 9)
+        val FINE_BREAKS = intArrayOf(0, 5, 8, 12)
 
         /**
          * Hits below which `Peak 1` is not evidence of anything.

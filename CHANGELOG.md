@@ -17,6 +17,14 @@ the banner instead, which is where a caller meets it once rather than at every c
 
 Builds on Gradle 9.7.1 and Kotlin 2.4.0.
 
+### `Long`: how many executions ran over a tick, their time, and the longest
+
+`Over 1t` was a share in the `Trust` group, and a finding read out of it - the resizes of a hash
+set - could not be followed. It is now a group of three columns beside the calls: `Execs`, `Time`,
+`Longest`. On the graph benchmark that reads `10, 809 ms, 334 ms` on a 233 ns insert, which is ten
+rehashes. `Load` runs through `Calls` and `Thread-time per call` and the `Calls` band is gone;
+`Spread` follows `Long`. A row at or under the machine floor shows dashes.
+
 ### The coarse table is a tree, with the pauses on it
 
 The coarse table and the tree under it were one set of numbers printed twice. Now there is one

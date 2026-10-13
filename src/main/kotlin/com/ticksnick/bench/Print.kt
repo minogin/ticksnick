@@ -208,6 +208,8 @@ private fun printSampler(
                 sampler.stuckHits[id], sampler.stuckInstances[id],
                 sampler.waitingHits[id], sampler.stuckWaitingHits[id], sampler.activeTicks[id],
                 sampler.sessionThreads(id), sampler.peakInside[id],
+                longestStuckTicks = sampler.longestStuckTicks[id],
+                stuckRuns = LongArray(STUCK_BUCKETS) { sampler.stuckRunHist[id * STUCK_BUCKETS + it] },
             )
         },
         idleHits = sampler.counters[NO_OP_INDEX],

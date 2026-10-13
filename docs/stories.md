@@ -38,7 +38,9 @@ level has none. The same frames run at every depth, so a flame graph shows one B
 loop variable, not a frame.
 
 ### The resizes, found by a column: a quarter of a 13 ns step is in executions over a millisecond
-*2026-10-12, the graph benchmark. Numbers in its `docs/profiler-notes.md`.*
+*2026-10-12, the graph benchmark. Numbers in its `docs/profiler-notes.md`. Counted on 2026-10-13
+with the `Long` group: `visitedAdd` 10 executions over a tick, 809 ms, longest 334 ms; `nextAdd` 9,
+48 ms, longest 13 ms. The conjecture below is now a count and a longest.*
 
 `Over 1t` is the share of an operation's time inside executions that outlived a sampling tick.
 `next.add(toId)` on an `ArrayList` is 13 ns a call and reads 27.5% there; `visited.add` on a

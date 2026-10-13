@@ -33,6 +33,12 @@ enum class WaitStrategy {
  *
  * Counters are plain longs: this thread is their only writer.
  */
+/**
+ * Log-2 buckets for the length of a long execution in ticks: 24 of them reach 16 million ticks,
+ * which is four and a half hours at a 1 ms step.
+ */
+const val STUCK_BUCKETS = 24
+
 internal class Sampler(
     private val stepNanos: Long,
     private val wait: WaitStrategy = WaitStrategy.SPIN,
@@ -126,6 +132,20 @@ internal class Sampler(
      * could only ever say "cannot say which".
      */
     internal val stuckWaitingHits = LongArray(MAX_OPERATIONS)
+
+    /**
+     * The longest unbroken run of stuck ticks one execution produced, per operation. In ticks: a
+     * run of `n` means the execution was seen open at `n + 1` consecutive ticks, so it lasted at
+     * least `n` intervals. It is what tells two dozen resizes of ten milliseconds from one lock
+     * held for two seconds, which a share cannot.
+     */
+    internal val longestStuckTicks = LongArray(MAX_OPERATIONS)
+
+    /**
+     * Runs of stuck ticks by length, [STUCK_BUCKETS] log-2 buckets per operation, recorded when a
+     * run ends. Kept for a reader who wants the distribution; the report prints the longest.
+     */
+    internal val stuckRunHist = LongArray(MAX_OPERATIONS * STUCK_BUCKETS)
 
     /**
      * Of the samples that caught a thread inside no label at all, the ones where it was not
@@ -343,6 +363,19 @@ internal class Sampler(
     private val prevOp = IntArray(MAX_SLOTS) { NO_OP }
     private val prevCount = LongArray(MAX_SLOTS)
     private val prevStuck = BooleanArray(MAX_SLOTS)
+
+    /** How many consecutive ticks the execution on this slot has been seen stuck. */
+    private val stuckRun = IntArray(MAX_SLOTS)
+
+    /** Closes the run of stuck ticks on slot [idx], which was inside [op], into the histogram. */
+    private fun endStuckRun(op: Int, idx: Int) {
+        val run = stuckRun[idx]
+        if (op in 0 until MAX_OPERATIONS && run > 0) {
+            val bucket = minOf(STUCK_BUCKETS - 1, 31 - Integer.numberOfLeadingZeros(run))
+            stuckRunHist[op * STUCK_BUCKETS + bucket]++
+        }
+        stuckRun[idx] = 0
+    }
 
     /**
      * Which thread each index belonged to last tick, so a recycled one starts clean.
@@ -612,6 +645,7 @@ internal class Sampler(
                     prevOp[idx] = NO_OP
                     prevCount[idx] = 0
                     prevStuck[idx] = false
+                    stuckRun[idx] = 0
                 }
                 // The other half of the per-thread bound. The duty walk knows how much of thread
                 // i's time was CPU; this is how much of it was inside a label, and the bound is
@@ -624,6 +658,7 @@ internal class Sampler(
                     if (c >= 0) slotLabelledWaiting[idx]++
                 }
                 if (c < 0) {
+                    if (prevStuck[idx]) endStuckRun(prevOp[idx], idx)
                     prevOp[idx] = NO_OP
                     prevStuck[idx] = false
                     continue
@@ -640,8 +675,14 @@ internal class Sampler(
                     if (!prevStuck[idx]) {
                         stuckInstances[c]++
                         prevStuck[idx] = true
+                        stuckRun[idx] = 0
                     }
+                    // The length of the run, and the longest per operation. One increment and
+                    // one compare, on the sampling thread.
+                    val run = ++stuckRun[idx]
+                    if (run > longestStuckTicks[c]) longestStuckTicks[c] = run.toLong()
                 } else {
+                    if (prevStuck[idx]) endStuckRun(prevOp[idx], idx)
                     prevStuck[idx] = false
                 }
                 prevOp[idx] = c

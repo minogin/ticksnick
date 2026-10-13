@@ -229,17 +229,24 @@ formatters that disagreed about where to stop - one printed an eight-minute coar
 ## The operations table
 
 ```
-                           |                    Load                    |               Spread                |               Calls                |          Trust
-Operation                  | Thread-time% v Thread-time Runnable / Waiting | Wall-time Concurrency Workers  Pool |         Calls Thread-time per call |     Hits  Noise Over 1t
----------------------------+--------------------------------------------+-------------------------------------+------------------------------------+------------------------
-flushBatch                 |          38.4%       183 s       100% / 0% |    58.4 s        3.14       8     8 | 1,483,486,016               124 ns |   183317 0.234%  0.034%
-validateRecord             |          37.7%       180 s       100% / 0% |    58.4 s        3.08       8     8 | 1,483,486,016               121 ns |   180044 0.236%  0.074%
-parseRecord                |          11.4%      54.3 s       100% / 0% |    36.4 s        1.49       6     8 | 1,483,486,016              36.6 ns |    54298 0.429%  0.004%
-indexRecord                |          7.58%      36.3 s       100% / 0% |    26.8 s        1.36       6     8 | 1,483,486,016              24.5 ns |    36240 0.525%      0%
-request *                  |          5.03%      24.1 s       100% / 0% |    20.0 s        1.20       7     8 |    20,998,546              1.15 us |    24033 0.645%       -
----------------------------+--------------------------------------------+-------------------------------------+------------------------------------+------------------------
+                           |                                       Load                                       |           Long            |               Spread                |      Trust
+Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call |   Execs     Time  Longest | Wall-time Concurrency Workers  Pool |     Hits  Noise
+---------------------------+----------------------------------------------------------------------------------+---------------------------+-------------------------------------+----------------
+visitedAdd                 |          64.0%      7.55 s          100% / 0%    32,374,539               233 ns |      10   809 ms   334 ms |    7.55 s        1.00       1     - |     7517  1.15%
+node                       |          29.8%      3.51 s          100% / 0%    16,038,234               219 ns |       -        -        - |    3.51 s        1.00       1     - |     3498  1.69%
+id                         |          4.53%      534 ms          100% / 0%    16,038,234              33.3 ns |       -        -        - |    534 ms        1.00       1     - |      532  4.34%
+nextAdd                    |          1.67%      197 ms          100% / 0%    16,038,134              12.3 ns |       9  48.2 ms  13.1 ms |    197 ms        1.00       1     - |      196  7.14%
+---------------------------+----------------------------------------------------------------------------------+---------------------------+-------------------------------------+----------------
+  run *, runBatch *, query *, level[4] *, level[5] *, level[3] *, level[2] *, level[1] *: coarse, with no own time - every sample inside them was in an operation above
   * a coarse operation, showing its OWN work - its full span is in the table below
+  Long: executions over a tick hold 7.51% of thread-time run-wide; preemption and GC pauses alone could put it at 7.99%, and a row at or under that shows -
 ```
+
+The graph benchmark, one query on one thread. `visitedAdd` is 32 million hash inserts at 233 ns,
+of which ten ran over a tick and held 809 ms between them, the longest 334 ms: the rehashes of a
+set growing to 16 million. That is the `Long` group's job - a share cannot tell *200M calls at 8 ns*
+from *1000 calls at 1.6 ms*, and a mean cannot tell *16 million at 12 ns* from *16 million at 9 ns
+plus nine at 5 ms*.
 
 **Both tiers are in one table, and the shares add to 100%.** A coarse label collects everything a
 fine one does and more, so an operation that is promoted should not vanish into a different table
@@ -254,17 +261,17 @@ An **inclusive** coarse number could not share this column: `request` covers 99.
 labelled time, so it would outrank every operation it contains and the column would sum to about
 200%. The inclusive view is the coarse table's job, below.
 
-**The columns are grouped, with bars between the groups and a band naming them** — `Load`
-(thread-time% through runnable/wait), `Spread` (wall-time and concurrency), `Trust` (hits, noise,
-over 1t). Eleven columns is more than anyone reads as a flat list, and the groups are the reading
-order: how much time went here, how it was spread over threads, how far the row can be trusted.
+**The columns are grouped, with bars between the groups and a band naming them** - `Load`
+(thread-time% through per call), `Long` (the executions over a tick), `Spread` (wall-time and
+concurrency), `Trust` (hits, noise). Fourteen columns is more than anyone reads as a flat list, and
+the groups are the reading order: how much time went here and in how many calls, which of those
+calls ran long, how the time lay across threads, how far the row can be trusted. `Load` runs through
+the calls because thread-time, calls and per call are one line of arithmetic; `Long` follows so the
+sentence continues; `Spread` comes after because it is a different question and on one thread a
+column of ones.
 
 The band labels are centred and unruled, because the bars below already say where each group starts
-and stops — dashes as well would draw the same boundary twice.
-
-The `Calls` band repeats the name of a column inside it, which is **provisional** — the group's
-natural name is the noun its first column already carries. [ideas.md](ideas.md) item 29 has the ways
-out.
+and stops - dashes as well would draw the same boundary twice.
 
 | column | what it is | what to watch for |
 |---|---|---|
@@ -279,7 +286,7 @@ out.
 | **hits** | samples that caught this operation | the evidence behind the share |
 | **noise** | `1/√hits` — the error chance alone gives | **if two rows differ by less than their noise, they are not ranked, they are tied** |
 | **thread-time per call** | `thread-time ÷ calls`, both of them columns on the same row | the smell test you can apply and the tool cannot: an operation you know is 20 ns showing 500 ns is stalling on something. Inferred from sampling — the fine tier never times an individual call, which is what makes it cheap and what the coarse tier exists to do |
-| **over 1t** | occupancy inside executions that outlived a tick | for a label claiming nanoseconds this is four orders of magnitude out. See the verdicts below |
+| **long: execs, time, longest** | executions still open at the next tick - at least a tick long - how many, the thread-time inside them, and the longest one in ticks | for a label claiming nanoseconds a long execution is four orders of magnitude out, and these say what it was: a few dozen of ten milliseconds is a resize, one of two seconds is a lock. A `-` means the share is at or under what preemption and GC alone could give, which the line under the table states. `longest` is a lower bound: the sampler counts the ticks it saw the execution open at. A coarse row shows `-` because its percentiles answer the question exactly. See the verdicts below |
 
 Operations that were never sampled are folded into one line rather than printed as a screen of
 zeroes — but a *called* operation with no samples is itself a finding, so the count and the names

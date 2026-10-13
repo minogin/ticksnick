@@ -2063,6 +2063,36 @@ outside every `level` - shows nothing of it in the tree, since the fine breakdow
 printed on leaves. The starred row in the fine table has that own time. If it matters, the sampler
 can credit fine hits to the innermost coarse type only, and the tree can print a parent's own line.
 
+## `Long`: the long executions beside the calls they are part of · 2026-10-13
+
+The resizes on the graph benchmark were read out of `Over 1t` - the share of an operation's
+thread-time in executions that outlived a tick - and Andrey could not follow the reading: *"for me
+reading the report this is quite vague. Also you make conclusions out of 'Trust' column, which
+looks more like a secondary column."* Both right. The share answers "can the mean be trusted"; the
+finding is "this much of this operation's time is in these few long executions", and that wants
+the count and the time, not a percentage, next to the calls it is a part of.
+
+**What is built.** The sampler, which already knew an execution was long by seeing the same call
+counter at two consecutive ticks, now counts how many ticks in a row it stays and keeps the longest
+per operation, plus a log-2 histogram of run lengths in ticks that nothing prints yet. The table
+has a `Long` group of three columns - `Execs`, `Time`, `Longest` - after `Load`, which now runs
+through `Calls` and `Thread-time per call`: thread-time, calls and per call are one line of
+arithmetic, and the `Calls` band only ever repeated its first column (ideas 29, closed by this).
+`Spread` moved after `Long`, since how the time lay across threads is a different question and on
+one thread a column of ones. `Over 1t` is gone from the table; the share still decides whether the
+group prints: a row at or under the machine floor shows dashes, and the line under the table says
+what the floor was. A coarse row shows dashes because its percentiles answer the question exactly.
+
+**What it said on the first run.** `visitedAdd`: 10 executions over a tick, 809 ms between them,
+longest 334 ms - the last rehashes of a set growing to 16 million, and the "about 0.8 s in
+rehashes" conjecture is now a count and a longest. `nextAdd`: 9 executions, 48 ms, longest 13 ms -
+the `ArrayList` doublings, a 100 MB copy each.
+
+**Not built: finer thresholds.** Below the tick the fine tier has nothing - it never times an
+execution - and the tick is a knob. Above it, the histogram exists; the longest is what decides
+between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
+both; this is the answer.
+
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 
 Three questions from Andrey on the tree above, in order. *The tree repeats the executions and

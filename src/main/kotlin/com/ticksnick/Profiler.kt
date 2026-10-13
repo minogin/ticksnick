@@ -937,6 +937,8 @@ object Profiler {
                 id, nameOf(id), s.counters[id], s.sessionCalls(id), s.stuckHits[id], s.stuckInstances[id],
                 s.waitingHits[id], s.stuckWaitingHits[id], s.activeTicks[id], s.sessionThreads(id),
                 s.peakInside[id],
+                longestStuckTicks = s.longestStuckTicks[id],
+                stuckRuns = LongArray(STUCK_BUCKETS) { s.stuckRunHist[id * STUCK_BUCKETS + it] },
             )
         }
         // A label still open when the session ends is a leak by definition: nothing can close it

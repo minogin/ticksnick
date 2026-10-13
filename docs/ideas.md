@@ -982,7 +982,11 @@ project has met before:
 **Not committed.** The inclusive total is the right key while there is no self time to sort by, and
 it is honest as long as the table says which it is.
 
-## 29. The `Calls` band repeats a column inside it · open
+## 29. The `Calls` band repeats a column inside it · done · 2026-10-13
+
+**Closed by the `Long` group:** `Load` now runs through `Calls` and `Thread-time per call`, since
+thread-time, calls and per call are one line of arithmetic, and the band is gone. plan.md,
+"`Long`: the long executions beside the calls they are part of".
 
 From the sandbox on 2026-09-01, and explicitly provisional - *"just name the group Calls for now"*.
 

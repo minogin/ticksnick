@@ -47,6 +47,17 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### A finding was read out of the Trust group · 2026-10-13
+
+The resizes on the graph benchmark - 0.78 s of `visitedAdd` and 46 ms of `nextAdd` in executions
+over a tick - were read off `Over 1t`, and Andrey could not follow: *"for me reading the report
+this is quite vague. Also you make conclusions out of 'Trust' column, which looks more like a
+secondary column."* Right twice. The column answers "can the mean be trusted" and the report has no
+place that says "this much of this operation's time is in a few long executions", which is a
+finding and belongs in words with the amount and the count. The counts exist (`stuckInstances`).
+Proposed: a `LONG EXECUTIONS` block under the fine table, filtered by the floor the run-wide line
+already computes, and that line goes.
+
 ### "made of" needed asking about · 2026-10-13
 
 Andrey, shown a mock-up of the coarse tree with `made of: visitedAdd 82.4%, node 11.3%` under a

@@ -251,11 +251,15 @@ object ProfileStore {
     fun fileName(label: String, now: LocalDateTime = LocalDateTime.now()): String =
         now.format(STAMP) + (if (label.isEmpty()) "" else " $label") + PROFILE_EXTENSION
 
-    /** The newest profile in [dir] by name, which is by time since the name starts with it. */
-    fun latest(dir: Path): Path? {
+    /**
+     * The newest profile in [dir] by name, which is by time since the name starts with it; with
+     * [label], the newest saved under that label.
+     */
+    fun latest(dir: Path, label: String? = null): Path? {
         if (!Files.isDirectory(dir)) return null
+        val suffix = if (label == null) PROFILE_EXTENSION else " $label$PROFILE_EXTENSION"
         return Files.list(dir).use { s ->
-            s.filter { it.fileName.toString().endsWith(PROFILE_EXTENSION) }
+            s.filter { it.fileName.toString().endsWith(suffix) }
                 .sorted(compareBy { it.fileName.toString() })
                 .reduce { _, b -> b }.orElse(null)
         }

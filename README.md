@@ -152,7 +152,7 @@ println(profile.diffAgainstLatest(Path.of("profiles"), label = "after-fix"))  //
 
 The last line saves the profile under the time and label into `profiles/`, nothing overwritten, and
 prints it against the newest one already there - so the usual loop of change, profile, look shows
-the change every time. Any two saved profiles compare later with
+the change every time; `against = "baseline"` reads it against the newest profile with that label instead. Any two saved profiles compare later with
 `./gradlew :cli --args="diff before.tsp after.tsp"`, and `render` re-renders one; outside Gradle it is
 `java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli` with the same arguments.
 

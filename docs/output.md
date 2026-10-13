@@ -703,7 +703,7 @@ change in the step. Two counts means different work, and a faster step is not wh
 
 `profile.diffAgainstLatest(dir, label)` is the usual loop in one call: it saves the profile into the
 directory under the time and the label, and prints it against the newest file that was already
-there. Nothing is overwritten; the directory is the history, and `./gradlew :cli --args="diff a b"`
+there, or with `against = "baseline"` against the newest one saved under that label. Nothing is overwritten; the directory is the history, and `./gradlew :cli --args="diff a b"`
 compares any two of its files later. A diff tool on two rendered reports does not do this job:
 every number differs and the arithmetic is left to the eye.
 

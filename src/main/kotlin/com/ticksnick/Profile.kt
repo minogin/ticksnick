@@ -2035,14 +2035,16 @@ class Profile internal constructor(
     /**
      * Saves this profile into [dir] under the time and [label], and returns the diff against the
      * newest profile that was already there - the previous run, on the usual workflow of change,
-     * profile, look. Nothing is overwritten; the directory is the history, and any two of its
+     * profile, look - or, with [against], the newest one saved under that label, so a run can
+     * always be read against a named baseline. Nothing is overwritten; the directory is the history, and any two of its
      * files can be compared later with `./gradlew :cli --args="diff a b"`.
      */
-    fun diffAgainstLatest(dir: java.nio.file.Path, label: String = ""): String {
-        val previous = ProfileStore.latest(dir)
+    fun diffAgainstLatest(dir: java.nio.file.Path, label: String = "", against: String? = null): String {
+        val previous = ProfileStore.latest(dir, against)
         val file = dir.resolve(ProfileStore.fileName(label))
         save(file)
-        if (previous == null) return "Saved as $file; the first profile here, nothing to compare with yet."
+        if (previous == null) return "Saved as $file; " +
+                (if (against == null) "the first profile here, nothing to compare with yet." else "no profile labelled '$against' here to compare with.")
         return "Saved as $file\n" + diffFrom(load(previous), previous.fileName.toString(), file.fileName.toString()).render()
     }
 

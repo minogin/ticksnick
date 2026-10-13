@@ -1287,6 +1287,17 @@ pause. HotSpot only, and a second module to depend on.
 bytes per operation - far beyond the 2 ns the fine hook costs, possibly affordable at the 40 ns of a
 coarse context, and unmeasured.
 
+## 43. A `times = n` label is one execution to the long-execution detector · open
+
+Seen on the graph benchmark, 2026-10-13: `id` is `op(Ops.id, times = frontier.size)` around a
+whole level's loop, and the `Long` group showed it as 40 executions over a tick holding 44 ms.
+True by construction - the loop runs for seconds and the counter moves once, at the end - and
+useless: every pair of consecutive ticks landing in its own time reads as one long execution, and
+the fine labels inside it break the runs up into "40". A `times` label should either be excluded
+from the detector, which loses nothing since its executions are known to be long, or the hook
+should bump the counter per iteration, which costs what the label was placed to avoid. Exclude is
+the cheaper and the honest one: the detector is for calls that should be short and were not.
+
 ## Promoted to plan.md
 
 **Phase 3.5** is item 9 above, reframed from detecting bad operations to bounding the error on every

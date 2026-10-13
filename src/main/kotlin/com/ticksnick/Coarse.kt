@@ -196,16 +196,25 @@ object SpanHistogram {
  * disjoint fields, no fence: a read a few nanoseconds stale is the bargain everything here makes.
  */
 internal class CoarsePath(
-    /** The coarse type at this node, [ROOT] for the root of a tree, [DEEPER] for the overflow node. */
+    /** The coarse type at this node, [ROOT] for the root of a tree. */
     @JvmField val type: Int,
     @JvmField val parent: CoarsePath?,
     /** The slot whose tree this is, or null for a merged tree. */
     @JvmField val owner: OpSlot?,
+    /**
+     * Whether this is a type's overflow node: where its executions past [MAX_COARSE_DEPTH] are
+     * recorded, one per type under the root, so the per-type totals stay exact and the row can
+     * say whose executions they were. Nothing is nested under it.
+     */
+    @JvmField val past: Boolean = false,
 ) {
     @JvmField val depth: Int = if (parent == null) 0 else parent.depth + 1
 
-    /** Children by type, plus the overflow node at the end. Allocated on the first child. */
+    /** Children by type. Allocated on the first child. */
     @JvmField var children: Array<CoarsePath?>? = null
+
+    /** On a root only: the overflow node per type, allocated on the first execution past the bound. */
+    @JvmField var overflow: Array<CoarsePath?>? = null
 
     // The span half: written by the owning thread.
     @JvmField var count: Long = 0
@@ -228,8 +237,14 @@ internal class CoarsePath(
     @JvmField var pauseStamp: Long = -1
 
     fun child(type: Int): CoarsePath {
-        val cs = children ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES + 1).also { children = it }
+        val cs = children ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES).also { children = it }
         return cs[type] ?: CoarsePath(type, this, owner).also { cs[type] = it }
+    }
+
+    /** The overflow node for [type] under this root. See [past]. */
+    fun deeper(type: Int): CoarsePath {
+        val os = overflow ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES).also { overflow = it }
+        return os[type] ?: CoarsePath(type, this, owner, past = true).also { os[type] = it }
     }
 
     fun record(nanos: Long) {
@@ -255,11 +270,8 @@ internal class CoarsePath(
             val f = fine ?: LongArray(MAX_OPERATIONS + 1).also { fine = it }
             for (i in f.indices) f[i] += of[i]
         }
-        val ocs = o.children ?: return
-        for (t in ocs.indices) {
-            val oc = ocs[t] ?: continue
-            if (t == DEEPER_INDEX) deeper().mergeFrom(oc) else child(t).mergeFrom(oc)
-        }
+        o.children?.let { ocs -> for (t in ocs.indices) ocs[t]?.let { child(t).mergeFrom(it) } }
+        o.overflow?.let { oos -> for (t in oos.indices) oos[t]?.let { deeper(t).mergeFrom(it) } }
     }
 
     /** Clears every figure here and below, keeping the shape. See `Profiler.resetCoarse`. */
@@ -274,30 +286,24 @@ internal class CoarsePath(
         fine?.fill(0L)
         pausedNanos = 0
         pauseStamp = -1
-        val cs = children ?: return
-        for (c in cs) c?.reset()
-    }
-
-    /** The one node under a root where everything nested past [MAX_COARSE_DEPTH] is recorded. */
-    fun deeper(): CoarsePath {
-        val cs = children ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES + 1).also { children = it }
-        return cs[DEEPER_INDEX] ?: CoarsePath(DEEPER, this, owner).also { cs[DEEPER_INDEX] = it }
+        children?.forEach { it?.reset() }
+        overflow?.forEach { it?.reset() }
     }
 
     /** Whether any span or sample was recorded here or below. */
     fun isEmpty(): Boolean {
         if (count > 0 || inclusiveHits > 0) return false
-        val cs = children ?: return true
-        for (c in cs) if (c != null && !c.isEmpty()) return false
+        children?.forEach { if (it != null && !it.isEmpty()) return false }
+        overflow?.forEach { if (it != null && !it.isEmpty()) return false }
         return true
     }
 
+    /** Every node under this one, children and overflow nodes, for a walk that wants them all. */
+    fun below(): List<CoarsePath> =
+        (children?.filterNotNull() ?: emptyList()) + (overflow?.filterNotNull() ?: emptyList())
+
     companion object {
         const val ROOT = -1
-        const val DEEPER = -2
-
-        /** The slot past the last type in a children array is the overflow node. */
-        const val DEEPER_INDEX = MAX_COARSE_TYPES
     }
 }
 

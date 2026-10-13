@@ -2168,6 +2168,20 @@ interleaved, fifteen rounds, sampler on. Before: 51.5 ns flat, 48.3 ns nested in
 47.9 ns and 48.4 ns. Both at a 150-205% clock, same session, so the tree did not move the hook.
 The number itself replaces the "two thirds measured" 40 ns in findings.md.
 
+**Tests, 2026-10-13 evening.** `TreeTest` drives the tree through the real hook: nesting with
+counts and spans per path, an operation under two callers split per caller, the same child under
+two paths kept apart, a borrowed context resolved into the borrower's tree, recursion past the
+bound, a retired thread's tree, the reset at session start, two threads merging into one node,
+and a forced collection charged to the span open through it. `StoreDiffTest` covers the `Long`
+group, the file round trip with a tree and a name containing a tab, `latest` by label,
+`diffAgainstLatest` on an empty directory and against a label, a diff with a side missing and
+calls that differ, and the command. Writing them found two things: an execution opened *under*
+the overflow node started a new sub-tree beneath it, and the overflow node had no type, so the
+per-type totals lost everything past the bound. **The overflow node is now one per type under
+the root**, flagged `past`, named `<op>, deeper than 16, not followed`, with nothing nested
+under it; the per-type figures are exact again. And two saves inside one second get a `-2`
+suffix rather than one overwriting the other.
+
 **Limits.** The one above - a parent's own fine work outside any child is not in the tree - still
 holds. A context made by hand rather than by the hook has no node and is named under the table. A
 borrowed context still sampled after its thread retired is counted per type and not in the tree.

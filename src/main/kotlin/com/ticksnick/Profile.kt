@@ -2041,7 +2041,13 @@ class Profile internal constructor(
      */
     fun diffAgainstLatest(dir: java.nio.file.Path, label: String = "", against: String? = null): String {
         val previous = ProfileStore.latest(dir, against)
-        val file = dir.resolve(ProfileStore.fileName(label))
+        // The name is to the second, so two runs inside one second get a suffix rather than one
+        // overwriting the other: the directory is the history and nothing in it is lost.
+        var file = dir.resolve(ProfileStore.fileName(label))
+        var n = 2
+        while (java.nio.file.Files.exists(file)) {
+            file = dir.resolve(ProfileStore.fileName(label).removeSuffix(PROFILE_EXTENSION) + "-${n++}" + PROFILE_EXTENSION)
+        }
         save(file)
         if (previous == null) return "Saved as $file; " +
                 (if (against == null) "the first profile here, nothing to compare with yet." else "no profile labelled '$against' here to compare with.")

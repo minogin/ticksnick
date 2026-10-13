@@ -218,8 +218,10 @@ class OpSlot(
             if (p != null && p.owner === this) p else resolve(root, parent)
         }
         // Past the depth bound everything goes to one overflow node under the root, so recursion
-        // cannot grow the tree without limit. The sampler's inclusive walk stops at the same depth.
-        return if (under.depth >= MAX_COARSE_DEPTH) root.deeper() else under.child(type)
+        // cannot grow the tree without limit - and stays there: an execution opened under the
+        // overflow node is still past the bound, not the start of a new tree beneath it. The
+        // sampler's inclusive walk stops at the same depth.
+        return if (under.depth >= MAX_COARSE_DEPTH || under.past) root.deeper(type) else under.child(type)
     }
 
     /**
@@ -235,7 +237,7 @@ class OpSlot(
             types[n++] = c.type
             c = c.parent
         }
-        if (c != null) return root.deeper()
+        if (c != null) return root.deeper(ctx.type)
         var node = root
         while (n > 0) node = node.child(types[--n])
         return node
@@ -538,8 +540,7 @@ object Profiler {
     /** Marks in [ran] every type with a completed execution anywhere under [node]. */
     private fun typesRan(node: CoarsePath, ran: BooleanArray) {
         if (node.type >= 0 && node.count > 0) ran[node.type] = true
-        val cs = node.children ?: return
-        for (c in cs) if (c != null) typesRan(c, ran)
+        for (c in node.below()) typesRan(c, ran)
     }
 
     /**
@@ -569,8 +570,7 @@ object Profiler {
                 val into = out[node.type] ?: CoarseAgg(node.type).also { out[node.type] = it }
                 into.mergeFrom(node)
             }
-            val cs = node.children ?: return
-            for (c in cs) if (c != null) walk(c)
+            for (c in node.below()) walk(c)
         }
         walk(tree)
         return out
@@ -979,7 +979,7 @@ object Profiler {
         val pauseScale = if (pauses.pausedNanos > 0) pauses.confirmedNanos.toDouble() / pauses.pausedNanos else 0.0
         fun nodeOf(n: CoarsePath): CoarseNode = CoarseNode(
             type = n.type,
-            name = if (n.type == CoarsePath.DEEPER) "deeper than $MAX_COARSE_DEPTH, not followed" else coarseNameOf(n.type),
+            name = coarseNameOf(n.type) + (if (n.past) ", deeper than $MAX_COARSE_DEPTH, not followed" else ""),
             count = n.count, spanSumNanos = n.sumNanos,
             spanMinNanos = if (n.count == 0L) 0L else n.minNanos, spanMaxNanos = n.maxNanos,
             hist = n.hist, inclusiveHits = n.inclusiveHits, runningInclusiveHits = n.runningInclusiveHits,
@@ -987,7 +987,7 @@ object Profiler {
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),
         )
-        val coarseTree = tree.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList()
+        val coarseTree = tree.below().filter { !it.isEmpty() }.map { nodeOf(it) }
         return Profile(
             stats, s.counters[NO_OP_INDEX], s.ticks, s.span, duration, s.maxSlots, s.duty(), s.failure,
             imbalances = imbalances.get() - imbalancesAtStart, openAtEnd = openSpans(), stateSampled = s.sampleState,

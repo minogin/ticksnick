@@ -257,10 +257,14 @@ object ProfileStore {
      */
     fun latest(dir: Path, label: String? = null): Path? {
         if (!Files.isDirectory(dir)) return null
-        val suffix = if (label == null) PROFILE_EXTENSION else " $label$PROFILE_EXTENSION"
+        // The name without its extension and without the `-N` a second save in one second gets:
+        // what is left is `<time> <label>`, and sorting that puts `-2` after the original.
+        fun stem(p: Path): String = p.fileName.toString().removeSuffix(PROFILE_EXTENSION)
+        fun labelled(p: Path): String = stem(p).replace(Regex("-[0-9]+$"), "")
         return Files.list(dir).use { s ->
-            s.filter { it.fileName.toString().endsWith(suffix) }
-                .sorted(compareBy { it.fileName.toString() })
+            s.filter { it.fileName.toString().endsWith(PROFILE_EXTENSION) }
+                .filter { label == null || labelled(it).endsWith(" $label") }
+                .sorted(compareBy { stem(it) })
                 .reduce { _, b -> b }.orElse(null)
         }
     }

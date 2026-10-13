@@ -11,7 +11,7 @@ import java.util.Locale
  * **The measurement that decides a design.** Trial 4 measured `working` reading **55x** more CPU than
  * the process actually spent, because it is built on `Thread.getState` and Java reports a thread
  * inside a native call as `RUNNABLE`. The report now prints a bound beside the number
- * ([Report.workingCeilingOf]), but a bound says the figure cannot be trusted; it does not produce a
+ * ([Profile.workingCeilingOf]), but a bound says the figure cannot be trusted; it does not produce a
  * better one. The better one is CPU time attributed per label, and whether that is affordable turns
  * entirely on two numbers nobody here has measured.
  *

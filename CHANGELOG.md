@@ -17,6 +17,15 @@ the banner instead, which is where a caller meets it once rather than at every c
 
 Builds on Gradle 9.7.1 and Kotlin 2.4.0.
 
+### `Profile`, saved to a file, and the diff between two
+
+`Profiler.stop()` returns a `Profile`, which was called `Report`: the data of one session, with
+`render()` making the report from it. A profile saves and loads as a small text file, two compare
+with `after.diffFrom(before).render()` - by operation name and by coarse path, every figure as
+`before -> after` with the change beside it - and `profile.diffAgainstLatest(dir, label)` is the
+loop of change, profile, look in one call. `./gradlew :cli --args="render|diff ..."` does the same on
+files. **Breaking:** the type `Report` is now `Profile`.
+
 ### `Long`: how many executions ran over a tick, their time, and the longest
 
 `Over 1t` was a share in the `Trust` group, and a finding read out of it - the resizes of a hash

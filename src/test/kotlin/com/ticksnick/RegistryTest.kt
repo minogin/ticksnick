@@ -219,7 +219,7 @@ class RegistryTest {
     /**
      * A session reports its own leaks and nobody else's.
      *
-     * Every other number in a `Report` is per session, and deliberately so: `callsAtStart` exists
+     * Every other number in a `Profile` is per session, and deliberately so: `callsAtStart` exists
      * because call counts that spanned the warm-up were inflating implied durations by a tenth, and
      * that mismatch was found only because it made an upper bound come out *below* the truth, which
      * is arithmetically impossible. The imbalance count had no such tell. It failed quietly, in the
@@ -508,6 +508,6 @@ class RegistryTest {
     }
 
     /** The row for one operation by name, since ids are shared with every other test in the JVM. */
-    private fun Report.threadsOf(name: String): Int =
+    private fun Profile.threadsOf(name: String): Int =
         operations.first { it.name == name }.threads
 }

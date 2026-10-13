@@ -121,7 +121,8 @@ with the duty-cycle bound printed beside it.
 | `Sampler.kt` | the sampling thread: the tick loop, the slot walk, the wait strategy |
 | `Coarse.kt` | the coarse tier: the context and the span histogram. The label itself is `op { }`, the same verb the fine tier uses |
 | `Operations.kt` | `FineOp` and `CoarseOp` — why the tier is chosen once, at registration, and never mentioned again |
-| `Report.kt` | what a session collected and how it is rendered, including every verdict and threshold |
+| `Profile.kt` | what a session collected - a `Profile` - and how it is rendered, including every verdict and threshold |
+| `Store.kt`, `Diff.kt`, `Cli.kt` | a profile as a file, two profiles side by side, and the jar as a command for both |
 | `Duty.kt` | how much of the occupancy was CPU, and the bound that puts on every share |
 | **`com/ticksnick/bench/`** | **the harness — never shipped, and now unable to leak into the above** |
 | `Workload.kt`, `Burn.kt`, `Bench.kt` | a workload whose true answer is known |

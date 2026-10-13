@@ -480,7 +480,7 @@ class DutyReport internal constructor(
      * aggregate where it does not.
      *
      * Everything that judges a *share* uses this. Everything that describes what the *machine* was
-     * doing to every thread at once — [Report.machineFloor], [Report.offCpuSamples] — keeps using
+     * doing to every thread at once — [Profile.machineFloor], [Profile.offCpuSamples] — keeps using
      * [duty], because there the whole process is the subject and an idle thread belongs in it.
      */
     val shareDuty: Double get() = if (labelledDuty.isNaN()) activeDuty else labelledDuty

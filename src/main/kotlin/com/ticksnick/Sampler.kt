@@ -215,7 +215,7 @@ internal class Sampler(
     /** Ticks at which at least one thread was doing this type's own work. */
     internal val coarseSelfActiveTicks = LongArray(MAX_COARSE_TYPES)
 
-    /** The most threads seen doing this type's own work at one tick. See `Report.workersOf`. */
+    /** The most threads seen doing this type's own work at one tick. See `Profile.workersOf`. */
     internal val coarseSelfPeak = IntArray(MAX_COARSE_TYPES)
 
     /** As `seenAt`, for [coarseSelfActiveTicks]. */
@@ -734,7 +734,7 @@ internal class Sampler(
      * The one condition that reaches here is a leaked label — see [Profiler.expectBalanced]. A
      * below-floor label used to as well, and stopped two correct runs in two consecutive trials
      * before it was demoted to the warning it always should have been; the reasoning is in
-     * plan.md § 1a and the list it now produces is [Report.tooSmall].
+     * plan.md § 1a and the list it now produces is [Profile.tooSmall].
      *
      * Stops sampling rather than the application: this is somebody else's process.
      */

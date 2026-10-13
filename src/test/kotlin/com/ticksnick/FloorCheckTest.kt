@@ -65,7 +65,7 @@ class FloorCheckTest {
     /**
      * `expandNode` from the single-threaded bench: 545 hits over 14,173,895 calls, 38.5 ns implied.
      * Under the floor, and *not* named — because the bound is 41.96 ns and the check inflates by
-     * [Report.FLOOR_BIAS_ALLOWANCE] before accusing anyone, which puts it at 50.35 against 50.
+     * [Profile.FLOOR_BIAS_ALLOWANCE] before accusing anyone, which puts it at 50.35 against 50.
      *
      * **The margin is 0.35 ns**, and it is the only place the allowance decides an outcome. It is
      * the kind of boundary that moves under an innocent-looking edit, and the direction matters:
@@ -78,8 +78,8 @@ class FloorCheckTest {
         val upper = impliedUpperNanos(hits = 545, calls = 14_173_895, stepNanos = step)
         assertEquals(41.96, upper, 0.1, "expandNode's upper bound moved")
         // Under the floor on its own, so only the allowance is keeping it off the list.
-        assertTrue(upper < Report.FLOOR_NANOS, "the test no longer exercises the allowance at all")
-        assertTrue(upper * Report.FLOOR_BIAS_ALLOWANCE > Report.FLOOR_NANOS, "the margin has closed")
+        assertTrue(upper < Profile.FLOOR_NANOS, "the test no longer exercises the allowance at all")
+        assertTrue(upper * Profile.FLOOR_BIAS_ALLOWANCE > Profile.FLOOR_NANOS, "the margin has closed")
         assertFalse(isTooSmall(545, 14_173_895, step), "a label inside the allowance was accused")
     }
 
@@ -95,7 +95,7 @@ class FloorCheckTest {
     fun `a thinly sampled label clears the floor on the bound alone`() {
         val upper = impliedUpperNanos(hits = 307, calls = 6_286_329, stepNanos = step)
         assertEquals(54.89, upper, 0.1, "route's upper bound moved")
-        assertTrue(upper > Report.FLOOR_NANOS, "this case is supposed to clear without the allowance")
+        assertTrue(upper > Profile.FLOOR_NANOS, "this case is supposed to clear without the allowance")
         assertFalse(isTooSmall(307, 6_286_329, step))
     }
 

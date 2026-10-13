@@ -215,7 +215,7 @@ class PauseReport internal constructor(
                 // one of the pauses the sampler saw, "3.00 ms paused, longest 22.5 ms" is a line
                 // contradicting itself, and the counts are left off rather than capped.
                 if (longestNanos <= paused) String.format(
-                    Locale.ROOT, " in %s, longest %s", Report.plural(pauses, "pause"), duration(longestNanos.toDouble())
+                    Locale.ROOT, " in %s, longest %s", Profile.plural(pauses, "pause"), duration(longestNanos.toDouble())
                 ) else ""
             )
         )
@@ -244,7 +244,7 @@ class PauseReport internal constructor(
             ) else emptyList()
         }
         val seen = String.format(
-            Locale.ROOT, "%s in %s", duration(pausedNanos.toDouble()), Report.plural(pauses, "pause")
+            Locale.ROOT, "%s in %s", duration(pausedNanos.toDouble()), Profile.plural(pauses, "pause")
         )
         if (gcNanos < 0) return listOf(
             "$seen seen by the sampler but not confirmed - this JVM's collectors cannot be read - so counted as active"

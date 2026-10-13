@@ -42,7 +42,21 @@ java {
 // lets the library keep them out of its public API. That is right for the source tree and wrong for
 // the artifact: nobody depending on this wants Bench, Workload and StackCost on their classpath.
 // `run` is unaffected — it builds from the classes directory, not from the jar.
-tasks.named<Jar>("jar") { exclude("com/ticksnick/bench/**") }
+tasks.named<Jar>("jar") {
+    exclude("com/ticksnick/bench/**")
+    // The saved-profile commands, see Cli.kt. The jar needs the Kotlin stdlib beside it, so the
+    // plain form is `java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli diff a b`; the
+    // task below is the same with the classpath found for you.
+    manifest { attributes("Main-Class" to "com.ticksnick.Cli") }
+}
+
+// `./gradlew :cli --args="diff before.tsp after.tsp"` and `--args="render profile.tsp"`.
+tasks.register<JavaExec>("cli") {
+    group = "application"
+    description = "render a saved profile, or diff two: --args=\"render f.tsp\" | --args=\"diff a.tsp b.tsp\""
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.ticksnick.Cli")
+}
 tasks.named<Jar>("sourcesJar") { exclude("com/ticksnick/bench/**") }
 
 application {

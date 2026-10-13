@@ -2063,6 +2063,39 @@ outside every `level` - shows nothing of it in the tree, since the fine breakdow
 printed on leaves. The starred row in the fine table has that own time. If it matters, the sampler
 can credit fine hits to the innermost coarse type only, and the tree can print a parent's own line.
 
+## `Profile`, saved, and the diff · 2026-10-13
+
+Two runs, two reports, and Andrey asked how to compare them without hassle. The answer began with
+a question about what the profiler's outcome is - the data or the report - and the library already
+had the split: `stop()` returned an object holding every counter, histogram and the tree, and
+`render()` made the page. It was called `Report`, which is why the question needed asking.
+
+**Renamed `Report` to `Profile`.** The object is the data of one session - raw session totals, not
+a trace, no per-tick record - and the report is what `render()` makes of it. Breaking, and 0.x is
+the time. `OperationStat`, `CoarseStat`, `CoarseNode`, `DutyReport` and `PauseReport` keep their
+names as parts of a profile.
+
+**Saved as text.** `profile.save(path)` and `Profile.load(path)`, `Store.kt`: one figure per line,
+`key<TAB>value`, arrays sparse as `index:value`, strings escaped, the tree in pre-order with a
+parent index, a format line first. Every constructor field and nothing derived, so a newer renderer
+re-renders an old file. No dependency; a session is kilobytes, so binary buys nothing.
+
+**The diff.** `after.diffFrom(before).render()`, `Diff.kt`: operations matched by name, coarse
+nodes by path, every figure `before -> after` with the change beside it, sorted by the thread-time
+that moved. Calls print `=` when equal, because a step that got faster at the same count is a faster
+step and a step with fewer calls did less work. A diff tool on two rendered reports was rejected:
+every number differs and the eye does the arithmetic.
+
+**The loop.** `profile.diffAgainstLatest(dir, label)` saves into the directory under the time and
+label - nothing overwritten, the directory is the history, Andrey's call - and prints the diff
+against the newest file already there. The graph benchmark does this after every profiled run.
+`./gradlew :cli --args="diff a b"` and `render f` are the same on two files later; a command in
+the library jar and not a second artifact, which would be a second thing to publish and explain.
+
+**What the first diff said.** Pre-sizing the set to the whole graph slowed `node` by 19%, 657 ms,
+and sped `visitedAdd` by 532 ms: a wash on the query. The single runs had read it as a 1.2 s win
+with "`node` 16 ns slower, one run". The diff is in graph's profiler-notes.
+
 ## `Long`: the long executions beside the calls they are part of · 2026-10-13
 
 The resizes on the graph benchmark were read out of `Over 1t` - the share of an operation's

@@ -5,13 +5,13 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
 
-/** See [Report.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
+/** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
 
-/** Whether a label is on something too small for the instrument to describe. See [Report.tooSmall]. */
+/** Whether a label is on something too small for the instrument to describe. See [Profile.tooSmall]. */
 fun isTooSmall(hits: Long, calls: Long, stepNanos: Double): Boolean =
-    calls > 0 && impliedUpperNanos(hits, calls, stepNanos) * Report.FLOOR_BIAS_ALLOWANCE < Report.FLOOR_NANOS
+    calls > 0 && impliedUpperNanos(hits, calls, stepNanos) * Profile.FLOOR_BIAS_ALLOWANCE < Profile.FLOOR_NANOS
 
 /**
  * What to tell someone whose label is below the floor. Both reasons, because the second is the one
@@ -23,11 +23,11 @@ fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): String = Str
     "%s: %,d calls at under %s each, below the %.0f ns floor.%n" +
             "    The hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels.%n" +
             "    Label the enclosing loop instead, op(%s, times = n) { }, or drop it if its share has already answered the question.",
-    name, calls, duration(upperNanos), Report.FLOOR_NANOS, name
+    name, calls, duration(upperNanos), Profile.FLOOR_NANOS, name
 )
 
 /**
- * The shortest a coarse operation may be, given how much of the run it holds. See [Report.coarseTooSmall].
+ * The shortest a coarse operation may be, given how much of the run it holds. See [Profile.coarseTooSmall].
  *
  * The tier boundary from profiler.md, as arithmetic rather than a rule of thumb. Two conditions,
  * protecting different things and neither implying the other:
@@ -42,7 +42,7 @@ fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): String = Str
  * program is undisturbed and the measurement is 100% wrong. That is why both are needed.
  */
 fun coarseFloorNanos(share: Double): Double =
-    maxOf(Report.COARSE_FLOOR_NANOS, Report.COARSE_SHARE_NANOS * share)
+    maxOf(Profile.COARSE_FLOOR_NANOS, Profile.COARSE_SHARE_NANOS * share)
 
 /**
  * What to tell someone whose coarse label is on something too small to carry a context.
@@ -60,16 +60,16 @@ fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, required
     //
     // Three lines: the fact, the reason, the fix. It was five, and Andrey read it on a label he had
     // put on a 40 ns lookup: "shorter, less verbose and more clear".
-    val shareBound = requiredNanos > Report.COARSE_FLOOR_NANOS
-    val overhead = Report.COARSE_CONTEXT_NANOS / meanNanos * 100
+    val shareBound = requiredNanos > Profile.COARSE_FLOOR_NANOS
+    val overhead = Profile.COARSE_CONTEXT_NANOS / meanNanos * 100
     val why = if (shareBound) String.format(
         Locale.ROOT,
         "    Accurate per execution (%.1f%% overhead), but %,d contexts at %.0f ns are over 1%% of the run.",
-        overhead, count, Report.COARSE_CONTEXT_NANOS
+        overhead, count, Profile.COARSE_CONTEXT_NANOS
     ) else String.format(
         Locale.ROOT,
         "    A context costs about %.0f ns, which is %.0f%% of an operation this size.",
-        Report.COARSE_CONTEXT_NANOS, overhead
+        Profile.COARSE_CONTEXT_NANOS, overhead
     )
     return String.format(
         Locale.ROOT,
@@ -136,7 +136,7 @@ fun leakMessage(open: String, thread: String = Thread.currentThread().name): Str
 
 /**
  * Whether one operation's long executions are evidence of anything, given what the machine was
- * doing to every operation at the same time — see [Report.machineFloor].
+ * doing to every operation at the same time — see [Profile.machineFloor].
  *
  * All three conditions matter and the third was learned the moment this first ran: on a quiet
  * machine the floor falls to 1%, so a single long execution out of two thousand samples clears
@@ -148,8 +148,8 @@ fun leakMessage(open: String, thread: String = Thread.currentThread().name): Str
  * they did within an hour of the bench check being written by hand.
  */
 fun isSuspect(hits: Long, stuckHits: Long, stuckInstances: Long, machineFloor: Double): Boolean =
-    hits > 0 && stuckInstances >= Report.SUSPECT_MIN_INSTANCES &&
-            stuckHits.toDouble() / hits > maxOf(machineFloor * Report.SUSPECT_OVER_BASELINE, Report.SUSPECT_MIN_SHARE)
+    hits > 0 && stuckInstances >= Profile.SUSPECT_MIN_INSTANCES &&
+            stuckHits.toDouble() / hits > maxOf(machineFloor * Profile.SUSPECT_OVER_BASELINE, Profile.SUSPECT_MIN_SHARE)
 
 /**
  * A duration in whatever unit keeps it readable. The fine tier spans four orders of magnitude, and
@@ -253,7 +253,7 @@ internal fun row(key: String, value: String): String = String.format(Locale.ROOT
 internal fun subRow(key: String, value: String): String =
     String.format(Locale.ROOT, "  %-11s %s", key, value)
 
-/** One operation's line in a [Report]. */
+/** One operation's line in a [Profile]. */
 class OperationStat internal constructor(
     val id: Int,
     val name: String,
@@ -320,7 +320,7 @@ class OperationStat internal constructor(
      * tracking the load at all. Twice the clients is twice this number with the code unchanged, so
      * it is a property of the deployment in both regimes. It earns its place because [elapsedNanosOf]
      * cannot be computed without it, and because printed over the thread count — see
-     * [Report.inFlightOf] — the ratio says which of the two regimes produced it.
+     * [Profile.inFlightOf] — the ratio says which of the two regimes produced it.
      *
      * The divisor that turns occupancy into elapsed time: the same hundred thread-seconds of
      * waiting is a convoy at fifteen executions in flight and mild persistent contention at 1.7,
@@ -374,7 +374,7 @@ class CoarseNode internal constructor(
 }
 
 /**
- * One coarse operation's line in a [Report].
+ * One coarse operation's line in a [Profile].
  *
  * The asymmetry with [OperationStat] is the point of the tier. **Span is measured**, exactly, by two
  * timestamps per execution — it is the only quantity in this whole tool that is not sampled, and it
@@ -459,7 +459,7 @@ class CoarseStat internal constructor(
      * work, but it is not available for anything else either, so with sixteen threads and five tied
      * up per request you can serve three at once and not four.
      *
-     * It is the number that keeps the identity in [Report.inFlightOf]'s note exact — `threads inside
+     * It is the number that keeps the identity in [Profile.inFlightOf]'s note exact — `threads inside
      * = executions in flight x this` — because [inFlight] counts an execution whether or not its
      * threads are running, and a factorisation has to count both sides the same way. It is also
      * consistent with the rest of the report, where `share`, `occupancy` and `in flight` all count a
@@ -518,7 +518,7 @@ class CoarseStat internal constructor(
  * reported separately as [idleHits] rather than folded into the denominator — mixing them in would
  * make every share depend on how much uninstrumented code happened to be running.
  */
-class Report internal constructor(
+class Profile internal constructor(
     val operations: List<OperationStat>,
     val idleHits: Long,
     val ticks: Long,
@@ -641,7 +641,7 @@ class Report internal constructor(
      * compare between two runs.
      *
      * [shareOf] is a share of *labelled* samples, which is the right denominator (see the note on
-     * [Report]) and a treacherous number to compare across runs: it re-scales every row at once
+     * [Profile]) and a treacherous number to compare across runs: it re-scales every row at once
      * whenever the set of labels changes.
      *
      * Measured on the Lucene trial, two runs of each placement, where the only difference is that
@@ -2025,6 +2025,27 @@ class Report internal constructor(
         appendLine("=".repeat(WIDTH))
     }
 
+    /** Writes this profile to [path]. See [ProfileStore]. */
+    fun save(path: java.nio.file.Path) = ProfileStore.save(this, path)
+
+    /** This profile against an earlier one: `before -> after`, by operation name and coarse path. */
+    fun diffFrom(before: Profile, beforeName: String = "before", afterName: String = "after"): ProfileDiff =
+        ProfileDiff(before, this, beforeName, afterName)
+
+    /**
+     * Saves this profile into [dir] under the time and [label], and returns the diff against the
+     * newest profile that was already there - the previous run, on the usual workflow of change,
+     * profile, look. Nothing is overwritten; the directory is the history, and any two of its
+     * files can be compared later with `./gradlew :cli --args="diff a b"`.
+     */
+    fun diffAgainstLatest(dir: java.nio.file.Path, label: String = ""): String {
+        val previous = ProfileStore.latest(dir)
+        val file = dir.resolve(ProfileStore.fileName(label))
+        save(file)
+        if (previous == null) return "Saved as $file; the first profile here, nothing to compare with yet."
+        return "Saved as $file\n" + diffFrom(load(previous), previous.fileName.toString(), file.fileName.toString()).render()
+    }
+
     companion object {
         /**
          * How far above the run-wide rate an operation has to sit before it is named, how many
@@ -2168,6 +2189,9 @@ class Report internal constructor(
          * A report that cannot count is a report a reader trusts slightly less, and the places this
          * matters are exactly the small runs where every other number is already marginal.
          */
+        /** Reads a profile written by [save]. */
+        fun load(path: java.nio.file.Path): Profile = ProfileStore.load(path)
+
         internal fun plural(n: Long, noun: String): String =
             if (n == 1L) "1 $noun" else String.format(Locale.ROOT, "%,d ${noun}s", n)
 

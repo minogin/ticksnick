@@ -1,5 +1,7 @@
 package com.ticksnick
 
+import java.nio.file.Files
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -15,7 +17,7 @@ import kotlin.test.assertTrue
  * warning, that a bound which found nothing never prints a number, and that a stopped session
  * cannot render as though it were a result.
  */
-class ReportTest {
+class ProfileTest {
 
 
     /**
@@ -33,7 +35,7 @@ class ReportTest {
      * not: the mangled character always lands exactly where a sentence explains *why*, because that
      * is what a dash is for. Sixteen strings carried one.
      *
-     * The library cannot fix this at the other end — [Report.render] returns a `String` and somebody
+     * The library cannot fix this at the other end — [Profile.render] returns a `String` and somebody
      * else decides the encoding it is printed with — so the only reliable answer is to emit nothing
      * that needs an encoding.
      */
@@ -62,13 +64,13 @@ class ReportTest {
     }
 
     /** A report with the warnings, the duty block and both tables all present at once. */
-    private fun loadedReport(): Report {
+    private fun loadedReport(): Profile {
         val fine = OperationStat(0, "work", 100, 1_000_000, 60, 3, 20, 10, 100)
         val c = CoarseStat(
             0, "request", 10, 10_000_000, 100, 2_000_000, LongArray(SpanHistogram.BUCKETS),
             80, 40, 80, 40, 40, 40, LongArray(MAX_OPERATIONS + 1) { if (it == 0) 80 else 0 }, 5,
         )
-        return Report(
+        return Profile(
             operations = listOf(fine), idleHits = 50, ticks = 1_000,
             samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 4,
             duty = DutyReport(
@@ -121,7 +123,7 @@ class ReportTest {
         state: Boolean = true,
         d: DutyReport = duty(),
         failure: String? = null,
-    ) = Report(
+    ) = Profile(
         operations = ops,
         idleHits = idle,
         ticks = 20_000,
@@ -296,7 +298,7 @@ class ReportTest {
     /** A leak that did not stop the session is still counted and still printed. */
     @Test
     fun `a non-fatal leak is still reported`() {
-        val r = Report(
+        val r = Profile(
             operations = listOf(stat("a", hits = 100, calls = 1000)),
             idleHits = 0, ticks = 20_000, samplingSpanNanos = 20_000_000_000,
             durationNanos = 20_000_000_000, threads = 8, duty = duty(),
@@ -323,5 +325,26 @@ class ReportTest {
         assertTrue(threadTime(999_000_000.0).endsWith("ms"))
         assertTrue(threadTime(40_080_000_000.0).endsWith("s"))
         assertFalse(threadTime(40_080_000_000.0).contains("ms"))
+    }
+
+    @Test
+    fun `a profile survives a round trip through a file`() {
+        val p = loadedReport()
+        val path = Files.createTempFile("ticksnick", PROFILE_EXTENSION)
+        try {
+            p.save(path)
+            val back = Profile.load(path)
+            assertEquals(p.render(legend = true), back.render(legend = true), "the file lost something")
+        } finally {
+            Files.delete(path)
+        }
+    }
+
+    @Test
+    fun `a diff matches operations by name and marks unchanged calls`() {
+        val text = loadedReport().diffFrom(loadedReport(), "a", "b").render()
+        assertTrue("work" in text, "the fine operation is missing: $text")
+        assertTrue("1,000,000 =" in text, "equal calls should read as =: $text")
+        assertTrue("a -> b" in text, "the names are missing: $text")
     }
 }

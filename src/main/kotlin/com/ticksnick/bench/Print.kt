@@ -201,7 +201,7 @@ private fun printSampler(
     // bench drove itself. Everything below then goes through the library's own arithmetic rather
     // than a second copy of it written for the bench — which is how the two came to disagree once
     // already.
-    val report = Report(
+    val report = Profile(
         operations = (0 until Profiler.registeredCount()).map { id ->
             OperationStat(
                 id, Profiler.nameOf(id), sampler.counters[id], sampler.sessionCalls(id),
@@ -294,7 +294,7 @@ private fun configuredNanos(id: Int, lock: ContendedLock?): Double =
     if (id < OP_COUNT) OPS[id].selfNanos else lock?.holdNanos?.toDouble() ?: Double.NaN
 
 private fun printDetector(
-    report: Report,
+    report: Profile,
     stepNanos: Double,
     lock: ContendedLock?,
     lockOpId: Int,
@@ -361,7 +361,7 @@ private fun printDetector(
     println("  (the floor is one tick: a stall shorter than ${String.format(Locale.ROOT, "%.2f", stepNanos / 1e6)} ms cannot be seen at all)")
 
     // Working or waiting? The bound is arithmetic on the duty cycle and this operation's long-run
-    // occupancy — see Report.runningFloorOf — and here it can be checked, because the workers timed
+    // occupancy — see Profile.runningFloorOf — and here it can be checked, because the workers timed
     // both halves of what lockedUpdate did.
     for (op in flagged) {
         println("  ${op.name}: ${report.verdictFor(op)}")

@@ -145,8 +145,16 @@ Profiler.start(stepMillis = 1.0)
 
 s = op(parse) { parseRecord(input) }              // wrap the work; nesting is fine
 
-println(Profiler.stop().render())
+val profile = Profiler.stop()                     // the data of the session: a Profile
+println(profile.render())                         // the report
+println(profile.diffAgainstLatest(Path.of("profiles"), label = "after-fix"))  // and the change
 ```
+
+The last line saves the profile under the time and label into `profiles/`, nothing overwritten, and
+prints it against the newest one already there - so the usual loop of change, profile, look shows
+the change every time. Any two saved profiles compare later with
+`./gradlew :cli --args="diff before.tsp after.tsp"`, and `render` re-renders one; outside Gradle it is
+`java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli` with the same arguments.
 
 `./gradlew :run --args="--demo"` runs exactly that against a toy workload and prints the report, so
 there is a working example to copy. Up to 256 operations, registered by name at runtime.
@@ -383,7 +391,10 @@ jitter, and in the whole project it never produced a measurement.
 src/main/kotlin/com/ticksnick/        the library — this, and nothing else, is the artifact
   Profiler.kt   the slot, the registry, op { } / enter / exit
   Sampler.kt    the sampling thread: the tick loop and the slot walk
-  Report.kt     what a session collected, and how it is rendered
+  Profile.kt    what a session collected - a Profile - and how it is rendered
+  Store.kt      a Profile as a file, and the directory of them
+  Diff.kt       two Profiles side by side
+  Cli.kt        ./gradlew :cli --args="render | diff ..."
   Duty.kt       how much of the occupancy was CPU, and the bound that puts on every share
 src/main/kotlin/com/ticksnick/bench/  the harness — never shipped
   Workload.kt   the twenty operations, the call graph, the schedule

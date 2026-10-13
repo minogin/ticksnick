@@ -334,7 +334,7 @@ object Profiler {
      * **What it costs, and it is a real cost:** a thread that arrives past the ceiling has no index
      * and so is no longer in the walk at all. It used to be sampled and merely invisible to the
      * long-execution detector. Now it is invisible to both, and the report says how many such
-     * threads there were — see [Report.untrackedSlots]. That is a bounded, stated degradation in
+     * threads there were — see [Profile.untrackedSlots]. That is a bounded, stated degradation in
      * place of an unbounded walk, and an unbounded walk corrupts every number rather than one.
      */
     private val slotByIndex = java.util.concurrent.atomic.AtomicReferenceArray<OpSlot?>(MAX_SLOTS)
@@ -753,7 +753,7 @@ object Profiler {
      * Labels left open at a point the caller said should be quiescent. See [expectBalanced].
      *
      * For the life of the process, because [expectBalanced] is a check a caller may make with no
-     * session running at all. What a [Report] carries is this minus [imbalancesAtStart], for the
+     * session running at all. What a [Profile] carries is this minus [imbalancesAtStart], for the
      * same reason `Sampler.callsAtStart` exists: every number in a report is about one session.
      */
     private val imbalances = AtomicInteger(0)
@@ -769,7 +769,7 @@ object Profiler {
      */
     private var imbalancesAtStart = 0
 
-    /** [untrackedSlots] as it stood when the current session began. See [Report.untrackedSlots]. */
+    /** [untrackedSlots] as it stood when the current session began. See [Profile.untrackedSlots]. */
     private var untrackedAtStart = 0
 
     /** [reclaimedSlots] as it stood when the current session began. */
@@ -924,7 +924,7 @@ object Profiler {
     }
 
     /** Stops sampling and returns what was collected. */
-    fun stop(): Report {
+    fun stop(): Profile {
         val s = checkNotNull(sampler) { "not sampling" }
         s.shutdown()
         sampler = null
@@ -988,7 +988,7 @@ object Profiler {
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),
         )
         val coarseTree = tree.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList()
-        return Report(
+        return Profile(
             stats, s.counters[NO_OP_INDEX], s.ticks, s.span, duration, s.maxSlots, s.duty(), s.failure,
             imbalances = imbalances.get() - imbalancesAtStart, openAtEnd = openSpans(), stateSampled = s.sampleState,
             untrackedSlots = (untrackedSlots() - untrackedAtStart).coerceAtLeast(0),

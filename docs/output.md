@@ -6,7 +6,7 @@ where a line is a warning, what to do about it.
 > **If you change the report, change this file, and change the legend `render()` prints — all
 > three.** The legend and this document say the same things on purpose, because a reader with a
 > terminal and no browser still needs the short version. Two copies of anything drift: a KDoc in
-> this project spent a day describing a function it had been moved away from. `Report.render()`
+> this project spent a day describing a function it had been moved away from. `Profile.render()`
 > carries a marker pointing here.
 
 Everything below is a real run — `./gradlew :run --args="--demo --seconds=12"`, which profiles a toy
@@ -679,6 +679,33 @@ condition causes it: a leaked label under `strict`. Pass `strict = false` for la
 not own and cannot fix — the leak is then still counted and still printed.
 
 ---
+
+## The diff: this run against the one before
+
+A profile is the data of a session, and `render()` is the report made from it. `profile.save(path)`
+writes the data, `Profile.load(path)` reads it back, and `after.diffFrom(before).render()` is the
+comparison - by operation name in the first table, by coarse path in the second, every figure as
+`before -> after` with the change beside it, sorted by how much the thread-time moved:
+
+```
+Diff          2026-10-13T19-43-01 baseline.tsp -> 2026-10-13T19-43-37 presized.tsp
+Wall time     11.3 s -> 11.4 s = active 10.6 s -> 10.8 s + paused 675 ms -> 643 ms
+
+COARSE AND FINE OPERATIONS - own time, matched by name, sorted by the change
+Operation                  |           Thread-time           change |  Thread-time per call |                        Calls |                     Long
+node                       |      3.38 s -> 4.04 s   +657 ms +19.4% |      211 ns -> 252 ns |                 16,038,234 = |                   - -> -
+visitedAdd                 |      6.41 s -> 5.88 s    -532 ms -8.3% |      198 ns -> 182 ns |                 32,374,539 = | 8 / 797 ms -> 1 / 74.4 ms
+nextAdd                    |      196 ms -> 134 ms  -62.7 ms -31.9% |    12.2 ns -> 8.34 ns |                 16,038,134 = |         8 / 53.1 ms -> -
+```
+
+**Calls are the check.** `=` says the two runs did the same work, so a change in thread-time is a
+change in the step. Two counts means different work, and a faster step is not what moved.
+
+`profile.diffAgainstLatest(dir, label)` is the usual loop in one call: it saves the profile into the
+directory under the time and the label, and prints it against the newest file that was already
+there. Nothing is overwritten; the directory is the history, and `./gradlew :cli --args="diff a b"`
+compares any two of its files later. A diff tool on two rendered reports does not do this job:
+every number differs and the arithmetic is left to the eye.
 
 ## The last word, which is not a warning
 

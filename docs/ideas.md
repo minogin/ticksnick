@@ -1298,6 +1298,16 @@ from the detector, which loses nothing since its executions are known to be long
 should bump the counter per iteration, which costs what the label was placed to avoid. Exclude is
 the cheaper and the honest one: the detector is for calls that should be short and were not.
 
+## 44. The diff leaves out the threading columns · open
+
+The diff prints thread-time, per call, calls and `Long`, and not thread-time%, runnable/waiting,
+wall-time, concurrency, workers, pool, hits or noise. The share and the noise belong to a run on
+its own, and on one thread the spread columns are ones. But on a threaded program runnable/waiting
+and concurrency are exactly what a change can move - a lock fix shows there and not in thread-time -
+so those two want to be in the diff as `before -> after` pairs, and the coarse half wants its
+runnable/waiting too. Andrey, 2026-10-13: "at least we should not forget about that." To be added
+when the first threaded diff is read; the graph benchmark is one thread and would not test it.
+
 ## Promoted to plan.md
 
 **Phase 3.5** is item 9 above, reframed from detecting bad operations to bounding the error on every

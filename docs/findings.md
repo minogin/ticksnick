@@ -283,6 +283,15 @@ five 92.6%. Might be machine-specific; it does not reproduce here.
 
 ## The hook
 
+**One coarse execution costs about 50 ns, measured directly, and the calling-context tree did not
+move it.** `--coarsecost`, 2026-10-13: the body alone, the body under one label, and the body under
+one label inside three open ones, interleaved with the order rotated, fifteen rounds, sampler on.
+Before the tree: 51.5 ns flat, 48.3 ns deep. After it: 47.9 ns and 48.4 ns. CPU clock 150-205% on
+both, same session, probe beside the run. The 40 ns the tier boundary is derived from was two thirds
+measured until now; the whole is 48-52 ns on this machine at that clock, and the boundary's
+arithmetic in profiler.md is unchanged by a quarter more. The first version of the bare arm read
+0.1 ns: C2 composed twenty affine LCG steps into one, and the body is a xorshift now.
+
 **A volatile store on x86 is not a store.** It needs a StoreLoad barrier — a lock-prefixed
 instruction costing tens of cycles — and the hook does two per call. Measured at 16% of the
 bench's throughput, against a design that assumed single-digit nanoseconds.
@@ -1848,7 +1857,8 @@ registration rather than an edit at every call site, so the report's advice — 
 coarse label"* — is far cheaper to act on and will be acted on more often. The number below decides
 when that advice is given, and it is still partly assumed.
 
-**What a coarse label will cost per execution — only two thirds of it is measured.** The tier
+**What a coarse label will cost per execution — only two thirds of it is measured.** *Measured
+since, 2026-10-13, under "The hook": 48-52 ns.* The tier
 boundary in [profiler.md](profiler.md#where-the-boundary-is) is derived from ~40 ns per coarse
 execution, of which **21.5 ns is measured** — fitted from the Lucene timed-wrapper comparison, which
 is two `nanoTime` calls plus an accumulate — and the rest is an assumed cost for allocating the

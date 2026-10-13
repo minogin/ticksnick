@@ -40,6 +40,12 @@ class CoarseContext @PublishedApi internal constructor(
     @JvmField val parent: CoarseContext?,
     /** `System.nanoTime()` at entry. Half of the only exactly-measured quantity in the report. */
     @JvmField val startNanos: Long,
+    /**
+     * Where this execution sits in the opening thread's calling-context tree, or null for a
+     * context made outside the hook. Set at entry so that the sampler credits the node with one
+     * read and exit records the span into it with none. See [CoarsePath].
+     */
+    @JvmField internal val path: CoarsePath? = null,
 ) {
     /** How many ancestors this context has. Kept so the sampler's walk is bounded without counting. */
     @JvmField
@@ -171,11 +177,133 @@ object SpanHistogram {
 }
 
 /**
- * One thread's account of one coarse type: what it measured itself, as against what the sampler saw.
+ * One node of a calling-context tree: a coarse type at a path of coarse types.
  *
- * Per thread, so the recording is a handful of plain writes with a single writer — no fence and no
- * contention on a path that runs thousands of times a second. Folded together when the report is
- * taken, and folded into the retired totals when the thread goes, exactly as the fine counters are.
+ * The tree replaced a parent-keyed table. That table knew that `tokenize` ran under `parse`, and
+ * not whether it was the `parse` under `query` or the one under `load`: with a shared operation
+ * the figures under each of its callers were one slot, printed twice. A node here is a whole path,
+ * so every row the report draws is a stat of its own. Andrey, 2026-10-13: "we probably need to
+ * respect the whole path."
+ *
+ * **One tree per thread, single writer, merged by path when the report is taken** - the same
+ * bargain the per-type aggregates made. Entry steps to a child, creating it the first time; exit
+ * records the span into the node the context carries. A context borrowed from another thread
+ * carries a node of that thread's tree, so the borrowing thread resolves the path in its own tree
+ * instead - the rare case, and a walk of at most [MAX_COARSE_DEPTH].
+ *
+ * The sampler writes its own fields on a node - hits, the fine cross-tabulation, the pauses - and
+ * nothing else does. The owning thread writes the span fields and nothing else does. Two writers,
+ * disjoint fields, no fence: a read a few nanoseconds stale is the bargain everything here makes.
+ */
+internal class CoarsePath(
+    /** The coarse type at this node, [ROOT] for the root of a tree, [DEEPER] for the overflow node. */
+    @JvmField val type: Int,
+    @JvmField val parent: CoarsePath?,
+    /** The slot whose tree this is, or null for a merged tree. */
+    @JvmField val owner: OpSlot?,
+) {
+    @JvmField val depth: Int = if (parent == null) 0 else parent.depth + 1
+
+    /** Children by type, plus the overflow node at the end. Allocated on the first child. */
+    @JvmField var children: Array<CoarsePath?>? = null
+
+    // The span half: written by the owning thread.
+    @JvmField var count: Long = 0
+    @JvmField var sumNanos: Long = 0
+    @JvmField var minNanos: Long = Long.MAX_VALUE
+    @JvmField var maxNanos: Long = 0
+    @JvmField val hist = LongArray(SpanHistogram.BUCKETS)
+
+    // The sampled half: written by the sampling thread.
+    @JvmField var inclusiveHits: Long = 0
+    @JvmField var runningInclusiveHits: Long = 0
+    /** Inclusive hits by the fine operation they caught, last entry no fine label. Allocated on the first hit. */
+    @JvmField var fine: LongArray? = null
+    /**
+     * Pause time charged to this node: every pause the sampler saw, charged once to every node
+     * open at the tick that followed it. See `Sampler`, "the pause, charged".
+     */
+    @JvmField var pausedNanos: Long = 0
+    /** The tick whose pause was last charged here, so three threads under one node charge it once. */
+    @JvmField var pauseStamp: Long = -1
+
+    fun child(type: Int): CoarsePath {
+        val cs = children ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES + 1).also { children = it }
+        return cs[type] ?: CoarsePath(type, this, owner).also { cs[type] = it }
+    }
+
+    fun record(nanos: Long) {
+        count++
+        sumNanos += nanos
+        if (nanos < minNanos) minNanos = nanos
+        if (nanos > maxNanos) maxNanos = nanos
+        hist[SpanHistogram.bucketOf(nanos)]++
+    }
+
+    /** Adds [o] and everything under it into this node and the matching nodes under it. */
+    fun mergeFrom(o: CoarsePath) {
+        count += o.count
+        sumNanos += o.sumNanos
+        if (o.minNanos < minNanos) minNanos = o.minNanos
+        if (o.maxNanos > maxNanos) maxNanos = o.maxNanos
+        for (i in hist.indices) hist[i] += o.hist[i]
+        inclusiveHits += o.inclusiveHits
+        runningInclusiveHits += o.runningInclusiveHits
+        pausedNanos += o.pausedNanos
+        val of = o.fine
+        if (of != null) {
+            val f = fine ?: LongArray(MAX_OPERATIONS + 1).also { fine = it }
+            for (i in f.indices) f[i] += of[i]
+        }
+        val ocs = o.children ?: return
+        for (t in ocs.indices) {
+            val oc = ocs[t] ?: continue
+            if (t == DEEPER_INDEX) deeper().mergeFrom(oc) else child(t).mergeFrom(oc)
+        }
+    }
+
+    /** Clears every figure here and below, keeping the shape. See `Profiler.resetCoarse`. */
+    fun reset() {
+        count = 0
+        sumNanos = 0
+        minNanos = Long.MAX_VALUE
+        maxNanos = 0
+        hist.fill(0L)
+        inclusiveHits = 0
+        runningInclusiveHits = 0
+        fine?.fill(0L)
+        pausedNanos = 0
+        pauseStamp = -1
+        val cs = children ?: return
+        for (c in cs) c?.reset()
+    }
+
+    /** The one node under a root where everything nested past [MAX_COARSE_DEPTH] is recorded. */
+    fun deeper(): CoarsePath {
+        val cs = children ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES + 1).also { children = it }
+        return cs[DEEPER_INDEX] ?: CoarsePath(DEEPER, this, owner).also { cs[DEEPER_INDEX] = it }
+    }
+
+    /** Whether any span or sample was recorded here or below. */
+    fun isEmpty(): Boolean {
+        if (count > 0 || inclusiveHits > 0) return false
+        val cs = children ?: return true
+        for (c in cs) if (c != null && !c.isEmpty()) return false
+        return true
+    }
+
+    companion object {
+        const val ROOT = -1
+        const val DEEPER = -2
+
+        /** The slot past the last type in a children array is the overflow node. */
+        const val DEEPER_INDEX = MAX_COARSE_TYPES
+    }
+}
+
+/**
+ * One coarse type's totals over every path and every thread: what the per-type statistics are
+ * taken from. Built from the tree when the report is taken, never written on the hot path.
  */
 internal class CoarseAgg(@JvmField val type: Int) {
     @JvmField var count: Long = 0
@@ -184,46 +312,12 @@ internal class CoarseAgg(@JvmField val type: Int) {
     @JvmField var maxNanos: Long = 0
     @JvmField val hist = LongArray(SpanHistogram.BUCKETS)
 
-    /**
-     * Executions and their spans by the type of the execution they were nested in, index
-     * `parent + 1`, with 0 for "none". The report draws the coarse tree from this: which operation
-     * ran under which, with the exact spans under each parent. Two more longs per span, on a path
-     * that already pays for an allocation and two clock reads.
-     */
-    @JvmField val byParentCount = LongArray(MAX_COARSE_TYPES + 1)
-    @JvmField val byParentNanos = LongArray(MAX_COARSE_TYPES + 1)
-
-    fun record(nanos: Long, parentType: Int) {
-        count++
-        sumNanos += nanos
-        if (nanos < minNanos) minNanos = nanos
-        if (nanos > maxNanos) maxNanos = nanos
-        hist[SpanHistogram.bucketOf(nanos)]++
-        val p = if (parentType in 0 until MAX_COARSE_TYPES) parentType + 1 else 0
-        byParentCount[p]++
-        byParentNanos[p] += nanos
-    }
-
-    fun mergeFrom(o: CoarseAgg) {
+    fun mergeFrom(o: CoarsePath) {
         count += o.count
         sumNanos += o.sumNanos
         if (o.minNanos < minNanos) minNanos = o.minNanos
         if (o.maxNanos > maxNanos) maxNanos = o.maxNanos
         for (i in hist.indices) hist[i] += o.hist[i]
-        for (i in byParentCount.indices) {
-            byParentCount[i] += o.byParentCount[i]
-            byParentNanos[i] += o.byParentNanos[i]
-        }
-    }
-
-    fun reset() {
-        count = 0
-        sumNanos = 0
-        minNanos = Long.MAX_VALUE
-        maxNanos = 0
-        hist.fill(0L)
-        byParentCount.fill(0L)
-        byParentNanos.fill(0L)
     }
 }
 
@@ -243,7 +337,7 @@ internal class CoarseAgg(@JvmField val type: Int) {
 inline fun <T> op(op: CoarseOp, body: () -> T): T {
     val slot = Profiler.slot()
     val parent = slot.contextOpaque()
-    val ctx = CoarseContext(op.id, parent, System.nanoTime())
+    val ctx = CoarseContext(op.id, parent, System.nanoTime(), slot.pathFor(parent, op.id))
     slot.setContextOpaque(ctx)
     try {
         return body()
@@ -260,6 +354,6 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
         // window is a nanosecond or two against a 1 ms sampling step, so swapping these two lines
         // leaves the suite green. Reasoned, not measured, and left in the safe order.
         ctx.markClosed()
-        slot.recordSpan(op.id, System.nanoTime() - ctx.startNanos, parent?.type ?: -1)
+        slot.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
     }
 }

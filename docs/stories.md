@@ -19,6 +19,16 @@ Newest first within each section. An entry that is a conjecture says so.
 
 ## Top ones: not possible with a stack profiler
 
+### The collection is paid by the level after the one that allocated
+*2026-10-13, the graph benchmark, `C:\idea\graph`. Numbers in its `docs/profiler-notes.md`.*
+
+A `Paused` column on the coarse tree: 768 ms of stop-the-world time in a 16.2 s query, 421 ms in
+`level[4]`, which boxes 13 million `Long`s, and 177 ms in `level[5]`, which allocates nothing of its
+own and inherits the collection the level before it provoked. A GC log has the pauses with
+timestamps and a flame graph has the frames; neither says which iteration of the same loop was
+stopped, because the depth is a loop variable, not a frame. Conjecture on the cause of each pause;
+the placement is measured.
+
 ### A BFS costs ten to twenty times more per level, until the last one
 *2026-10-12, the graph benchmark, `C:\idea\graph`. Numbers in its `docs/profiler-notes.md`.*
 

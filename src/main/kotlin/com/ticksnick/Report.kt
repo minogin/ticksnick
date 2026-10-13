@@ -323,6 +323,50 @@ class OperationStat internal constructor(
 }
 
 /**
+ * One node of the coarse tree: a coarse operation at one path of coarse operations, with the
+ * figures of the executions that ran exactly there.
+ *
+ * The coarse table is drawn from these. A [CoarseStat] is the operation over every path, which is
+ * what the floor check, the fine table's folding and the parallelism line want; a node is what the
+ * tree wants, and the two are the same figures only for an operation with one caller. See
+ * `CoarsePath` for where the figures come from.
+ */
+class CoarseNode internal constructor(
+    val type: Int,
+    val name: String,
+    /** Executions completed at this path. Exact. */
+    val count: Long,
+    val spanSumNanos: Long,
+    val spanMinNanos: Long,
+    val spanMaxNanos: Long,
+    internal val hist: LongArray,
+    /** Samples caught anywhere under an execution at this path. */
+    val inclusiveHits: Long,
+    /** Of those, the ones whose thread was runnable. */
+    val runningInclusiveHits: Long,
+    /** Inclusive samples by the fine operation they caught. Last entry: no fine label. */
+    internal val fine: LongArray,
+    /**
+     * Pause time charged here: every pause the sampler saw with an execution of this path open,
+     * scaled to what the JVM confirmed. The pause that interrupted the span, which is not always
+     * the one the span caused.
+     */
+    val pausedNanos: Long,
+    val children: List<CoarseNode>,
+) {
+    val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
+
+    /** As [CoarseStat.percentileNanos]: at the top of its bucket, never above the exact maximum. */
+    fun percentileNanos(p: Double): Double {
+        val v = SpanHistogram.percentile(hist, count, p)
+        return if (v.isNaN()) v else minOf(v, spanMaxNanos.toDouble())
+    }
+
+    /** Every node of the subtree, this one first. */
+    fun flatten(): List<CoarseNode> = listOf(this) + children.flatMap { it.flatten() }
+}
+
+/**
  * One coarse operation's line in a [Report].
  *
  * The asymmetry with [OperationStat] is the point of the tier. **Span is measured**, exactly, by two
@@ -372,20 +416,7 @@ class CoarseStat internal constructor(
     val selfPeak: Int = 0,
     /** Distinct threads that ran an execution of this operation. See [Profiler.coarseThreadsOf]. */
     val threads: Int = 0,
-    /** Executions by the type they were nested in, index `parent + 1`, 0 for none. See [CoarseAgg]. */
-    internal val byParentCount: LongArray = LongArray(MAX_COARSE_TYPES + 1),
-    /** The spans of those executions, summed the same way. */
-    internal val byParentNanos: LongArray = LongArray(MAX_COARSE_TYPES + 1),
 ) {
-    /** Executions that were nested in no coarse operation. */
-    val rootCount: Long get() = byParentCount[0]
-
-    /** Executions nested in an execution of [parent]. */
-    fun countUnder(parent: Int): Long = byParentCount[parent + 1]
-
-    /** Their spans, summed. */
-    fun spanNanosUnder(parent: Int): Long = byParentNanos[parent + 1]
-
     /** Mean measured duration of one execution. Exact, not sampled. */
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -539,6 +570,8 @@ class Report internal constructor(
     val coarseSampleHits: Long = 0,
     /** How long every thread was stopped, which is what stretches [stepNanos] past the requested step. */
     val pause: PauseReport = PauseReport.NONE,
+    /** The coarse tree: the roots, each with what ran under it. Empty when no coarse label was placed. */
+    val coarseTree: List<CoarseNode> = emptyList(),
 ) {
     /** False when a fatal finding stopped the session. See the severity ladder in plan.md. */
     val ok: Boolean get() = failure == null
@@ -1293,8 +1326,9 @@ class Report internal constructor(
             appendLine("    is an upper bound on the speedup rather than the speedup itself")
             appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
             appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
-            appendLine("  the tree under the table is which coarse operation ran under which, with the exact spans")
-            appendLine("    under each parent; the fine steps on a leaf are its cross-tabulation, sampled")
+            appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
+            appendLine("    the executions on that path alone; 'made of' under a leaf is its cross-tabulation, sampled")
+            appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
         }
     }
 
@@ -1303,106 +1337,74 @@ class Report internal constructor(
         if (seen.isEmpty()) return
         appendLine()
         // Wall time, not active: a span is two timestamps, and a request that sat through a 2.6 s
-        // collection took 2.6 s longer. Said in the heading, with the total it includes, because
-        // the table above is over active time and nothing else on the page says they differ. Per
-        // row would be better and needs the pause timestamps against each span, which nothing
-        // records - ideas.md item 41.
+        // collection took 2.6 s longer. The pauses stay in - the caller waited for them - and the
+        // `Paused` column says how much of each row they were. Taking them out would make a
+        // 9.07 s level look like an 8.5 s one, and where they fell is itself a lead: the span that
+        // collects is the span that allocated, or the one after it. Andrey, 2026-10-13.
+        //
+        // The table is the tree. It was a flat table sorted by total with a tree under it, and the
+        // two said the same executions and totals twice. Inclusive time is monotone up a path, so
+        // the heaviest operation anywhere is at the end of the first branch - the ranking holds.
         val pausedInSpan = pause.confirmedPausedIn(samplingSpanNanos)
         appendLine(
-            "COARSE OPERATIONS - inclusive wall time" +
-                    if (pausedInSpan > 0) ", ${duration(pausedInSpan.toDouble())} of pauses included" else ""
+            "COARSE OPERATIONS - inclusive wall time, nested as it ran" +
+                    if (pausedInSpan > 0) "; a pause is charged to every operation it interrupted" else ""
         )
         appendLine(
             String.format(
-                // `busy/exec` is gone: it was `working x mean`, both of which are printed beside it,
-                // and its name did not say it summed over the threads in the execution — which is
-                // why it could exceed the span next to it and look like a defect. It existed for the
-                // old headline "mean - busy/exec is the waiting", and that stopped being true the
-                // moment work could cross a thread. `waiting` is the reading that survives.
-                // `Total` is the sum of the measured spans - exact, since every one of them was
-                // timed - and it is what the table is sorted by. It is the ranking that answers
-                // "what do I fix first": mean alone puts a rare slow operation above a frequent one
-                // costing ten times more, and a percentile ranks by tail, which is a latency
-                // question rather than a cost one.
-                //
-                // Inclusive, so a parent contains its children and always sorts above them. Self
-                // time is the honest answer once spans nest and the coarse tier cannot measure it
-                // yet - ideas.md item 28.
-                // `inside`, `working` and `in flight` left this table for the per-operation lines
-                // below it. Asked where the parallelism was, a reader could not find it in a report
-                // carrying three columns of it: the word never appeared, and the two questions the
-                // columns answer - does one execution use several threads, and how many executions
-                // run at once - were adjacent columns with nothing saying they were different
-                // questions. A prose line can say both, and a column head cannot.
-                Locale.ROOT, "%-25s %11s %10s %10s %10s %10s %10s %10s %18s",
-                "Coarse operation", "Executions", "Total v", "Mean", "p50", "p90", "p99", "Max",
-                "Runnable / Waiting"
+                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "Total v", "Paused", "Mean",
+                "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
         )
         appendLine("-".repeat(COARSE_WIDTH))
-        for (c in seen.sortedByDescending { it.spanSumNanos }) {
-            val waitShare =
-                if (c.inclusiveHits == 0L) 0.0
-                else (c.inclusiveHits - c.runningInclusiveHits).toDouble() / c.inclusiveHits
-            appendLine(
-                String.format(
-                    Locale.ROOT, "%-25s %,11d %10s %10s %10s %10s %10s %10s %18s",
-                    c.name, c.count,
-                    duration(c.spanSumNanos.toDouble()),
-                    duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
-                    duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
-                    duration(c.spanMaxNanos.toDouble()),
-                    runnableSplit(waitShare)
-                )
-            )
-        }
-        appendLine("-".repeat(COARSE_WIDTH))
-        // The tree: which coarse operation ran under which, with the exact spans under each parent,
-        // and the fine steps as the leaves. It replaces the `was:` lines, which were a flat
-        // cross-tabulation standing in for a tree the report could not draw: `run`, `runBatch` and
-        // `query` each printed the same breakdown, because nothing said one contained the next.
-        // Andrey, 2026-10-12: "would it not be more clear if we put them in the table as kind of
-        // hierarchy?"
-        //
-        // Executions and spans are per (parent, child) and exact. The fine breakdown is per type
-        // and sampled, so it is printed on the leaves only - a parent's would be its children's
-        // over again. A type under two parents appears under each with its figures under that one.
-        // Nesting of a type inside itself is cut at the type, not followed.
-        val byId = seen.associateBy { it.type }
-        fun childrenOf(parent: Int): List<CoarseStat> =
-            seen.filter { it.type != parent && it.countUnder(parent) > 0 }
-                .sortedByDescending { it.spanNanosUnder(parent) }
+        val byType = coarse.associateBy { it.type }
+        val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
 
-        fun StringBuilder.node(c: CoarseStat, parent: Int?, depth: Int, path: Set<Int>) {
-            val count = if (parent == null) c.rootCount else c.countUnder(parent)
-            val nanos = if (parent == null) {
-                c.spanSumNanos - (0 until MAX_COARSE_TYPES).sumOf { c.spanNanosUnder(it) }
-            } else c.spanNanosUnder(parent)
-            val children = if (depth >= MAX_COARSE_DEPTH) emptyList() else childrenOf(c.type).filter { it.type !in path }
-            val leaf = children.isEmpty()
-            val fine = if (!leaf || c.inclusiveHits == 0L) "" else {
-                val parts = operations
-                    .map { it.name to c.fine[it.id] }
-                    .plus("unlabelled" to c.fine[NO_OP_INDEX])
-                    .filter { it.second > 0 }
-                    .sortedByDescending { it.second }
-                val shown = parts.take(6).joinToString(", ") {
-                    it.first + " " + percent(it.second * 100.0 / c.inclusiveHits)
-                }
-                val rest = parts.size - 6
-                if (parts.isEmpty()) "" else "   " + shown + (if (rest > 0) ", and $rest more" else "")
-            }
+        fun waitSplit(inclusive: Long, running: Long): String =
+            runnableSplit(if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive)
+
+        fun madeOf(fine: LongArray, inclusiveHits: Long): String {
+            val parts = operations
+                .map { it.name to fine[it.id] }
+                .plus("unlabelled" to fine[NO_OP_INDEX])
+                .filter { it.second > 0 }
+                .sortedByDescending { it.second }
+            if (parts.isEmpty()) return ""
+            val shown = parts.take(6).joinToString(", ") { it.first + " " + percent(it.second * 100.0 / inclusiveHits) }
+            val rest = parts.size - 6
+            return shown + (if (rest > 0) ", and $rest more" else "")
+        }
+
+        fun StringBuilder.node(n: CoarseNode, depth: Int) {
+            val indent = "  ".repeat(depth)
+            // An execution still open when the session ended has no span: its row keeps the
+            // samples and the children, and says `-` where the clock would go.
+            val timed = n.count > 0
             appendLine(
                 String.format(
-                    Locale.ROOT, "%-30s %,11d %10s%s",
-                    "  ".repeat(depth + 1) + c.name, count, duration(nanos.toDouble()), fine
+                    Locale.ROOT, COARSE_ROW,
+                    indent + n.name, n.count,
+                    if (timed) duration(n.spanSumNanos.toDouble()) else "-",
+                    if (n.pausedNanos > 0) duration(n.pausedNanos.toDouble()) else "-",
+                    if (timed) duration(n.meanSpanNanos) else "-",
+                    if (timed) duration(n.percentileNanos(0.50)) else "-",
+                    if (timed) duration(n.percentileNanos(0.90)) else "-",
+                    if (timed) duration(n.percentileNanos(0.99)) else "-",
+                    if (timed) duration(n.spanMaxNanos.toDouble()) else "-",
+                    waitSplit(n.inclusiveHits, n.runningInclusiveHits)
                 )
             )
-            // The two parallelism questions, under the node they are about, and only on a run
+            // The fine steps, on the leaves only: a parent's would be its children's over again.
+            if (n.children.isEmpty() && n.inclusiveHits > 0) {
+                val made = madeOf(n.fine, n.inclusiveHits)
+                if (made.isNotEmpty()) appendLine("$indent  made of: $made")
+            }
+            // The two parallelism questions, under the root they are about, and only on a run
             // with more than one thread: on one thread every number on the line is fixed by
             // construction, and a line that can only restate its neighbours is how a report earns
             // the wall-of-text complaint.
-            if (parent == null && threads > 1 && (!c.inside.isNaN() || !c.inFlight.isNaN())) {
+            val c = byType[n.type]
+            if (depth == 0 && threads > 1 && c != null && (!c.inside.isNaN() || !c.inFlight.isNaN())) {
                 val perExecution =
                     if (c.inside.isNaN()) "thread count per execution unknown"
                     else String.format(
@@ -1421,20 +1423,44 @@ class Report internal constructor(
                         Locale.ROOT, "; %.2f executions at once over %s",
                         c.inFlight, plural(threads.toLong(), "thread")
                     )
-                appendLine("  ".repeat(depth + 1) + "  parallelism: $perExecution$atOnce")
+                appendLine("$indent  parallelism: $perExecution$atOnce")
             }
-            for (child in children) node(child, c.type, depth + 1, path + c.type)
+            for (child in n.children.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
+                node(child, depth + 1)
+            }
         }
-        val roots = seen.filter { it.rootCount > 0 }.sortedByDescending { it.spanSumNanos }
-        if (roots.isNotEmpty()) {
-            appendLine(String.format(Locale.ROOT, "%-30s %11s %10s   %s", "  Nested as", "Executions", "Total", "made of, on the leaves"))
-            for (r in roots) node(r, null, 0, emptySet())
+        for (root in coarseTree.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
+            node(root, 0)
         }
-        // An operation whose every execution was nested in one that did not complete has no root
-        // and no parent in `seen`; it is still in the table above, and said here so it is not lost.
-        val orphans = seen.filter { c -> c.rootCount == 0L && (0 until MAX_COARSE_TYPES).none { p -> c.countUnder(p) > 0 && byId.containsKey(p) } }
-        if (orphans.isNotEmpty()) appendLine("  not in the tree, nested in nothing that completed: " + orphans.joinToString { it.name })
-        if (seen.any { it.inclusiveHits > 0 }) appendLine("-".repeat(COARSE_WIDTH))
+        appendLine("-".repeat(COARSE_WIDTH))
+        // An operation with more than one caller is a row under each, and those rows are its
+        // figures under that caller alone. Its percentiles over everything are a different
+        // question - "how long does a parse take" - and they are answered here, once, only when
+        // the question exists.
+        val shared = seen.filter { (nodesOf[it.type]?.size ?: 0) > 1 }.sortedByDescending { it.spanSumNanos }
+        if (shared.isNotEmpty()) {
+            appendLine("  Under more than one caller - all callers together:")
+            for (c in shared) {
+                val paused = nodesOf[c.type]!!.sumOf { it.pausedNanos }
+                appendLine(
+                    String.format(
+                        Locale.ROOT, COARSE_ROW,
+                        "  " + c.name, c.count,
+                        duration(c.spanSumNanos.toDouble()),
+                        if (paused > 0) duration(paused.toDouble()) else "-",
+                        duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
+                        duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
+                        duration(c.spanMaxNanos.toDouble()),
+                        waitSplit(c.inclusiveHits, c.runningInclusiveHits)
+                    )
+                )
+            }
+            appendLine("-".repeat(COARSE_WIDTH))
+        }
+        // A context made by hand rather than by the hook has no path and is in no tree. Its type
+        // still has its per-type figures; said here so it is not lost.
+        val missing = seen.filter { nodesOf[it.type] == null }
+        if (missing.isNotEmpty()) appendLine("  not in the tree, its contexts were made outside the hook: " + missing.joinToString { it.name })
         // The one signal for work escaping its context, which neither the floor check nor the
         // balance check can see. Stated as a measurement with both readings, because it cannot tell
         // "I bracketed part of the program" from "work escaped to another thread" and guessing would
@@ -2069,7 +2095,10 @@ class Report internal constructor(
          * which is true and is in the friction log. Then the parallelism columns left and took
          * more than `Total` had added.
          */
-        const val COARSE_WIDTH = 122
+        const val COARSE_WIDTH = 138
+
+        /** One row of the coarse table: name, executions, total, paused, five durations, the split. */
+        const val COARSE_ROW = "%-30s %,11d %10s %10s %10s %10s %10s %10s %10s %18s"
 
         /**
          * The fine table, likewise drawn to itself.

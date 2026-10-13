@@ -47,6 +47,14 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### "made of" needed asking about · 2026-10-13
+
+Andrey, shown a mock-up of the coarse tree with `made of: visitedAdd 82.4%, node 11.3%` under a
+leaf: *"what is 'made of'? fine ops?"* The phrase does not say that the parts are the fine
+operations sampled inside the span, or that the shares are of the span's own samples. Noticed by
+the person who designed the table, which is the kind of observation worth less; a reader who has
+not would stall harder. The wording stays for now and the legend says what it is.
+
 ### After a break, the header did not read
 *2026-10-11, Andrey, on the graph benchmark's report. **Acted on the same day: plan.md, "The five
 words".***

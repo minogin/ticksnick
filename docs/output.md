@@ -340,40 +340,42 @@ that is what the `parallelism:` line under the coarse table reports.
 ## The coarse table
 
 Present only if you placed a coarse label. It answers the question the table above structurally
-cannot: **how long did one execution take.**
+cannot: **how long did one execution take.** It is drawn as a tree: an operation sits under the one
+it ran inside, and its figures are the executions on that path alone.
 
 ```
-Coarse operation           Executions    Total v       Mean        p50        p90        p99        Max Runnable / Waiting
------------------------------------------------------------------------------------------------------------------------
-request                     3,203,348    95.78 s    29.9 us    20.5 us    45.1 us   180.2 us   17.01 ms   100.0% / 0.0%
------------------------------------------------------------------------------------------------------------------------
-  Nested as                     Executions      Total   made of, on the leaves
-  request                        2,058,556     47.8 s   flushBatch 36.3%, validateRecord 35.2%, parseRecord 12.9%, unlabelled 8.14%, indexRecord 7.51%
-    parallelism: 1.00 thread per execution, 1.00 of it on a CPU; 7.97 executions at once over 8 threads
+COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
+Coarse operation                Executions    Total v     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+------------------------------------------------------------------------------------------------------------------------------------------
+run                                      1     16.2 s     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+  runBatch                               1     16.2 s     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+    query                                1     16.2 s     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+      level[4]                           1     11.2 s     421 ms     11.2 s     11.2 s     11.2 s     11.2 s     11.2 s          100% / 0%
+        made of: visitedAdd 80.5%, node 10.8%, id 5.97%, nextAdd 2.78%
+      level[5]                           1     3.92 s     177 ms     3.92 s     3.92 s     3.92 s     3.92 s     3.92 s          100% / 0%
+        made of: node 90.4%, id 9.65%
+      level[3]                           1     1.02 s     169 ms     1.02 s     1.02 s     1.02 s     1.02 s     1.02 s          100% / 0%
+        made of: visitedAdd 73.0%, node 13.3%, nextAdd 8.26%, id 5.43%
+      level[2]                           1    29.4 ms          -    29.4 ms    29.4 ms    29.4 ms    29.4 ms    29.4 ms          100% / 0%
+        made of: visitedAdd 51.7%, node 37.9%, id 6.90%, nextAdd 3.45%
+------------------------------------------------------------------------------------------------------------------------------------------
 ```
 
-With nested labels the tree is the point. The graph benchmark, `run` around the measured batches,
-`runBatch` around each, `query` around each query and a family `level[0..5]` around each depth:
-
-```
-  Nested as                     Executions      Total   made of, on the leaves
-  run                                    1     12.2 s
-    runBatch                             1     12.2 s
-      query                              1     12.2 s
-        level[4]                         1     9.06 s   visitedAdd 81.3%, node 11.8%, nextAdd 1.95%, id 0.994%
-        level[5]                         1     2.55 s   node 95.0%, id 5.05%
-        level[3]                         1     584 ms   visitedAdd 71.0%, node 17.7%, nextAdd 6.52%, id 1.72%
-```
+The graph benchmark: `run` around the measured batches, `runBatch` around each, `query` around
+each query and a family `level[0..5]` around each depth. With one execution per row the
+percentiles repeat the total; on a request served a million times they are the point. The
+`parallelism:` line appears under a root on a run with more than one thread.
 
 | column | what it is | what to watch for |
 |---|---|---|
-| **executions** | completed executions, counted exactly | not sampled. If this disagrees with what you think ran, a label is leaking |
-| **total** | the measured spans summed, and what the table is sorted by | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** — a parent contains its children, so the outermost span always leads. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
+| **the nesting** | an operation under the one it ran inside; siblings by total | the figures on a row are the executions on **that path**. An operation with two callers is a row under each, and once more under the table as *all callers together* |
+| **executions** | completed executions on that path, counted exactly | not sampled. If this disagrees with what you think ran, a label is leaking |
+| **total** | the measured spans summed, **wall time** | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** - a parent contains its children. Inclusive time is monotone up a path, so the heaviest operation anywhere is at the end of the first branch. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
+| **paused** | of the total, time every thread was stopped - usually GC - charged to every span open when the pause lifted | the span the pause **interrupted**, not the one that caused it: a young collection lands in whoever allocated last. A `-` is none. Rows sum to at most the header's paused figure |
 | **mean, p50, p90, p99, max** | **measured**, two timestamps per execution | the only numbers in the whole report that are not sampled. Percentiles come from a log-bucket histogram: **at most 12.5% high, never low** |
-| **runnable / wait** | the same split as the fine table, over the samples caught anywhere inside the span | `0.0%` waiting here because the demo never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
-| **the tree** | which coarse operation ran under which: executions and spans under each parent, **exact** | a type under two parents appears under each. The figures are per parent, so a child's rows add up to its row in the table |
-| **made of, on the leaves** | the cross-tabulation, **sampled**: which fine operations ran under this one | on the leaves only. A parent's would be its children's over again. Neither tier produces this alone |
-| **`parallelism:` line** | the two parallelism questions, in words, under a root | see below — they are different questions and used to be adjacent columns |
+| **runnable / waiting** | the same split as the fine table, over the samples caught anywhere inside the span on that path | `0%` waiting here because the benchmark never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
+| **made of, under a leaf** | the cross-tabulation, **sampled**: which fine operations ran under this one | on the leaves only. A parent's would be its children's over again. Neither tier produces this alone |
+| **`parallelism:` line** | the two parallelism questions, in words, under a root | see below - they are different questions and used to be adjacent columns |
 
 ### The two parallelisms, which are not the same question
 

@@ -331,7 +331,7 @@ class CoarseTest {
         assertTrue("NOT CPU" in text, "the traps went missing")
         assertTrue("noise is 1/sqrt(hits)" in text, "the full legend was not printed")
         assertTrue("worth 275x when" in text, "the counterfactual argument was not printed")
-        assertTrue("the tree under the table is which coarse operation ran under which" in text, "the coarse half was not printed")
+        assertTrue("the coarse table is a tree" in text, "the coarse half was not printed")
     }
 
     private fun stat(
@@ -339,14 +339,20 @@ class CoarseTest {
         inclusive: Long = hits, runningInclusive: Long = running,
         instanceTicks: Long = inclusive, activeTicks: Long = instanceTicks,
         staleHits: Long = 0, name: String = "req", id: Int = 0,
-        /** Which coarse type every execution was nested in; -1 for none. */
-        parent: Int = -1,
     ) = CoarseStat(
         id, name, count, sumNanos, 0, 0, LongArray(SpanHistogram.BUCKETS),
         hits, running, inclusive, runningInclusive, instanceTicks, activeTicks,
         LongArray(MAX_OPERATIONS + 1), staleHits,
-        byParentCount = LongArray(MAX_COARSE_TYPES + 1).also { it[parent + 1] = count },
-        byParentNanos = LongArray(MAX_COARSE_TYPES + 1).also { it[parent + 1] = sumNanos },
+    )
+
+    /** A node of the coarse tree with the same figures as [stat], and [children] under it. */
+    private fun node(
+        c: CoarseStat, paused: Long = 0, fine: LongArray = LongArray(MAX_OPERATIONS + 1),
+        children: List<CoarseNode> = emptyList(),
+        count: Long = c.count, sumNanos: Long = c.spanSumNanos, inclusive: Long = c.inclusiveHits,
+    ) = CoarseNode(
+        c.type, c.name, count, sumNanos, c.spanMinNanos, c.spanMaxNanos, LongArray(SpanHistogram.BUCKETS),
+        inclusive, inclusive, fine, paused, children,
     )
 
     /**
@@ -360,6 +366,8 @@ class CoarseTest {
         dutyAvailable: Boolean = true,
         staleContextHits: Long = 0,
         coarseSampleHits: Long = 0,
+        /** The tree; by default every operation is a root with no children. */
+        tree: List<CoarseNode> = coarse.map { node(it) },
     ) = Report(
         operations = listOf(OperationStat(0, "fine", labelled, labelled, 0, 0, 0, 0, labelled)),
         idleHits = 0,
@@ -379,6 +387,7 @@ class CoarseTest {
         coarse = coarse,
         staleContextHits = staleContextHits,
         coarseSampleHits = coarseSampleHits,
+        coarseTree = tree,
     )
 
     @Test
@@ -557,24 +566,46 @@ class CoarseTest {
     }
 
     /**
-     * The tree: `query` nested in `batch` nested in `run`, each taking all of the time of the one
-     * around it. Three rows, indented, the fine steps on the leaf only, and no `was:` line.
+     * The table is the tree: `query` nested in `batch` nested in `run`, each taking all of the
+     * time of the one around it. Three rows, indented, each once, the fine steps under the leaf
+     * only, the pauses on the rows they were charged to.
      */
     @Test
-    fun `nested coarse operations are drawn as a tree with the fine steps on the leaves`() {
+    fun `nested coarse operations are one table drawn as a tree with the fine steps on the leaves`() {
         val run = stat(count = 1, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "run", id = 0)
-        val batch = stat(count = 1, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "batch", id = 1, parent = 0)
-        val query = stat(count = 3, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "query", id = 2, parent = 1)
-        query.fine[0] = 3000   // every sample under query was inside the one fine operation
-        val text = report(listOf(run, batch, query), labelled = 3000).render()
+        val batch = stat(count = 1, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "batch", id = 1)
+        val query = stat(count = 3, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "query", id = 2)
+        val queryFine = LongArray(MAX_OPERATIONS + 1).also { it[0] = 3000 }   // every sample under query was inside the one fine operation
+        val tree = listOf(node(run, paused = 200_000_000, children = listOf(node(batch, paused = 200_000_000, children = listOf(node(query, paused = 200_000_000, fine = queryFine))))))
+        val text = report(listOf(run, batch, query), labelled = 3000, tree = tree).render()
         val lines = text.lines()
-        val iRun = lines.indexOfFirst { it.startsWith("  run ") }
-        val iBatch = lines.indexOfFirst { it.startsWith("    batch ") }
-        val iQuery = lines.indexOfFirst { it.startsWith("      query ") }
+        val iRun = lines.indexOfFirst { it.startsWith("run ") }
+        val iBatch = lines.indexOfFirst { it.startsWith("  batch ") }
+        val iQuery = lines.indexOfFirst { it.startsWith("    query ") }
         assertTrue(iRun in 0 until iBatch && iBatch < iQuery, "the tree is not drawn in order: $text")
-        assertTrue("fine 100%" in lines[iQuery], "the leaf carries no fine breakdown: ${lines[iQuery]}")
-        assertFalse("fine 100%" in lines[iBatch], "a parent repeats its children's breakdown: ${lines[iBatch]}")
+        assertEquals(1, lines.count { it.trim().startsWith("query ") }, "an operation is printed more than once: $text")
+        assertTrue("made of: fine 100%" in lines[iQuery + 1], "the leaf carries no fine breakdown: ${lines[iQuery + 1]}")
+        assertFalse("made of" in lines[iBatch + 1], "a parent repeats its children's breakdown: ${lines[iBatch + 1]}")
+        assertTrue("200 ms" in lines[iQuery], "the pause charged to the row is not on it: ${lines[iQuery]}")
         assertFalse(" was: " in text, "the flat lines are still printed")
+        assertFalse("all callers together" in text, "a one-caller tree got the shared-operation block")
+    }
+
+    /** An operation under two callers is a row under each and, once, the figure over both. */
+    @Test
+    fun `an operation with two callers is drawn under each and summed once`() {
+        val load = stat(count = 1, sumNanos = 1_000_000_000, hits = 0, running = 0, inclusive = 1000, runningInclusive = 1000, name = "load", id = 0)
+        val query = stat(count = 1, sumNanos = 2_000_000_000, hits = 0, running = 0, inclusive = 2000, runningInclusive = 2000, name = "query", id = 1)
+        val parse = stat(count = 2, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "parse", id = 2)
+        val tree = listOf(
+            node(query, children = listOf(node(parse, count = 1, sumNanos = 2_000_000_000, inclusive = 2000))),
+            node(load, children = listOf(node(parse, count = 1, sumNanos = 1_000_000_000, inclusive = 1000))),
+        )
+        val text = report(listOf(load, query, parse), labelled = 3000, tree = tree).render()
+        val rows = text.substringAfter("COARSE OPERATIONS").lines().filter { it.trim().startsWith("parse ") }
+        assertEquals(3, rows.size, "parse should be under each caller and once over both: $text")
+        assertTrue("all callers together" in text, "the figure over both callers is missing: $text")
+        assertTrue(rows.any { "2.00 s" in it } && rows.any { "1.00 s" in it }, "the per-caller figures are not per caller: $rows")
     }
 
     @Test

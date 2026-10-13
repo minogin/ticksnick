@@ -1263,7 +1263,13 @@ pause behind it. Today the `GC` row is the only check, and it only knows about c
 check. If the counters moved across a late tick, the workers were running. It says nothing for a
 thread inside one long call, so it bounds the answer rather than giving it.
 
-## 41. Say where the pauses landed · open
+## 41. Say where the pauses landed · done, the easy version · 2026-10-13
+
+**Built as the `Paused` column of the coarse table:** a late tick's lateness is charged to every
+coarse node open at that tick, scaled to what the JVM confirmed. Worded in the heading as *charged
+to every operation it interrupted*. On the graph benchmark, 768 ms of pauses: 421 ms in `level[4]`,
+177 ms in `level[5]`, 169 ms in `level[3]`, none in the levels under a second. The allocator-charged
+version below stays open.
 
 The total is in the header. Which coarse execution sat through the 1.8 s collection is not, and it
 is the first thing a reader of the percentiles asks. The slot still holds its label and its context

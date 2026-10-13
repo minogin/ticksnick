@@ -192,27 +192,68 @@ class OpSlot(
     var context: CoarseContext? = null
 
     /**
-     * This thread's span statistics, one entry per coarse type, or null if it has entered none.
+     * This thread's calling-context tree of coarse executions, or null if it has entered none.
      *
      * Lazily allocated so that a program using only the fine tier pays nothing for this — not the
-     * array, not the histograms. Written by the owning thread alone, read when the report is taken.
+     * root, not the histograms. The span fields are written by the owning thread alone, read when
+     * the report is taken. See [CoarsePath].
      */
     @JvmField
-    internal var coarseAgg: Array<CoarseAgg?>? = null
+    internal var coarseRoot: CoarsePath? = null
 
     /**
-     * Records one completed coarse execution of [type] lasting [nanos].
+     * The node a new execution of [type] under [parent] records into: one array read when the
+     * parent is this thread's own, which is the common case.
      *
-     * Not inline, deliberately: it is called from [coarse], which is, and an inline function that
-     * drags a histogram update into every call site would bloat exactly the code the JIT needs to
-     * keep small. The work here is a handful of plain writes with a single writer.
+     * Not inline, deliberately: it is called from [op], which is, and an inline function that
+     * drags a tree walk into every call site would bloat exactly the code the JIT needs to keep
+     * small.
      */
     @PublishedApi
-    internal fun recordSpan(type: Int, nanos: Long, parentType: Int = -1) {
-        if (type < 0 || type >= MAX_COARSE_TYPES) return
-        val aggs = coarseAgg ?: arrayOfNulls<CoarseAgg>(MAX_COARSE_TYPES).also { coarseAgg = it }
-        val a = aggs[type] ?: CoarseAgg(type).also { aggs[type] = it }
-        a.record(nanos, parentType)
+    internal fun pathFor(parent: CoarseContext?, type: Int): CoarsePath? {
+        if (type < 0 || type >= MAX_COARSE_TYPES) return null
+        val root = coarseRoot ?: CoarsePath(CoarsePath.ROOT, null, this).also { coarseRoot = it }
+        val under = if (parent == null) root else {
+            val p = parent.path
+            if (p != null && p.owner === this) p else resolve(root, parent)
+        }
+        // Past the depth bound everything goes to one overflow node under the root, so recursion
+        // cannot grow the tree without limit. The sampler's inclusive walk stops at the same depth.
+        return if (under.depth >= MAX_COARSE_DEPTH) root.deeper() else under.child(type)
+    }
+
+    /**
+     * The node for [ctx]'s path in this thread's own tree, when the context was made on another
+     * thread: a context borrowed from a pool's caller, or closed by a thread that did not open it.
+     * Walks the chain once and creates the path; rare, and bounded by [MAX_COARSE_DEPTH].
+     */
+    private fun resolve(root: CoarsePath, ctx: CoarseContext): CoarsePath {
+        val types = IntArray(MAX_COARSE_DEPTH)
+        var n = 0
+        var c: CoarseContext? = ctx
+        while (c != null && n < MAX_COARSE_DEPTH) {
+            types[n++] = c.type
+            c = c.parent
+        }
+        if (c != null) return root.deeper()
+        var node = root
+        while (n > 0) node = node.child(types[--n])
+        return node
+    }
+
+    /**
+     * Records one completed coarse execution [ctx] lasting [nanos] into its node.
+     *
+     * Not inline, for the reason [pathFor] is not. A handful of plain writes with a single writer.
+     */
+    @PublishedApi
+    internal fun recordSpan(ctx: CoarseContext, nanos: Long) {
+        val p = ctx.path ?: return
+        val node = if (p.owner === this) p else {
+            val root = coarseRoot ?: CoarsePath(CoarsePath.ROOT, null, this).also { coarseRoot = it }
+            resolve(root, ctx)
+        }
+        node.record(nanos)
     }
 
     /** How deeply this thread is nested in coarse executions. Zero when it is inside none. */
@@ -470,7 +511,7 @@ object Profiler {
      * Span statistics from threads that have already exited, so a pool that recycles does not lose
      * the executions its retired threads measured.
      */
-    private val retiredCoarse = arrayOfNulls<CoarseAgg>(MAX_COARSE_TYPES)
+    private var retiredCoarse = CoarsePath(CoarsePath.ROOT, null, null)
 
     /**
      * Threads that ran an execution of each coarse type and have since exited.
@@ -481,17 +522,35 @@ object Profiler {
      */
     private val retiredCoarseThreads = IntArray(MAX_COARSE_TYPES)
 
-    /** Folds one departing thread's span statistics into [retiredCoarse]. */
-    private fun retire(aggs: Array<CoarseAgg?>?) {
-        if (aggs == null) return
-        synchronized(retiredCoarse) {
-            for (t in 0 until MAX_COARSE_TYPES) {
-                val a = aggs[t] ?: continue
-                if (a.count > 0) retiredCoarseThreads[t]++
-                val into = retiredCoarse[t] ?: CoarseAgg(t).also { retiredCoarse[t] = it }
-                into.mergeFrom(a)
-            }
+    /** Folds one departing thread's tree into [retiredCoarse]. */
+    private fun retire(root: CoarsePath?) {
+        if (root == null) return
+        synchronized(retiredLock) {
+            val ran = BooleanArray(MAX_COARSE_TYPES)
+            typesRan(root, ran)
+            for (t in 0 until MAX_COARSE_TYPES) if (ran[t]) retiredCoarseThreads[t]++
+            retiredCoarse.mergeFrom(root)
         }
+    }
+
+    private val retiredLock = Any()
+
+    /** Marks in [ran] every type with a completed execution anywhere under [node]. */
+    private fun typesRan(node: CoarsePath, ran: BooleanArray) {
+        if (node.type >= 0 && node.count > 0) ran[node.type] = true
+        val cs = node.children ?: return
+        for (c in cs) if (c != null) typesRan(c, ran)
+    }
+
+    /**
+     * Every thread's tree and the retired one, merged by path. Taken once, when the report is.
+     * Allocates and walks every slot, which is why it is not something the sampler does per tick.
+     */
+    internal fun coarseTree(): CoarsePath {
+        val out = CoarsePath(CoarsePath.ROOT, null, null)
+        synchronized(retiredLock) { out.mergeFrom(retiredCoarse) }
+        forEachSlot { s -> s.coarseRoot?.let { out.mergeFrom(it) } }
+        return out
     }
 
     /**
@@ -500,22 +559,20 @@ object Profiler {
      * Taken once, when the report is. Allocates and walks every slot, which is why it is not
      * something the sampler does per tick.
      */
-    internal fun coarseTotals(): Array<CoarseAgg?> {
+    internal fun coarseTotals(): Array<CoarseAgg?> = coarseTotals(coarseTree())
+
+    /** The per-type totals of a merged tree: every node of a type, summed. */
+    internal fun coarseTotals(tree: CoarsePath): Array<CoarseAgg?> {
         val out = arrayOfNulls<CoarseAgg>(MAX_COARSE_TYPES)
-        synchronized(retiredCoarse) {
-            for (t in 0 until MAX_COARSE_TYPES) {
-                val a = retiredCoarse[t] ?: continue
-                out[t] = CoarseAgg(t).also { it.mergeFrom(a) }
+        fun walk(node: CoarsePath) {
+            if (node.type >= 0 && node.count > 0) {
+                val into = out[node.type] ?: CoarseAgg(node.type).also { out[node.type] = it }
+                into.mergeFrom(node)
             }
+            val cs = node.children ?: return
+            for (c in cs) if (c != null) walk(c)
         }
-        forEachSlot { s ->
-            val aggs = s.coarseAgg ?: return@forEachSlot
-            for (t in 0 until MAX_COARSE_TYPES) {
-                val a = aggs[t] ?: continue
-                val into = out[t] ?: CoarseAgg(t).also { out[t] = it }
-                into.mergeFrom(a)
-            }
-        }
+        walk(tree)
         return out
     }
 
@@ -536,13 +593,11 @@ object Profiler {
      * count came out 11.06% high, which is precisely the warm-up.
      */
     internal fun resetCoarse() {
-        synchronized(retiredCoarse) {
-            for (t in 0 until MAX_COARSE_TYPES) {
-                retiredCoarse[t] = null
-                retiredCoarseThreads[t] = 0
-            }
+        synchronized(retiredLock) {
+            retiredCoarse = CoarsePath(CoarsePath.ROOT, null, null)
+            for (t in 0 until MAX_COARSE_TYPES) retiredCoarseThreads[t] = 0
         }
-        forEachSlot { s -> s.coarseAgg?.forEach { it?.reset() } }
+        forEachSlot { s -> s.coarseRoot?.reset() }
     }
 
     /**
@@ -552,11 +607,14 @@ object Profiler {
      * threads that *ran* the operation rather than threads a sample happened to catch inside it.
      */
     internal fun coarseThreadsOf(t: Int): Int =
-        synchronized(retiredCoarse) { retiredCoarseThreads[t] }.let { retired ->
+        synchronized(retiredLock) { retiredCoarseThreads[t] }.let { retired ->
             var live = 0
+            val ran = BooleanArray(MAX_COARSE_TYPES)
             forEachSlot { s ->
-                val a = s.coarseAgg?.get(t)
-                if (a != null && a.count > 0) live++
+                val root = s.coarseRoot ?: return@forEachSlot
+                ran.fill(false)
+                typesRan(root, ran)
+                if (ran[t]) live++
             }
             retired + live
         }
@@ -623,7 +681,8 @@ object Profiler {
      */
     fun enter(op: CoarseOp) {
         val s = local.get()
-        s.setContextOpaque(CoarseContext(op.id, s.contextOpaque(), System.nanoTime()))
+        val parent = s.contextOpaque()
+        s.setContextOpaque(CoarseContext(op.id, parent, System.nanoTime(), s.pathFor(parent, op.id)))
     }
 
     /**
@@ -643,7 +702,7 @@ object Profiler {
         if (ctx.type != op.id) mismatch(nameOf(op), coarseNameOf(ctx.type))
         s.setContextOpaque(ctx.parent)
         ctx.markClosed()
-        s.recordSpan(ctx.type, System.nanoTime() - ctx.startNanos, ctx.parent?.type ?: -1)
+        s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
     }
 
     /** One closing call that did not match what was open. Counted with the leaks, and fatal under strict. */
@@ -753,7 +812,7 @@ object Profiler {
                 }
             }
         }
-        retire(s.coarseAgg)
+        retire(s.coarseRoot)
         // Removed from the walk list first, so the sampler cannot be reading this slot at the
         // moment its index is handed to somebody else.
         if (s.index >= 0) freeIndexes.add(s.index)
@@ -801,7 +860,7 @@ object Profiler {
                     }
                 }
             }
-            retire(s.coarseAgg)
+            retire(s.coarseRoot)
             freeIndexes.add(i)
             reclaimed.incrementAndGet()
         }
@@ -885,7 +944,9 @@ object Profiler {
         // operation quietly accumulating everybody else's samples — looks exactly like a finding.
         // Taken before the open-context count, so a context still open at the end is visible in
         // both: its span is missing from the totals precisely because nothing closed it.
-        val totals = coarseTotals()
+        val tree = coarseTree()
+        val totals = coarseTotals(tree)
+        val pauses = s.pauses(gcNanos)
         val coarse = (0 until coarseCount()).map { t ->
             val a = totals[t]
             CoarseStat(
@@ -908,10 +969,23 @@ object Profiler {
                 activeTicks = s.coarseActiveTicks[t],
                 fine = LongArray(MAX_OPERATIONS + 1) { s.pairHits[t * (MAX_OPERATIONS + 1) + it] },
                 staleHits = s.coarseStaleHits[t],
-                byParentCount = a?.byParentCount ?: LongArray(MAX_COARSE_TYPES + 1),
-                byParentNanos = a?.byParentNanos ?: LongArray(MAX_COARSE_TYPES + 1),
             )
         }
+        // A node's pauses are what the sampler saw; the header prints what the JVM confirmed. The
+        // same scale brings the column under the header, so that the rows cannot add up to more
+        // than the line above them says there was.
+        val pauseScale = if (pauses.pausedNanos > 0) pauses.confirmedNanos.toDouble() / pauses.pausedNanos else 0.0
+        fun nodeOf(n: CoarsePath): CoarseNode = CoarseNode(
+            type = n.type,
+            name = if (n.type == CoarsePath.DEEPER) "deeper than $MAX_COARSE_DEPTH, not followed" else coarseNameOf(n.type),
+            count = n.count, spanSumNanos = n.sumNanos,
+            spanMinNanos = if (n.count == 0L) 0L else n.minNanos, spanMaxNanos = n.maxNanos,
+            hist = n.hist, inclusiveHits = n.inclusiveHits, runningInclusiveHits = n.runningInclusiveHits,
+            fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
+            pausedNanos = (n.pausedNanos * pauseScale).toLong(),
+            children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),
+        )
+        val coarseTree = tree.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList()
         return Report(
             stats, s.counters[NO_OP_INDEX], s.ticks, s.span, duration, s.maxSlots, s.duty(), s.failure,
             imbalances = imbalances.get() - imbalancesAtStart, openAtEnd = openSpans(), stateSampled = s.sampleState,
@@ -923,7 +997,8 @@ object Profiler {
             labelledOutsideCoarse = s.labelledOutsideCoarse,
             staleContextHits = s.staleContextHits,
             coarseSampleHits = s.coarseSampleHits,
-            pause = s.pauses(gcNanos),
+            pause = pauses,
+            coarseTree = coarseTree,
         )
     }
 }

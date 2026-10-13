@@ -17,6 +17,16 @@ the banner instead, which is where a caller meets it once rather than at every c
 
 Builds on Gradle 9.7.1 and Kotlin 2.4.0.
 
+### The coarse table is a tree, with the pauses on it
+
+The coarse table and the tree under it were one set of numbers printed twice. Now there is one
+table, drawn as the tree: an operation under the one it ran inside, and every row is the executions
+on that path alone - keyed by the whole path, so an operation called from two places is a row under
+each with its own percentiles, and once more as *all callers together*. A `Paused` column says how
+much of each row every thread was stopped for, charged to the span the pause interrupted. The hook
+records into a calling-context tree per thread instead of per-type aggregates; measured at 48 ns
+per coarse execution before and after (`--coarsecost`, new).
+
 ### Run and paused
 
 The header splits wall time into the part that ran and the part every thread was stopped, and

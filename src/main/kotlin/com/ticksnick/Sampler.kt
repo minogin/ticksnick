@@ -434,7 +434,12 @@ internal class Sampler(
             waitUntil(next)
             if (!running) break
             val now = System.nanoTime()
-            pause.tick(next, now)
+            // The pause, charged: a tick that ran late found every thread stopped for that long,
+            // and the spans open now were open through it - a span can only have ended in the
+            // microseconds between the pause lifting and this read. So the lateness goes to every
+            // node this walk finds open, once per node. It is the span that was interrupted, not
+            // the span that caused the collection; the report says so.
+            val lateNanos = pause.tick(next, now)
 
             val walkStart = System.nanoTime()
             var live = 0
@@ -538,6 +543,20 @@ internal class Sampler(
                     var anyStale = false
                     while (p != null && d < MAX_COARSE_DEPTH) {
                         val pt = p.type
+                        // The node: every context in the chain is its own path, so each is
+                        // credited, with no once-per-type rule to apply. Skipped when stale, for
+                        // the reason the per-type counters skip it.
+                        val node = p.path
+                        if (node != null && !(p.isClosed() && (if (stillMounted < 0) s.contextOpaque() === ctx else stillMounted == 1))) {
+                            node.inclusiveHits++
+                            if (!waiting) node.runningInclusiveHits++
+                            val f = node.fine ?: LongArray(MAX_OPERATIONS + 1).also { node.fine = it }
+                            f[fine]++
+                            if (lateNanos > 0 && node.pauseStamp != ticks) {
+                                node.pauseStamp = ticks
+                                node.pausedNanos += lateNanos
+                            }
+                        }
                         var seen = false
                         var j = 0
                         while (j < n) {

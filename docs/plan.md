@@ -2035,6 +2035,8 @@ tables would move a row for a reason that has nothing to do with the program.
 
 ## The coarse tree · 2026-10-12
 
+*Superseded the next day by the entry above: the tree is keyed by the whole path and is the table.*
+
 Andrey, reading the `was:` lines on the graph benchmark: *"would it not be more clear if we put
 them in the table as kind of hierarchy?"* The lines were a flat cross-tabulation standing in for a
 tree the report could not draw: `run`, `runBatch` and `query` each printed the same breakdown,
@@ -2060,6 +2062,52 @@ bench, for the reason the families were not: an argument, and a small one.
 outside every `level` - shows nothing of it in the tree, since the fine breakdown is inclusive and
 printed on leaves. The starred row in the fine table has that own time. If it matters, the sampler
 can credit fine hits to the innermost coarse type only, and the tree can print a parent's own line.
+
+## The coarse table is the tree, keyed by the whole path · 2026-10-13
+
+Three questions from Andrey on the tree above, in order. *The tree repeats the executions and
+totals the table already has* - with one execution per row the page said the same numbers twice.
+*Should an operation with two callers be allowed?* - yes: "parse is 2 s under query and 50 ms under
+load" is what a tree is for, and what was wrong was printing one aggregate's percentiles on a
+per-caller row. *Does respecting the parent suffice?* - no: `query > parse > tokenize` and
+`load > parse > tokenize` kept `tokenize` under `parse` in one slot and would have printed its
+combined total under both. "We probably need to respect the whole path."
+
+**What is built.** A calling-context tree per thread, `CoarsePath`. Entry steps from the parent's
+node to the child for the type, creating it the first time; the context carries its node; exit
+records the span into it. A context borrowed from another thread carries a node of that thread's
+tree, so the borrower resolves the path in its own - a walk of at most `MAX_COARSE_DEPTH`, on the
+rare path. Past that depth every span goes to one overflow node under the root, so recursion
+cannot grow the tree without limit. The sampler credits each node in a context's chain with its
+inclusive hits and the `(node, fine)` pair, and charges a late tick's lateness to every node open
+at that tick, once per node. The trees are merged by path when the report is taken, retired
+threads' trees into one at exit, and **the per-type figures are the sum over the type's nodes** -
+`CoarseAgg` is built from the tree and its parent-keyed arrays are gone, so the hot path does less
+than it did.
+
+**The table.** One, which is the tree: the coarse rows indented under the one they ran inside,
+siblings by total, a `Paused` column, and `made of:` under each leaf. Inclusive time is monotone up
+a path, so the heaviest operation anywhere is at the end of the first branch and the ranking the
+flat sort gave is kept. An operation under more than one caller is a row under each, with the
+figures under that caller alone, and once more in a block under the table - *all callers together*
+- which is the per-type stat and appears only when there is such an operation.
+
+**Pauses stay in the totals and are shown per row.** A span is two timestamps and the caller waited
+through the collection, so the total is wall; taking the pauses out would make a 9.07 s level look
+like an 8.5 s one. The column says how much of each row they were, scaled to what the JVM confirmed
+so that the rows cannot sum above the header. Charged to the span the pause interrupted, which is
+not always the one that caused it: a young collection lands in whoever allocated last, a full one
+wherever the heap crossed its threshold. The heading and the legend say so. Ideas 41, the easy
+version; the allocator-charged version stays open there.
+
+**Cost, measured.** `--coarsecost` prices one coarse execution bare against labelled, three arms
+interleaved, fifteen rounds, sampler on. Before: 51.5 ns flat, 48.3 ns nested in three. After:
+47.9 ns and 48.4 ns. Both at a 150-205% clock, same session, so the tree did not move the hook.
+The number itself replaces the "two thirds measured" 40 ns in findings.md.
+
+**Limits.** The one above - a parent's own fine work outside any child is not in the tree - still
+holds. A context made by hand rather than by the hook has no node and is named under the table. A
+borrowed context still sampled after its thread retired is counted per type and not in the tree.
 
 ## Operation families: `level[depth]` · 2026-10-12
 

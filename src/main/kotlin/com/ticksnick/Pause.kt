@@ -42,13 +42,17 @@ internal class PauseTracker(
     /** Paused time that both this thread saw and the JVM counted. Never more than either. */
     var confirmedNanos: Long = 0; private set
 
-    /** Called on every tick with when it was due and when it actually ran. */
-    fun tick(dueNanos: Long, nowNanos: Long) {
+    /**
+     * Called on every tick with when it was due and when it actually ran. Returns the lateness
+     * counted, or 0 when the tick was on time: the sampler charges it to the spans it finds open.
+     */
+    fun tick(dueNanos: Long, nowNanos: Long): Long {
         val late = nowNanos - dueNanos
-        if (late < thresholdNanos) return
+        if (late < thresholdNanos) return 0
         pausedNanos += late
         pauses++
         if (late > longestNanos) longestNanos = late
+        return late
     }
 
     /**

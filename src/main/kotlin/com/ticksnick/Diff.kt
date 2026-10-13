@@ -27,16 +27,13 @@ class ProfileDiff(
     fun render(): String = buildString {
         appendLine("=".repeat(DIFF_WIDTH))
         appendLine(row("Diff", "$beforeName -> $afterName"))
-        appendLine(
-            row(
-                "Wall time", String.format(
-                    Locale.ROOT, "%s = active %s + paused %s",
-                    pair(before.samplingSpanNanos.toDouble(), after.samplingSpanNanos.toDouble()),
-                    pair(before.activeNanos.toDouble(), after.activeNanos.toDouble()),
-                    pair(before.pause.confirmedPausedIn(before.samplingSpanNanos).toDouble(), after.pause.confirmedPausedIn(after.samplingSpanNanos).toDouble()),
-                )
-            )
-        )
+        // Three lines and not one `wall = active + paused`, so that each carries its change: the
+        // header pairs had none while every row below did. Andrey, 2026-10-13.
+        fun headerLine(key: String, a: Double, b: Double) =
+            row(key, String.format(Locale.ROOT, "%s   %s", pair(a, b), change(a, b, true)))
+        appendLine(headerLine("Wall time", before.samplingSpanNanos.toDouble(), after.samplingSpanNanos.toDouble()))
+        appendLine(headerLine("  Active", before.activeNanos.toDouble(), after.activeNanos.toDouble()))
+        appendLine(headerLine("  Paused", before.pause.confirmedPausedIn(before.samplingSpanNanos).toDouble(), after.pause.confirmedPausedIn(after.samplingSpanNanos).toDouble()))
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS - own time, matched by name, sorted by the change")
         appendLine(

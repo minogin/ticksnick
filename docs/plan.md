@@ -26,7 +26,7 @@ words, is [tldr.md](tldr.md).
 | 4 | The coarse tier — contexts, spans, cross-tabulation | **done** |
 | 5 | Crossing threads — propagation, and per-operation parallelism | **done**; the coroutines module dropped, [ideas.md](ideas.md) item 25 |
 | 6 | Thread state and the whole-application parallelism coefficient | **partly done**; what remains is designed and measured, not started |
-| 7 | Library surface — annotations, agent, results API | **v0.1.0 released**; annotations and the agent not started |
+| 7 | Library surface — annotations, agent, results API | **v0.2.0 released 2026-10-13**: `Profile`, saved and diffed; annotations and the agent not started |
 | 8 | JFR output | not started |
 
 **What this is for.** A general-purpose tool, released open source, for auditing the performance of
@@ -2207,7 +2207,32 @@ id is wrong by construction, and the limit says so at registration.
 against about 40 ns for a coarse context and 2 to 3 ns for a fine hook, which is an argument; the
 bench with the CPU clock beside it is the measurement, and it has not been run with an indexed op.
 
-## Next session: the coarse output · opened 2026-09-02
+## Next session · written 2026-10-13
+
+Where to pick up, after the entries dated 2026-10-11 to 13 above and v0.2.0.
+
+**Open in the tool**, in the order they matter:
+
+1. **A threaded workload.** Nothing in the tree, the `Paused` column or the diff has been read
+   against a program with more than one thread. The graph benchmark's parallel BFS is the planned
+   one, and ideas 44 - the diff leaves out runnable/waiting and concurrency - is what it will hit
+   first.
+2. **Ideas 43:** a `times = n` label is one execution to the long-execution detector and prints
+   as a `Long` finding that is not one. Exclude such labels from the detector.
+3. **The bench.** `--verify` and `--hook` have not been re-run since 2026-10-01; the coarse hook
+   was measured with `--coarsecost` only. `RegistryTest` "the thread count is per operation and not
+   per run" has failed twice in many runs and is not explained.
+4. Ideas 40, 41 (the allocator-charged pause), 42, and 28 (self time for coarse operations).
+
+**What the next article needs from the tool:** several runs per arm with the clock traced, since
+`node` moved by 600 ms between two baseline runs on its own; and the `Long` artefact above fixed,
+so the report has no line to explain away.
+
+## The coarse output · opened 2026-09-02 · done 2026-10-12
+
+> **History.** The coarse table was reworked on 2026-10-11 to 13: see "The five words", "The coarse
+> tree", "The coarse table is the tree", "`Long`" and "`Profile`, saved, and the diff" above. Item
+> 28, self time, is still open; items 37 and the prose lines are settled by the tree.
 
 Written as a handover, because the work is Andrey's to start and the context is a day old.
 

@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 — 2026-10-13
+
+```kotlin
+repositories { maven("https://jitpack.io") }
+dependencies { implementation("com.github.minogin:ticksnick:v0.2.0") }
+```
+
+**Breaking:** the type `Report` is now `Profile`; `op { }` is the one verb for both tiers and the
+tier is chosen at registration (`registerFine` / `registerCoarse`); the coordinates moved to
+`com.ticksnick`. Everything below is since v0.1.0, newest first.
 
 ### The project is called TickSnick
 
@@ -8,7 +17,7 @@ Renamed from `profiler`; the domain is **ticksnick.com** and the repository is
 `github.com/minogin/ticksnick`. Package and coordinates are now `com.ticksnick`:
 
 ```kotlin
-implementation("com.ticksnick:ticksnick:0.1.0")
+implementation("com.github.minogin:ticksnick:v0.2.0")   // JitPack; the group inside the jar is com.ticksnick
 ```
 
 The `Profiler` object keeps its name — `Profiler.registerFine(...)` says what it does, where

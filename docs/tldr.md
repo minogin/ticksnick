@@ -123,8 +123,9 @@ threads, at a cost of 6.5% against 35% for the way a production search engine do
 where four handlers sharing one class are four rows here and one indistinguishable blob in a flame
 graph; and PostgreSQL over a socket, which is the first workload here that waits for anything.
 
-Released as v0.1.0 — Apache-2.0, one dependency, Java 21+, and a report you can read: what every
-column and warning means is [output.md](output.md).
+Released as v0.2.0 — Apache-2.0, one dependency, Java 21+, and a report you can read: what every
+column and warning means is [output.md](output.md). A session's data is a `Profile`: it saves to a
+file and diffs against another, so the loop of change, profile, look prints the change every time.
 
 **The coarse tier is built too**: a label around a logical operation — a request, a query —
 measures how long each execution took, exactly, and cross-tabulates the fine breakdown underneath it.

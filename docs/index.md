@@ -21,8 +21,8 @@ were both the integer 0.
   expected to have moved — but a close comparison against an older figure should re-run `--hook`
   first. See [plan.md](plan.md), "The toolchain".
 
-**Where we are right now.** The fine tier is built, verified and **released as v0.1.0** — Apache-2.0,
-no dependencies, Java 21+. Verified on our own bench and on **four** foreign codebases: Apache
+**Where we are right now.** The fine tier is built, verified and released, **v0.2.0 on
+2026-10-13** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on our own bench and on **four** foreign codebases: Apache
 Calcite, Apache Lucene, Netty, and PostgreSQL over a socket. Phases 1, 2, 3, 3.5 and 3.75 are done; phase 6 is half done —
 thread state and per-operation concurrency exist, the whole-application coefficient does not; phase 7
 is far enough for a 0.x but has no annotations and no agent.
@@ -68,6 +68,21 @@ vocabulary - paused, active, waiting, runnable, on CPU - and why each matters ar
 [plan.md](plan.md), "The five words", and in [output.md](output.md). **Left open:** items 40 to 42.
 The bench was not re-run after any of these changes. That project's `docs/handover.md` says where
 the work on it stands.
+
+**Then, 2026-10-12 and 13: the coarse output, used in anger, and v0.2.0.** Operation families,
+`level[depth]`, one registration for a small integer index. The coarse table is now the tree: each
+operation under the one it ran inside, keyed by the whole path through a calling-context tree per
+thread, with a `Paused` column charging each pause to the span it interrupted, and `made of` under
+the leaves. `Over 1t` became the `Long` group beside the calls - how many executions ran over a tick,
+their time, the longest - which turned "about 0.8 s in rehashes, conjecture" into "ten, 809 ms,
+longest 334 ms". `Report` was renamed `Profile`, the data of a session; it saves to a text file,
+loads, and diffs against another by operation name and coarse path, with `diffAgainstLatest(dir,
+label)` as the change-profile-look loop in one call and `:cli` on two files. The hook was measured
+at 48 ns per coarse execution before and after the tree (`--coarsecost`). On the graph benchmark
+the baseline went 12.2 s to 1.75 s with CSR and the diff said why, row for row. The suite is 160
+tests. All of it in [plan.md](plan.md), the entries dated 2026-10-12 and 13, and in the
+[CHANGELOG](../CHANGELOG.md). **Left open:** items 40 to 44 in [ideas.md](ideas.md); the bench
+`--verify` has not been re-run since 2026-10-01; no threaded workload has been diffed yet.
 
 **What to do next is [plan.md § Phase 6](plan.md#phase-6--thread-state-and-the-whole-application-coefficient--partly-done)** —
 the whole-application parallelism coefficient. Its design is settled and the measurement that settled
@@ -135,7 +150,8 @@ with the duty-cycle bound printed beside it.
 | `DutyBoundTest.kt` | the bound on every share: four properties, and the five regimes the trials measured |
 | `FloorCheckTest.kt` | who gets named as below the floor, including both sides of the 0.35 ns boundary |
 | `RegistryTest.kt` | slots, nesting, the balance check, and the one fatal condition in both directions |
-| `ReportTest.kt` | shares, coverage, the long-execution floor, and what the report promises to print |
+| `ProfileTest.kt` | shares, coverage, the long-execution floor, and what the report promises to print |
+| `TreeTest.kt`, `StoreDiffTest.kt` | the coarse tree through the real hook, pauses per node; the `Long` group, the file, the diff, the command |
 | `CoarseTest.kt` | the histogram brackets what it is given, nesting restores the parent, a leaked context is caught, and the tier boundary from the coarse side |
 | `trial-calcite/` | the Calcite trial, in its own module so its dependencies cannot leak into the profiler |
 | `trial-lucene/` | the Lucene trial — the corpus, the wrappers that place the labels, and four instrumentation configurations to compare |

@@ -3,13 +3,14 @@
 **ticksnick.com** · a profiler for operations too short to profile — finding out which of twenty nanosecond-scale
 operations eats your time, by sampling labels instead of measuring durations.
 
-**v0.1.0** — Apache-2.0, one dependency (the Kotlin stdlib), verified on a synthetic workload whose
-true answer is known independently and on three foreign codebases: Apache Calcite, Apache Lucene and
-Netty.
+**v0.2.0** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on a synthetic
+workload whose true answer is known independently and on four foreign codebases: Apache Calcite,
+Apache Lucene, Netty and PostgreSQL over a socket. Used in anger on a graph benchmark, where it took
+a BFS from 12.2 s to 1.75 s and said, row for row, why.
 
 ```kotlin
 repositories { maven("https://jitpack.io") }
-dependencies { implementation("com.github.minogin:ticksnick:v0.1.0") }
+dependencies { implementation("com.github.minogin:ticksnick:v0.2.0") }
 ```
 
 ### What it does, and what it does not
@@ -236,30 +237,48 @@ thread reads as an idle one and inflates the denominator every share is taken ov
 
 ### What comes out
 
+One query of a breadth-first search over a graph of 20 million nodes, on one thread, with four fine
+labels on the steps and a coarse label per depth:
+
 ```
-86,597 labelled samples over 12.1 s, 11,933 ticks at 1.006 ms, 8 threads
-labels cover 87.10 s of the 95.97 s of thread-time observed (90.8%); 8.87 s was outside every label
-threads were on CPU 98.68% of sampled wall time
-  inside labelled work it was 98.55%, and that is what bounds the shares
-at most 1.47 pp of any share is a thread waiting rather than working
-so the ranking is trustworthy
-================================================================================================
-operation            share  occupancy  waiting   elapsed   in flight         calls    hits  noise  impl/call
-flushBatch         44.250%    38.54 s     0.0%   11.75 s      3.28/8   288,514,362   38319  0.51%   133.6 ns
-validateRecord     41.222%    35.91 s     0.0%   11.68 s      3.07/8   288,514,362   35697  0.53%   124.5 ns
-parseRecord         9.478%     8.26 s     0.3%    6.14 s      1.34/8   288,514,362    8208  1.10%    28.6 ns
-indexRecord         5.050%     4.40 s     0.0%    3.73 s      1.18/8   288,514,362    4373  1.51%    15.2 ns
+Wall time     12.5 s = 11.8 s active + 680 ms paused (5.45%) in 7 pauses, longest 259 ms
+
+COARSE AND FINE OPERATIONS - own time, out of 11.8 s active time
+                           |                                       Load                                       |           Long            |               Spread                |      Trust
+Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call |   Execs     Time  Longest | Wall-time Concurrency Workers  Pool |     Hits  Noise
+---------------------------+----------------------------------------------------------------------------------+---------------------------+-------------------------------------+----------------
+visitedAdd                 |          64.0%      7.55 s          100% / 0%    32,374,539               233 ns |      10   809 ms   334 ms |    7.55 s        1.00       1     - |     7517  1.15%
+node                       |          29.8%      3.51 s          100% / 0%    16,038,234               219 ns |       -        -        - |    3.51 s        1.00       1     - |     3498  1.69%
+id                         |          4.53%      534 ms          100% / 0%    16,038,234              33.3 ns |       -        -        - |    534 ms        1.00       1     - |      532  4.34%
+nextAdd                    |          1.67%      197 ms          100% / 0%    16,038,134              12.3 ns |       9  48.2 ms  13.1 ms |    197 ms        1.00       1     - |      196  7.14%
+
+COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
+Coarse operation                Executions    Total v     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+query                                    1     12.1 s     674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
+  level[4]                               1     8.92 s     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
+    made of: visitedAdd 82.1%, node 11.4%, id 4.67%, nextAdd 1.79%
+  level[5]                               1     2.54 s     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
+    made of: node 94.3%, id 5.70%
 ```
 
-Three things to know before you trust a table like that:
+Three things that table says which a flame graph would not:
 
-- **`at most 1.47 pp`** is an error bar that holds for every row at once. It is the report telling
-  you how much of the shares is waiting rather than working, and it can come out saying *nothing
-  here bounds the shares* — which is honest, and means your labels do not cover where the time went.
-- **`noise` is `1/√hits`.** Two rows differing by less than their noise are tied, not ranked.
-- **The top row of that specimen is wrong**, and the report says so forty lines further down. The
-  demo leaks a label on purpose; `flushBatch` at 44% is other operations' time billed to it. The
-  number looks completely plausible, which is the point.
+- **`visitedAdd` is 32 million hash inserts at 233 ns**, and ten of them ran over a millisecond and
+  held 809 ms between them, the longest 334 ms: the rehashes of a set growing to 16 million. A
+  share says where the time went; `Calls`, `per call` and `Long` say what it was.
+- **Level 4 is 82% inserts and level 5 is 94% lookups**, the same frames at every depth. The depth
+  is a loop variable, not a frame, and a coarse label per depth is what makes it a row.
+- **The 680 ms of GC pauses fell in levels 3 to 5**, charged to the span each one interrupted.
+
+After the fix, a profile of the new implementation against the saved one:
+
+```
+Wall time     12.2 s -> 1.75 s   -10.4 s -85.6%
+visitedAdd    7.44 s -> 253 ms   -7.19 s -96.6% |  230 ns -> 7.83 ns |  32,374,539 =
+node          3.29 s -> 881 ms   -2.41 s -73.2% |  205 ns -> 54.9 ns |  16,038,234 =
+```
+
+The `=` on calls is the check that the step changed and not the work.
 
 **[docs/output.md](docs/output.md) explains every column and every warning**, using that same run.
 The report also prints a short legend at its own foot, so you need neither this file nor a browser
@@ -402,6 +421,7 @@ src/main/kotlin/com/ticksnick/bench/  the harness — never shipped
   Bench.kt      worker threads and the stages they are driven through
   StackCost.kt  what a cross-thread stack costs, which decides whether we may ever take one
   Main.kt       the modes, the run, and the bench's own tolerance table
+  CoarseCost.kt what one coarse execution costs, bare against labelled
   Verify.kt     the sampler against the truth, and the observer effect
   Print.kt      every report the bench prints about itself
 src/test/kotlin/                             the arithmetic, checked in ~3 s — ./gradlew test
@@ -459,8 +479,10 @@ samples across every thread, the span from the context, and their ratio is how w
 actually spread out.
 
 **Built since:** thread state beside every sample, per-operation concurrency, and a per-thread bound
-on the error of every share — the `waiting`, `elapsed` and `in-flight` columns are those. And the
-library surface enough to publish: **v0.1.0**, Apache-2.0, on JitPack.
+on the error of every share — the `waiting`, `concurrency` and `workers` columns are those. And the
+library surface enough to publish: **v0.1.0**, Apache-2.0, on JitPack; **v0.2.0** on 2026-10-13 with
+the coarse table drawn as a tree with the pauses on it, the `Long` group, operation families, and a
+`Profile` that saves to a file and diffs against another.
 
 **And the coarse tier is built, and contexts now cross threads.** A coarse label around a logical operation gives
 executions, mean, p50/p90/p99 and max — **measured**, two timestamps per execution, the only numbers

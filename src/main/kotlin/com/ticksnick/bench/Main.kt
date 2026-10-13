@@ -205,6 +205,12 @@ fun main(args: Array<String>) {
         return
     }
 
+    // What one coarse execution costs, bare against labelled. Its own mode for the same reason.
+    if (opt["coarsecost"] != null) {
+        runCoarseCost()
+        return
+    }
+
     // The one thing `strict` still stops, provoked on purpose. Its own mode because it registers an
     // operation of its own, which would otherwise show up as a twenty-first line of the bench's
     // report carrying no samples.

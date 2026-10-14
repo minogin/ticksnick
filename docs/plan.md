@@ -26,7 +26,7 @@ words, is [tldr.md](tldr.md).
 | 4 | The coarse tier — contexts, spans, cross-tabulation | **done** |
 | 5 | Crossing threads — propagation, and per-operation parallelism | **done**; the coroutines module dropped, [ideas.md](ideas.md) item 25 |
 | 6 | Thread state and the whole-application parallelism coefficient | **partly done**; what remains is designed and measured, not started |
-| 7 | Library surface — annotations, agent, results API | **v0.2.0 released 2026-10-13**: `Profile`, saved and diffed; annotations and the agent not started |
+| 7 | Library surface — annotations, agent, results API | **v0.2.1 released 2026-10-14**: `Profile`, saved and diffed; annotations and the agent not started |
 | 8 | JFR output | not started |
 
 **What this is for.** A general-purpose tool, released open source, for auditing the performance of
@@ -2223,11 +2223,12 @@ Where to pick up, after the entries dated 2026-10-11 to 13 above and v0.2.0.
    was measured with `--coarsecost` only. `RegistryTest` "the thread count is per operation and not
    per run" has failed twice in many runs and is not explained.
 4. Ideas 40, 41 (the allocator-charged pause), 42, and 28 (self time for coarse operations).
-5. **JitPack has no artifact.** The v0.2.0 tag was requested on 2026-10-13 and JitPack's build
-   failed on a transient `429 Too Many Requests` from Maven Central while fetching the Kotlin
-   plugin; JitPack caches the failure, so it has to be deleted and rebuilt from jitpack.io while
-   logged in, or a v0.2.1 tag pushed. v0.1.0 shows no build at all there, so the README's "on
-   JitPack" has never been checked by anyone pulling the artifact.
+5. **JitPack.** The v0.2.0 build failed twice on a `429 Too Many Requests` from Maven Central
+   while fetching the Kotlin plugin - Central throttles JitPack's shared address - and on the
+   third try, 2026-10-14, on the trial modules still saying `Report`: JitPack runs
+   `publishToMavenLocal` across every module, so the trials have to compile too. Fixed and tagged
+   v0.2.1. v0.1.0 shows no build at all there, so nobody had pulled the artifact the README
+   advertised before this.
 
 **What the next article needs from the tool:** several runs per arm with the clock traced, since
 `node` moved by 600 ms between two baseline runs on its own; and the `Long` artefact above fixed,

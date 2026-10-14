@@ -8,7 +8,7 @@ group = "com.ticksnick"
 
 // 0.x on purpose. The fine tier is measured and reviewed, but the public surface has not yet had a
 // release's worth of other people's use, and a 0.x says the API may still move. See README.
-version = "0.2.0"
+version = "0.2.1"
 
 repositories {
     mavenCentral()

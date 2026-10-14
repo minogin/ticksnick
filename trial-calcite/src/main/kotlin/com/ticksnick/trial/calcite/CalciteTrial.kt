@@ -3,7 +3,7 @@ package com.ticksnick.trial.calcite
 import com.ticksnick.trial.analyzeJfr
 import com.ticksnick.trial.recordExecutionSamples
 import com.ticksnick.Profiler
-import com.ticksnick.Report
+import com.ticksnick.Profile
 import com.ticksnick.SpanHistogram
 import com.ticksnick.duration
 import com.ticksnick.op
@@ -372,7 +372,7 @@ private fun load(
  * against an exact one measures the quantiser, which is specified; the exact figure is printed
  * beside it so a reader can see the quantisation, and it is not what is being checked.
  */
-private fun checkPlanSpans(report: Report, times: List<Long>) {
+private fun checkPlanSpans(report: Profile, times: List<Long>) {
     val plan = report.coarse.firstOrNull { it.name == "plan" } ?: return
     if (plan.count == 0L || times.isEmpty()) return
     val sorted = times.sorted()

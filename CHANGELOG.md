@@ -1,11 +1,18 @@
 # Changelog
 
-## v0.2.0 — 2026-10-13
+## v0.2.1 — 2026-10-14
+
+v0.2.0 did not build on JitPack: the `Report` to `Profile` rename had missed the trial modules,
+which JitPack compiles along with the library. No change to the library itself.
 
 ```kotlin
 repositories { maven("https://jitpack.io") }
-dependencies { implementation("com.github.minogin:ticksnick:v0.2.0") }
+dependencies { implementation("com.github.minogin:ticksnick:v0.2.1") }
 ```
+
+## v0.2.0 — 2026-10-13
+
+Tagged, and not buildable on JitPack; use v0.2.1.
 
 **Breaking:** the type `Report` is now `Profile`; `op { }` is the one verb for both tiers and the
 tier is chosen at registration (`registerFine` / `registerCoarse`); the coordinates moved to
@@ -17,7 +24,7 @@ Renamed from `profiler`; the domain is **ticksnick.com** and the repository is
 `github.com/minogin/ticksnick`. Package and coordinates are now `com.ticksnick`:
 
 ```kotlin
-implementation("com.github.minogin:ticksnick:v0.2.0")   // JitPack; the group inside the jar is com.ticksnick
+implementation("com.github.minogin:ticksnick:v0.2.1")   // JitPack; the group inside the jar is com.ticksnick
 ```
 
 The `Profiler` object keeps its name — `Profiler.registerFine(...)` says what it does, where

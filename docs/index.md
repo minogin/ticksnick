@@ -21,7 +21,7 @@ were both the integer 0.
   expected to have moved — but a close comparison against an older figure should re-run `--hook`
   first. See [plan.md](plan.md), "The toolchain".
 
-**Where we are right now.** The fine tier is built, verified and released, **v0.2.0 on
+**Where we are right now.** The fine tier is built, verified and released, **v0.2.1 on
 2026-10-13** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on our own bench and on **four** foreign codebases: Apache
 Calcite, Apache Lucene, Netty, and PostgreSQL over a socket. Phases 1, 2, 3, 3.5 and 3.75 are done; phase 6 is half done —
 thread state and per-operation concurrency exist, the whole-application coefficient does not; phase 7
@@ -69,7 +69,7 @@ vocabulary - paused, active, waiting, runnable, on CPU - and why each matters ar
 The bench was not re-run after any of these changes. That project's `docs/handover.md` says where
 the work on it stands.
 
-**Then, 2026-10-12 and 13: the coarse output, used in anger, and v0.2.0.** Operation families,
+**Then, 2026-10-12 and 13: the coarse output, used in anger, and v0.2.1.** Operation families,
 `level[depth]`, one registration for a small integer index. The coarse table is now the tree: each
 operation under the one it ran inside, keyed by the whole path through a calling-context tree per
 thread, with a `Paused` column charging each pause to the span it interrupted, and `made of` under

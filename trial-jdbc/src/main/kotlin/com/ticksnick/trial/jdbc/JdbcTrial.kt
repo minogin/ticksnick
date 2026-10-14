@@ -267,7 +267,7 @@ private fun load(seconds: Int, threads: Int, fanout: Int, propagate: Boolean, st
  * only way to get it is by counting threads that were stopped.
  */
 private fun checkAgainstTheOperatingSystem(
-    report: com.ticksnick.Report,
+    report: com.ticksnick.Profile,
     requests: Long,
     wallNanos: Long,
     cpuNanos: Long,

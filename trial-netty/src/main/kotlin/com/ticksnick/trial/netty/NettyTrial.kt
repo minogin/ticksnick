@@ -390,7 +390,7 @@ fun profile(seconds: Int, threads: Int, connections: Int, inFlight: Int, coarse:
  * and really averages 800. Using the configured 1,024 would make the fit look worse than it is and
  * would be our arithmetic error, not the tool's.
  */
-private fun printPolicyFit(report: com.ticksnick.Report) {
+private fun printPolicyFit(report: com.ticksnick.Profile) {
     val bodies = IntArray(16) { 128 + it * 128 }
     fun effective(depth: Int) = bodies.sumOf { minOf(depth, it) }.toDouble() / bodies.size
 

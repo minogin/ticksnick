@@ -360,6 +360,8 @@ class CoarseNode internal constructor(
      */
     val pausedNanos: Long,
     val children: List<CoarseNode>,
+    /** For an operation opened with a key: its slowest executions on this path, longest first. Measured. */
+    val slowest: List<SlowExecution> = emptyList(),
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -372,6 +374,9 @@ class CoarseNode internal constructor(
     /** Every node of the subtree, this one first. */
     fun flatten(): List<CoarseNode> = listOf(this) + children.flatMap { it.flatten() }
 }
+
+/** One of the slowest executions of a coarse operation: the key it was opened with, and its wall time. */
+data class SlowExecution(val key: String, val nanos: Long)
 
 /**
  * One coarse operation's line in a [Profile].
@@ -1336,6 +1341,10 @@ class Profile internal constructor(
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
             appendLine("    the executions on that path alone; 'made of' under a leaf is its cross-tabulation, sampled")
             appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
+            if (coarseTree.any { t -> t.flatten().any { it.slowest.isNotEmpty() } }) {
+                appendLine("  'slowest:' under a row opened with a key: its longest executions on that path, measured,")
+                appendLine("    wall time with any pause in it")
+            }
         }
     }
 
@@ -1423,6 +1432,14 @@ class Profile internal constructor(
                     waitSplit(n.inclusiveHits, n.runningInclusiveHits)
                 )
             )
+            // Which executions were the slowest, when the operation was opened with a key: a
+            // percentile says how slow, and this says which, so the case can be run again.
+            n.slowest.forEachIndexed { i, slow ->
+                appendLine(
+                    indent + "  " + (if (i == 0) "slowest: " else "         ") +
+                            String.format(Locale.ROOT, "%9s  %s", duration(slow.nanos.toDouble()), slow.key)
+                )
+            }
             // The fine steps, on the leaves only: a parent's would be its children's over again.
             if (n.children.isEmpty() && n.inclusiveHits > 0) {
                 val made = madeOf(n.fine, n.inclusiveHits)

@@ -244,18 +244,20 @@ class OpSlot(
     }
 
     /**
-     * Records one completed coarse execution [ctx] lasting [nanos] into its node.
+     * Records one completed coarse execution [ctx] lasting [nanos] into its node, and returns the
+     * node, for the keyed form to keep the slowest in; null for a context made outside the hook.
      *
      * Not inline, for the reason [pathFor] is not. A handful of plain writes with a single writer.
      */
     @PublishedApi
-    internal fun recordSpan(ctx: CoarseContext, nanos: Long) {
-        val p = ctx.path ?: return
+    internal fun recordSpan(ctx: CoarseContext, nanos: Long): CoarsePath? {
+        val p = ctx.path ?: return null
         val node = if (p.owner === this) p else {
             val root = coarseRoot ?: CoarsePath(CoarsePath.ROOT, null, this).also { coarseRoot = it }
             resolve(root, ctx)
         }
         node.record(nanos)
+        return node
     }
 
     /** How deeply this thread is nested in coarse executions. Zero when it is inside none. */
@@ -986,6 +988,7 @@ object Profiler {
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),
+            slowest = n.slowest(),
         )
         val coarseTree = tree.below().filter { !it.isEmpty() }.map { nodeOf(it) }
         return Profile(

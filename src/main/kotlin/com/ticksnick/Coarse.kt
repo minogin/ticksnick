@@ -20,6 +20,12 @@ const val MAX_COARSE_TYPES = 64
 const val MAX_COARSE_DEPTH = 16
 
 /**
+ * How many of its slowest executions a coarse operation opened with a key keeps, per path. They
+ * are printed under its row, longest first, and saved with the profile.
+ */
+const val SLOWEST_KEPT = 5
+
+/**
  * One execution of a coarse operation.
  *
  * Allocated on entry, published into the calling thread's slot, and read from the sampling thread
@@ -195,6 +201,7 @@ object SpanHistogram {
  * nothing else does. The owning thread writes the span fields and nothing else does. Two writers,
  * disjoint fields, no fence: a read a few nanoseconds stale is the bargain everything here makes.
  */
+@PublishedApi
 internal class CoarsePath(
     /** The coarse type at this node, [ROOT] for the root of a tree. */
     @JvmField val type: Int,
@@ -236,6 +243,17 @@ internal class CoarsePath(
     /** The tick whose pause was last charged here, so three threads under one node charge it once. */
     @JvmField var pauseStamp: Long = -1
 
+    // The slowest executions of an operation opened with a key: written by the owning thread,
+    // unordered. Allocated on the first keyed execution.
+    @JvmField var slowNanos: LongArray? = null
+    @JvmField var slowKeys: Array<String?>? = null
+    @JvmField var slowCount: Int = 0
+    /**
+     * What an execution has to beat to be among the slowest: -1 until [SLOWEST_KEPT] are kept, then
+     * the shortest of them. The one compare a keyed execution pays when it is not slow.
+     */
+    @PublishedApi @JvmField internal var slowFloor: Long = -1
+
     fun child(type: Int): CoarsePath {
         val cs = children ?: arrayOfNulls<CoarsePath>(MAX_COARSE_TYPES).also { children = it }
         return cs[type] ?: CoarsePath(type, this, owner).also { cs[type] = it }
@@ -255,6 +273,30 @@ internal class CoarsePath(
         hist[SpanHistogram.bucketOf(nanos)]++
     }
 
+    /** Keeps one execution of [nanos] opened with [key] if it is among the slowest. */
+    @PublishedApi
+    internal fun recordSlow(nanos: Long, key: String) {
+        val ns = slowNanos ?: LongArray(SLOWEST_KEPT).also { slowNanos = it }
+        val ks = slowKeys ?: arrayOfNulls<String>(SLOWEST_KEPT).also { slowKeys = it }
+        if (slowCount < SLOWEST_KEPT) {
+            ns[slowCount] = nanos
+            ks[slowCount] = key
+            slowCount++
+            if (slowCount < SLOWEST_KEPT) return
+        } else {
+            var shortest = 0
+            for (i in 1 until SLOWEST_KEPT) if (ns[i] < ns[shortest]) shortest = i
+            if (nanos <= ns[shortest]) return
+            ns[shortest] = nanos
+            ks[shortest] = key
+        }
+        slowFloor = ns.min()
+    }
+
+    /** The slowest executions kept here, longest first. */
+    fun slowest(): List<SlowExecution> =
+        (0 until slowCount).map { SlowExecution(slowKeys!![it]!!, slowNanos!![it]) }.sortedByDescending { it.nanos }
+
     /** Adds [o] and everything under it into this node and the matching nodes under it. */
     fun mergeFrom(o: CoarsePath) {
         count += o.count
@@ -270,6 +312,7 @@ internal class CoarsePath(
             val f = fine ?: LongArray(MAX_OPERATIONS + 1).also { fine = it }
             for (i in f.indices) f[i] += of[i]
         }
+        for (i in 0 until o.slowCount) recordSlow(o.slowNanos!![i], o.slowKeys!![i]!!)
         o.children?.let { ocs -> for (t in ocs.indices) ocs[t]?.let { child(t).mergeFrom(it) } }
         o.overflow?.let { oos -> for (t in oos.indices) oos[t]?.let { deeper(t).mergeFrom(it) } }
     }
@@ -286,6 +329,10 @@ internal class CoarsePath(
         fine?.fill(0L)
         pausedNanos = 0
         pauseStamp = -1
+        slowNanos?.fill(0L)
+        slowKeys?.fill(null)
+        slowCount = 0
+        slowFloor = -1
         children?.forEach { it?.reset() }
         overflow?.forEach { it?.reset() }
     }
@@ -363,3 +410,41 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
         slot.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
     }
 }
+
+/**
+ * The same, and keeps the [SLOWEST_KEPT] slowest executions under the [key] each was opened with,
+ * so the report can say which ones they were: `op(resolveRoot, key = { root }) { ... }`.
+ *
+ * [key] is called only for an execution that makes the slowest so far, and after the end timestamp,
+ * so it is never part of the span it names. An execution that is not slow pays one compare more
+ * than the plain form. The few that are - about `SLOWEST_KEPT x ln(executions / SLOWEST_KEPT)` in a
+ * run in random order - pay for the key's `toString` and five longs scanned.
+ *
+ * The time is the execution's wall time, pauses included, so a key can be slowest only because a
+ * collection landed in it.
+ */
+inline fun <T> op(op: CoarseOp, key: () -> Any?, body: () -> T): T {
+    val slot = Profiler.slot()
+    val parent = slot.contextOpaque()
+    val ctx = CoarseContext(op.id, parent, System.nanoTime(), slot.pathFor(parent, op.id))
+    slot.setContextOpaque(ctx)
+    try {
+        return body()
+    } finally {
+        // As the plain form, then the one compare.
+        slot.setContextOpaque(parent)
+        ctx.markClosed()
+        val nanos = System.nanoTime() - ctx.startNanos
+        val node = slot.recordSpan(ctx, nanos)
+        if (node != null && nanos > node.slowFloor) node.recordSlow(nanos, keyOf(key))
+    }
+}
+
+/** A key that throws is named rather than allowed to replace whatever the body threw. */
+@PublishedApi
+internal inline fun keyOf(key: () -> Any?): String =
+    try {
+        key().toString()
+    } catch (e: Exception) {
+        "(the key threw ${e.javaClass.simpleName})"
+    }

@@ -2126,6 +2126,26 @@ execution - and the tick is a knob. Above it, the histogram exists; the longest 
 between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
 both; this is the answer.
 
+## The slowest executions, by key · 2026-10-16
+
+Andrey, on the same profile: `resolveRoot` p50 590 us and max 85.3 ms, and nothing said which
+roots. **`op(coarse, key = { ... }) { }`** keeps the `SLOWEST_KEPT` = 5 slowest executions per
+path with their keys, prints them under the row as `slowest:`, and saves them with the profile
+(only where there are any, so the format stays `ticksnick-profile 1`).
+
+**The cost, by design.** Exit already takes the end timestamp and records the span; the keyed form
+adds one compare against `slowFloor`, the shortest of the five kept. Only an execution that beats
+it calls the key and scans five longs - about `5 x ln(n / 5)` of them in a run in random order, 75
+of 15,786. The key is an inline lambda, so nothing is allocated when it is not called, and it runs
+after the end timestamp, so it is never in the span it names. Per thread, single writer, merged at
+`stop` like every other span figure. **Not yet measured**: an A/B on the bench is owed.
+
+**Coarse only.** A fine label is not timed per execution at all, so there is no duration to rank;
+timing one would be two clock reads, ~40 ns, on operations of 8-30 ns.
+
+**Not built.** No key on `Profiler.enter` / `exit`, and none on the *all callers together* rows; a
+key that throws is kept as `(the key threw X)` rather than replacing what the body threw.
+
 ## `x parent` and `% parent` in the coarse table · 2026-10-16
 
 Andrey, reading a maven-graph profile where `select` was 9.78 s under a 16.7 s `resolve`: the

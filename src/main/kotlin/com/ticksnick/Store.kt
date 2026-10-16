@@ -145,6 +145,14 @@ object ProfileStore {
             line(k + "runningInclusiveHits", n.runningInclusiveHits)
             sparse(k + "fine", n.fine)
             line(k + "pausedNanos", n.pausedNanos)
+            // Only where there are any, so a file from before keys existed reads the same.
+            if (n.slowest.isNotEmpty()) {
+                line(k + "slowest", n.slowest.size)
+                n.slowest.forEachIndexed { j, slow ->
+                    line(k + "slowest.$j.nanos", slow.nanos)
+                    text(k + "slowest.$j.key", slow.key)
+                }
+            }
         }
         path.parent?.let { Files.createDirectories(it) }
         Files.writeString(path, out.toString())
@@ -231,6 +239,9 @@ object ProfileStore {
                 inclusiveHits = long(k + "inclusiveHits"), runningInclusiveHits = long(k + "runningInclusiveHits"),
                 fine = sparse(k + "fine", MAX_OPERATIONS + 1), pausedNanos = long(k + "pausedNanos"),
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
+                slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
+                    SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))
+                },
             )
         }
         val tree = (childrenOf[-1] ?: emptyList<Int>()).map { build(it) }

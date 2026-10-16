@@ -1,5 +1,6 @@
 package com.ticksnick
 
+import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.AfterTest
@@ -253,5 +254,81 @@ class TreeTest {
         val row = p.render().substringAfter("COARSE OPERATIONS").lines().first { it.startsWith("tree-paused ") }
         val paused = row.split(Regex("[ ]+"))[3]
         assertTrue(paused != "-", "the Paused column is empty on the row: $row")
+    }
+    /**
+     * An operation opened with a key keeps its five slowest executions on the path, longest first,
+     * prints them under its row and saves them with the profile. Durations a millisecond apart, in
+     * an order that is neither ascending nor descending.
+     */
+    @Test
+    fun `a keyed operation keeps its slowest executions by key`() {
+        val outer = Profiler.registerCoarse("tree-keyed-outer")
+        val keyed = Profiler.registerCoarse("tree-keyed")
+        val order = listOf(7, 19, 2, 13, 0, 16, 9, 18, 4, 11, 15, 1, 17, 6, 14, 3, 12, 8, 10, 5)
+        start()
+        op(outer) {
+            for (i in order) op(keyed, key = { "k$i" }) { spinFor((i + 1) * 1_000_000L) }
+        }
+        val p = Profiler.stop()
+
+        val node = assertNotNull(assertNotNull(p.root("tree-keyed-outer")).child("tree-keyed"))
+        assertEquals(SLOWEST_KEPT, node.slowest.size)
+        assertEquals(node.slowest.sortedByDescending { it.nanos }, node.slowest, "not longest first")
+        // A preemption can swap two neighbours a millisecond apart; it cannot bring up a short one.
+        val top = (13..19).map { "k$it" }.toSet()
+        assertTrue(node.slowest.all { it.key in top }, "not the slowest: ${node.slowest}")
+        assertTrue(node.slowest.first().nanos >= 20_000_000, "the longest is shorter than it ran: ${node.slowest.first()}")
+        assertTrue(assertNotNull(p.root("tree-keyed-outer")).slowest.isEmpty(), "an operation without a key kept some")
+
+        val text = p.render()
+        assertTrue(text.lines().any { it.trim().startsWith("slowest:") && node.slowest.first().key in it }, "no slowest line:\n$text")
+
+        val file = Files.createTempFile("tree-keyed", PROFILE_EXTENSION)
+        try {
+            ProfileStore.save(p, file)
+            val loaded = ProfileStore.load(file)
+            assertEquals(node.slowest, assertNotNull(assertNotNull(loaded.root("tree-keyed-outer")).child("tree-keyed")).slowest)
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    /** The key is built only for an execution that makes the slowest so far: in descending order, the first five. */
+    @Test
+    fun `the key is called only for a slow execution`() {
+        val keyed = Profiler.registerCoarse("tree-key-calls")
+        var calls = 0
+        start()
+        for (i in 10 downTo 1) op(keyed, key = { calls++; "k$i" }) { spinFor(i * 2_000_000L) }
+        Profiler.stop()
+        assertEquals(SLOWEST_KEPT, calls)
+    }
+
+    /** Each thread keeps its own slowest; the report keeps the slowest of all of them. */
+    @Test
+    fun `the slowest are merged across threads`() {
+        val keyed = Profiler.registerCoarse("tree-key-threads")
+        start()
+        val fast = onThread("tree-key-fast") { repeat(SLOWEST_KEPT) { op(keyed, key = { "fast$it" }) { spinFor(1_000_000) } } }
+        val slow = onThread("tree-key-slow") { repeat(SLOWEST_KEPT) { op(keyed, key = { "slow$it" }) { spinFor(4_000_000) } } }
+        fast.start()
+        slow.start()
+        fast.join()
+        slow.join()
+        val p = Profiler.stop()
+        val node = assertNotNull(p.root("tree-key-threads"))
+        assertEquals(2L * SLOWEST_KEPT, node.count)
+        assertTrue(node.slowest.all { it.key.startsWith("slow") }, "the slow thread's were not kept: ${node.slowest}")
+    }
+
+    /** A key that throws does not replace the body's result or its exception. */
+    @Test
+    fun `a key that throws is named`() {
+        val keyed = Profiler.registerCoarse("tree-key-throws")
+        start()
+        val result = op(keyed, key = { error("no key") }) { spinFor(1_000_000); 42 }
+        val p = Profiler.stop()
+        assertEquals(42, result)
+        assertEquals("(the key threw IllegalStateException)", assertNotNull(p.root("tree-key-throws")).slowest.single().key)
     }
 }

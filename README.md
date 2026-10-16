@@ -192,6 +192,22 @@ it. `Profiler.enter(op)` / `Profiler.exit(op)` exist for a boundary that is two 
 — they have no `finally`, so pair them with `Profiler.expectBalanced()` at a point the thread should
 be quiescent, which for a coarse label means *between* requests and not inside one.
 
+**Which executions were the slow ones.** Give a coarse label a key, and the report keeps the five
+slowest executions under it, longest first, by name:
+
+```kotlin
+op(request, key = { input.id }) { handle(input) }
+```
+
+```
+request         5,262  ...  max 85.3 ms
+  slowest:   85.3 ms  order-7731
+             71.0 ms  order-120
+```
+
+The key is called only for an execution that makes the slowest so far, after it has finished, so
+it is never part of the time it names; every other execution pays one compare.
+
 **A label with an index.** When the same step runs at several depths, types or sizes and you want
 them apart, register a family once and index it on the hot path:
 

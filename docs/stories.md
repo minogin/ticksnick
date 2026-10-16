@@ -81,6 +81,21 @@ that may be the more honest article.
 
 ## Nice ones: interesting on their own
 
+### A check removed, and the next lookup paid part of it back
+*2026-10-16, maven-graph (`C:\idea\maven-graph`), classpath resolution of 5,262 `org.apache.camel`
+roots on the Goblin graph. Profiles in its `docs/profiles/`, numbers in its `docs/steps.md`.*
+
+The naive resolver asked of every edge, on every walk, whether the target version exists on Central:
+a `g:a:v` string built and looked up in a map of 16 million releases, label `onCentral`, 40.5% of
+the run at 130 ns a call. The next step dropped those edges once, before the walks. Same labels on
+both, so the diff reads row for row: `onCentral` 8.18 s to nothing, the run 20.6 s to 13.8 s - 6.76
+s saved, not 8.18 - and `dependencies`, the lookup of a release's dependency list in the same map,
+78 ns to 149 ns a call at the same 21,346,303 calls, with no change to its code. The placement is
+measured; the cause is a conjecture: `onCentral` had just touched the same map entry the walk then
+looked up, so the lookup found it in cache, and without it the miss is paid there. A step that
+re-adds the `containsKey` alone, without the filter, would settle it. A flame graph diff would show
+the time moving between the two callers of `HashMap.getNode` too.
+
 ### The same labels on two implementations, and the diff reads row for row
 *2026-10-13, the graph benchmark, `C:\idea\graph`. Numbers in its `docs/profiler-notes.md`.*
 

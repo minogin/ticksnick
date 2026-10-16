@@ -192,15 +192,6 @@ the first coarse one were both the integer `0`, and passing one where the other 
 and reported a plausible wrong answer. The handles erase to a bare `int`, so none of it costs
 anything at run time.
 
-**Start coarse, then demote what the report names.** Unless an operation is certainly tiny - a hash
-probe, a field read - register it coarse: it gives everything a fine label does, plus timings per
-execution, the tree and the slowest keys. Treat the first run as placing the labels, not as the
-result. A coarse label on something that runs millions of times at a few hundred nanoseconds adds
-about 40 ns and an allocation to every call, which moves every share; the warnings at the top of
-the report name each such label with its numbers. Make those `registerFine`, run again, and read
-that run. On a classpath resolver, two such labels took a batch from 16.7 s to 20.8 s, and both
-were named.
-
 **For a whole request, query or plan, add a coarse label as well:**
 
 ```kotlin
@@ -282,6 +273,28 @@ unlike the fine floor it is comparing a duration it measured rather than one it 
 Call `Profiler.release()` when a thread exits. There is a safety net — the sampler reclaims the
 slots of threads that have died — but it waits on a garbage collection, and until then a dead
 thread reads as an idle one and inflates the denominator every share is taken over.
+
+### How to use it: label everything, let the report prune
+
+You do not need to know in advance which operations are big and which are tiny. Label generously
+and let the report say which labels are wrong - it names each one, with the numbers.
+
+1. **Label every step you are curious about, coarse.** Coarse is strictly more: everything a fine
+   label gives, plus timings per execution, the tree and the slowest keys. Go down to the
+   individual checks if you like, an `==` included.
+2. **Run once, and act on the warnings at the top**, not on the tables:
+   - *N coarse executions of X; a coarse label needs Y here*: the operation is too short or too frequent for a context of
+     about 40 ns. Change it to `registerFine`; the `op(...)` calls stay as they are.
+   - *N calls at under X each, below the 50 ns floor*: the operation is too short even for a 2 ns
+     hook, and the sampler reads it low. Label the loop around it with `times`, or drop the label - its share
+     has usually answered the question already.
+3. **Run again and read that run.**
+
+The first run is for placing the labels, not for the result. Over-small labels distort it: a coarse
+label on a few-hundred-nanosecond operation adds about 40 ns and an allocation to every call, a
+fine one roughly doubles a 3 ns comparison, and the compiler can move work between adjacent tiny
+labels. On a classpath resolver, two coarse labels the report then named took a batch from 16.7 s
+to 20.8 s.
 
 ### What comes out
 

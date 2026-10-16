@@ -2157,6 +2157,11 @@ the first run places the labels and the second is read. Seen on maven-graph: `me
 executions of 196 ns) and `passedOn` (21M of 490 ns) labelled coarse took the batch from 16.7 s to
 20.8 s, and both were the two warnings at the top. Written into the README and profiler.md.
 
+Extended the same day one tier down, Andrey: "if I profile this stuff I'd put labels even on
+`==`". The README's *How to use it* is the whole loop: label everything coarse, act on both floor
+warnings (coarse too small -> `registerFine`; fine too small -> label the loop with `times`, or
+drop it), read the second run. A user should not need to know what is small; the floor checks do.
+
 **Handles as top-level capitals**, `val RESOLVE_ROOT = registerCoarse("resolveRoot")`, one file of
 them: `op(SELECT)` reads as a label in any viewer and does not clash with the `select()` it wraps,
 and IntelliJ colours package-level properties apart where an object's members look like any field.

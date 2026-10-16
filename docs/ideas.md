@@ -1308,6 +1308,19 @@ so those two want to be in the diff as `before -> after` pairs, and the coarse h
 runnable/waiting too. Andrey, 2026-10-13: "at least we should not forget about that." To be added
 when the first threaded diff is read; the graph benchmark is one thread and would not test it.
 
+## 45. `times` on a coarse label · open
+
+The coarse floor warning advises putting the label around a batch, and then the row speaks in
+batches: "42,000 executions of 250 us" where the reader thinks "21M `passedOn` of 490 ns". `times`
+fixes that on the fine tier. Andrey, 2026-10-16: around a batch, would it not be better to have
+`times` there? For the count and the mean, yes. The catch is the rest of the row: p50, p90, p99,
+max and the slowest keys are per span, and with a batch only the batch is timed, so those columns
+can only ever be per batch while executions and the mean would be per unit - one row in two units
+with nothing on it saying which. A way through is to say both, `42,000 (x504 units)` in
+Executions, the mean per unit, and the percentiles marked per batch; it is a design question on the
+coarse table and not a sentence in a warning, so the warning gives the batch without `times` for
+now.
+
 ## Promoted to plan.md
 
 **Phase 3.5** is item 9 above, reframed from detecting bad operations to bounding the error on every

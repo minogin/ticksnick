@@ -60,6 +60,10 @@ fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, required
     //
     // Three lines: the fact, the reason, the fix. It was five, and Andrey read it on a label he had
     // put on a 40 ns lookup: "shorter, less verbose and more clear".
+    //
+    // The fix names the registration, not a call: `op` takes both tiers, so the call site is already
+    // right. It said `op(name) { }` from before the one verb, and Andrey, 2026-10-16, reading it with
+    // `op(PASSED_ON)` in his code: "a bit misleading".
     val shareBound = requiredNanos > Profile.COARSE_FLOOR_NANOS
     val overhead = Profile.COARSE_CONTEXT_NANOS / meanNanos * 100
     val why = if (shareBound) String.format(
@@ -74,7 +78,7 @@ fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, required
     return String.format(
         Locale.ROOT,
         "%s: %,d coarse executions of %s; a coarse label needs %s here.%n%s%n" +
-                "    Use a fine label, op(%s) { }, or put the coarse label around a batch of these.",
+                "    Register it fine, registerFine(\"%s\"), and keep the op(...) calls; or put the coarse label around a batch of these.",
         name, count, duration(meanNanos), duration(requiredNanos), why, name
     )
 }

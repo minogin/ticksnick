@@ -630,7 +630,7 @@ Three lines: the fact, the reason, the fix.
 ```
   1. id: 16,038,234 coarse executions of 938 ns; a coarse label needs 3.71 us here.
      Accurate per execution (4.3% overhead), but 16,038,234 contexts at 40 ns are over 1% of the run.
-     Use a fine label, op(id) { }, or put the coarse label around a batch of these.
+     Register it fine, registerFine("id"), and keep the op(...) calls; or put the coarse label around a batch of these.
 ```
 
 **What to do:** what the last line says. A warning, never fatal.

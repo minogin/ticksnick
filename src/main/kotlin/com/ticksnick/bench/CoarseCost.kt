@@ -28,6 +28,8 @@ const val COARSE_COST_BODY = 20
  * - **flat**: the body under one coarse label, nested in nothing.
  * - **deep**: the body under one coarse label inside three open ones - the common shape, where
  *   entry has a parent to look up under.
+ * - **keyed**: flat, opened with a key, so exit also compares against the slowest kept. Added
+ *   2026-10-16 with the keyed form: one compare is the claim, and this is what checks it.
  *
  * The sampler is on, as it would be in use, so whatever it does to the context's cache line is in
  * the figure. Prices one thread: contention is not what a per-thread recording path has.
@@ -35,20 +37,23 @@ const val COARSE_COST_BODY = 20
 internal fun runCoarseCost() {
     val outer = Array(3) { Profiler.registerCoarse("outer$it") }
     val leaf = Profiler.registerCoarse("leaf")
+    val keyed = Profiler.registerCoarse("keyed")
     Profiler.start(strict = false)
     try {
-        println("--- What one coarse execution costs: bare vs flat vs deep, ${COARSE_COST_ROUNDS} interleaved rounds ---")
+        println("--- What one coarse execution costs: bare vs flat vs deep vs keyed, ${COARSE_COST_ROUNDS} interleaved rounds ---")
         // Warm-up: every arm, until C2 has had its say.
-        repeat(5) { bareLap(); flatLap(leaf); deepLap(outer, leaf) }
+        repeat(5) { bareLap(); flatLap(leaf); deepLap(outer, leaf); keyedLap(keyed) }
         val bare = DoubleArray(COARSE_COST_ROUNDS)
         val flat = DoubleArray(COARSE_COST_ROUNDS)
         val deep = DoubleArray(COARSE_COST_ROUNDS)
+        val key = DoubleArray(COARSE_COST_ROUNDS)
         for (r in 0 until COARSE_COST_ROUNDS) {
-            for (k in 0 until 3) {
-                when ((r + k) % 3) {
+            for (k in 0 until 4) {
+                when ((r + k) % 4) {
                     0 -> bare[r] = bareLap()
                     1 -> flat[r] = flatLap(leaf)
-                    else -> deep[r] = deepLap(outer, leaf)
+                    2 -> deep[r] = deepLap(outer, leaf)
+                    else -> key[r] = keyedLap(keyed)
                 }
             }
         }
@@ -59,9 +64,11 @@ internal fun runCoarseCost() {
         println("  bare body:            " + stats(bare))
         println("  flat, one label:      " + stats(flat))
         println("  deep, three outside:  " + stats(deep))
+        println("  keyed, one label:     " + stats(key))
         val flatCost = flat.sorted()[COARSE_COST_ROUNDS / 2] - bare.sorted()[COARSE_COST_ROUNDS / 2]
         val deepCost = deep.sorted()[COARSE_COST_ROUNDS / 2] - bare.sorted()[COARSE_COST_ROUNDS / 2]
-        println(String.format(Locale.ROOT, "  one coarse execution: %.1f ns flat, %.1f ns deep (median minus median)", flatCost, deepCost))
+        val keyedCost = key.sorted()[COARSE_COST_ROUNDS / 2] - bare.sorted()[COARSE_COST_ROUNDS / 2]
+        println(String.format(Locale.ROOT, "  one coarse execution: %.1f ns flat, %.1f ns deep, %.1f ns keyed (median minus median)", flatCost, deepCost, keyedCost))
     } finally {
         Profiler.stop()
     }
@@ -115,4 +122,13 @@ private fun deepLap(outer: Array<com.ticksnick.CoarseOp>, leaf: com.ticksnick.Co
     }
     sink = s
     return ns.toDouble() / COARSE_COST_LAP
+}
+
+private fun keyedLap(keyed: com.ticksnick.CoarseOp): Double {
+    var s = sink
+    val t0 = System.nanoTime()
+    for (i in 0 until COARSE_COST_LAP) s = op(keyed, key = { i }) { body(s) }
+    val t1 = System.nanoTime()
+    sink = s
+    return (t1 - t0).toDouble() / COARSE_COST_LAP
 }

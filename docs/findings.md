@@ -292,6 +292,12 @@ measured until now; the whole is 48-52 ns on this machine at that clock, and the
 arithmetic in profiler.md is unchanged by a quarter more. The first version of the bare arm read
 0.1 ns: C2 composed twenty affine LCG steps into one, and the body is a xorshift now.
 
+**A key on a coarse label costs nothing measurable.** `--coarsecost` with a fourth arm, the flat
+label opened with `key = { i }`, 2026-10-16: ten runs of fifteen interleaved rounds each, CPU clock
+155-225%, probe beside the runs. Median of the runs: 45.5 ns flat, 44.6 ns keyed; keyed minus flat
+per run from -2.1 to +1.4 ns, mean -0.6 ns. The one compare is below the noise of the hook itself,
+which moves by 3 ns between runs. The bare body read 24-25 ns.
+
 **A volatile store on x86 is not a store.** It needs a StoreLoad barrier — a lock-prefixed
 instruction costing tens of cycles — and the hook does two per call. Measured at 16% of the
 bench's throughput, against a design that assumed single-digit nanoseconds.

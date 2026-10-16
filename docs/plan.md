@@ -2138,7 +2138,8 @@ adds one compare against `slowFloor`, the shortest of the five kept. Only an exe
 it calls the key and scans five longs - about `5 x ln(n / 5)` of them in a run in random order, 75
 of 15,786. The key is an inline lambda, so nothing is allocated when it is not called, and it runs
 after the end timestamp, so it is never in the span it names. Per thread, single writer, merged at
-`stop` like every other span figure. **Not yet measured**: an A/B on the bench is owed.
+`stop` like every other span figure. **Measured** (findings.md, "A key on a coarse label costs
+nothing measurable"): 44.6 ns keyed against 45.5 ns plain, over ten runs, inside the noise.
 
 **Coarse only.** A fine label is not timed per execution at all, so there is no duration to rank;
 timing one would be two clock reads, ~40 ns, on operations of 8-30 ns.

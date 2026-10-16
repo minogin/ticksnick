@@ -3,6 +3,9 @@ package com.ticksnick
 import java.util.Locale
 import kotlin.math.abs
 
+/** The three header lines, wall, active and paused: before -> after, the change, the percentage, each column right-aligned. */
+const val HEADER_DIFF_ROW = "%7s -> %7s  %9s %7s"
+
 /**
  * Two profiles side by side: what changed between a run and the one before it.
  *
@@ -29,8 +32,13 @@ class ProfileDiff(
         appendLine(row("Diff", "$beforeName -> $afterName"))
         // Three lines and not one `wall = active + paused`, so that each carries its change: the
         // header pairs had none while every row below did. Andrey, 2026-10-13.
-        fun headerLine(key: String, a: Double, b: Double) =
-            row(key, String.format(Locale.ROOT, "%s   %s", pair(a, b), change(a, b, true)))
+        fun headerLine(key: String, a: Double, b: Double): String {
+            if (a.isNaN() || b.isNaN()) return row(key, pair(a, b))
+            val d = b - a
+            val sign = if (d < 0) "-" else "+"
+            val pct = if (a == 0.0) "" else String.format(Locale.ROOT, "%s%.1f%%", sign, abs(d) / a * 100)
+            return row(key, String.format(Locale.ROOT, HEADER_DIFF_ROW, duration(a), duration(b), sign + duration(abs(d)), pct))
+        }
         appendLine(headerLine("Wall time", before.samplingSpanNanos.toDouble(), after.samplingSpanNanos.toDouble()))
         appendLine(headerLine("  Active", before.activeNanos.toDouble(), after.activeNanos.toDouble()))
         appendLine(headerLine("  Paused", before.pause.confirmedPausedIn(before.samplingSpanNanos).toDouble(), after.pause.confirmedPausedIn(after.samplingSpanNanos).toDouble()))

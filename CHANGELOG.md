@@ -3,11 +3,14 @@
 ## v0.3.0 — 2026-10-16
 
 ```kotlin
-repositories { maven("https://jitpack.io") }
-dependencies { implementation("com.github.minogin:ticksnick:v0.3.0") }
+dependencies { implementation("com.ticksnick:ticksnick:0.3.0") }
 ```
 
-Nothing breaking: new ways to place a label, and a report that reads from the top down. All of it
+**On Maven Central from this release**, as `com.ticksnick:ticksnick`, with no extra repository.
+JitPack is dropped: its builder kept failing on Central's rate limit before compiling anything.
+Signed, with sources.
+
+Nothing breaking in the API: new ways to place a label, and a report that reads from the top down. All of it
 came from labelling a real program, the maven-graph classpath resolver.
 
 ### `op` in the middle of a chain
@@ -51,7 +54,6 @@ right-aligned columns.
 
 *How to use it*: label everything, let the report prune; handles as top-level capitals in one file.
 
-JitPack publishes the root project only, so a trial that fails to compile no longer fails a release.
 
 ## v0.2.1 — 2026-10-14
 

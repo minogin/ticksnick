@@ -9,8 +9,7 @@ Apache Lucene, Netty and PostgreSQL over a socket. Used in anger on a graph benc
 a BFS from 12.2 s to 1.75 s and said, row for row, why.
 
 ```kotlin
-repositories { maven("https://jitpack.io") }
-dependencies { implementation("com.github.minogin:ticksnick:v0.3.0") }
+dependencies { implementation("com.ticksnick:ticksnick:0.3.0") }   // Maven Central
 ```
 
 ### What it does, and what it does not

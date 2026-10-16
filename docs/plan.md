@@ -2257,6 +2257,28 @@ past their parent's wall time and that excess is a reading, not an error. Not ad
 *all callers together* rows, which have no single parent. The diff keeps its own columns. The
 table goes from 138 to 156 wide.
 
+## Maven Central, not JitPack · 2026-10-16
+
+v0.3.0 failed on JitPack the same way v0.2.0 did: `429 Too Many Requests` from Maven Central while
+JitPack's builder fetched the Kotlin Gradle plugin, before a line of ours was compiled. Central
+throttles JitPack's shared address, and JitPack keeps a failed build until someone deletes it by
+hand. Andrey: it happens every time. JitPack is a convenience, not the standard: a library is
+expected on Maven Central, consumed with one line and no extra repository, built and signed by its
+author, and immutable once released.
+
+So from v0.3.0 the artifact is `com.ticksnick:ticksnick` on Maven Central, published with the
+`com.vanniktech.maven.publish` plugin (0.37.0) through the Central Portal. The namespace
+`com.ticksnick` is proved by a DNS TXT record on ticksnick.com; every release is signed with
+Andrey's GPG key. `jitpack.yml` is gone. Published: the jar and the sources without
+`com.ticksnick.bench`, an empty javadoc jar (Central requires one; Dokka is not worth a
+dependency for this), and a POM whose only dependency is the Kotlin stdlib.
+
+Signing runs only when `signingInMemoryKey` is set, so a local publish or a build from source -
+maven-graph includes this build - needs no key; Central refuses an unsigned deployment, so a release
+without one fails there. The credentials live in `~/.gradle/gradle.properties`, never in the
+repository. A release: `./gradlew publishToMavenCentral`, then "Publish" on
+central.sonatype.com/publishing/deployments.
+
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 
 Three questions from Andrey on the tree above, in order. *The tree repeats the executions and
@@ -2359,7 +2381,7 @@ Where to pick up, after the entries dated 2026-10-11 to 13 above and v0.2.0.
    third try, 2026-10-14, on the trial modules still saying `Report`: JitPack runs
    `publishToMavenLocal` across every module, so the trials have to compile too. Fixed and tagged
    v0.2.1. v0.1.0 shows no build at all there, so nobody had pulled the artifact the README
-   advertised before this.
+   advertised before this. **Superseded 2026-10-16: Maven Central, see above.**
 
 **What the next article needs from the tool:** several runs per arm with the clock traced, since
 `node` moved by 600 ms between two baseline runs on its own; and the `Long` artefact above fixed,

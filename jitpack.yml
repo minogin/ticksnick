@@ -1,9 +1,0 @@
-# JitPack builds from the git tag. Its default JDK is older than the toolchain Gradle asks for, and
-# without this the build fails and the artifact the README advertises never appears.
-jdk:
-  - openjdk21
-# The root project only: the library is the artifact, and the trials and the sandbox are modules
-# of their own that nothing depends on. Without the leading colon JitPack publishes across every
-# module, so a trial that fails to compile fails the release - which is how v0.2.0 was lost.
-install:
-  - ./gradlew :publishToMavenLocal -Pgroup=com.github.minogin -Pversion=$VERSION --console=plain

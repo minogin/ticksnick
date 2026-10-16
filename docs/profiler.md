@@ -169,6 +169,15 @@ two clock reads are lost in the noise.
 **They meet at the slot**, which carries the fine operation id *and* a reference to the current
 coarse context. Every sample records the pair.
 
+**Fine labels do not nest in the report, and that is the model, not a gap.** A fine label is an
+integer in the slot: the one innermost label. The outer one, when fine labels nest, lives only in
+the hook's local `prev`, on the thread's stack, so no sample says what contained what - and
+recording it would cost the hook on every call. So a fine label reports its own time, which is
+exact under nesting (the bench nests them on purpose and checks exactly this), and the coarse table
+shows a leaf's time *split* by innermost label rather than as a tree. A hierarchy is what the coarse
+tier is for; make the outer label coarse and pay its cost. The same goes for work handed to other
+threads: a fine label stays on its thread, a coarse context travels.
+
 **Which to start with: coarse.** Coarse is strictly more, so the default is to register an
 operation coarse unless it is certainly tiny, and to let the report say which ones to demote. The
 floor check is exact on the coarse tier - it compares durations it measured - so the advice is

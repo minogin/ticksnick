@@ -298,6 +298,12 @@ and let the report say which labels are wrong - it names each one, with the numb
      has usually answered the question already.
 3. **Run again and read that run.**
 
+**Fine labels split time; they do not make a hierarchy.** Under a coarse leaf the report splits its
+time by the innermost fine label, each sample once, and a fine label with fine labels inside it
+shows only its own part. If you want one step shown *with* its parts inside it, make that outer
+label coarse and accept its ~40 ns per execution - the report will say what that costs. The same
+holds across threads: a fine label does not travel to a pool, a coarse context does.
+
 The first run is for placing the labels, not for the result. Over-small labels distort it: a coarse
 label on a few-hundred-nanosecond operation adds about 40 ns and an allocation to every call, a
 fine one roughly doubles a 3 ns comparison, and the compiler can move work between adjacent tiny
@@ -316,13 +322,13 @@ COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to
 Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
 query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
   level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
-    visitedAdd                        fine              7.32 s      82%
-    node                              fine              1.02 s      11%
-    id                                fine              417 ms       5%
-    nextAdd                           fine              160 ms       2%
+    - visitedAdd                       own              7.32 s      82%
+    - node                             own              1.02 s      11%
+    - id                               own              417 ms       5%
+    - nextAdd                          own              160 ms       2%
   level[5]                               1              2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
-    node                              fine              2.40 s      94%
-    id                                fine              145 ms       6%
+    - node                             own              2.40 s      94%
+    - id                               own              145 ms       6%
 
 COARSE AND FINE OPERATIONS - own time, out of 11.8 s active time
                            |                                       Load                                       |           Long            |               Spread                |      Trust

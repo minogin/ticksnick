@@ -8,6 +8,9 @@ import kotlin.math.sqrt
 /** How many fine operations a coarse leaf lists as rows under it; the rest are one line. */
 const val FINE_ROWS_SHOWN = 6
 
+/** What marks a row of a leaf's split by innermost label, so it does not read as a child. ASCII, as everything printed is. */
+const val SPLIT_MARK = "-"
+
 /** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
@@ -1346,7 +1349,7 @@ class Profile internal constructor(
             appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
             appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
-            appendLine("    the executions on that path alone; the 'fine' rows under a leaf are its fine operations, sampled")
+            appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
             appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
             if (coarseTree.any { t -> t.flatten().any { it.slowest.isNotEmpty() } }) {
                 appendLine("  'slowest:' under a row opened with a key: its longest executions on that path, measured,")
@@ -1408,6 +1411,8 @@ class Profile internal constructor(
             }
         }
 
+        var anySplit = false
+
         fun StringBuilder.node(n: CoarseNode, depth: Int, parent: CoarseNode?) {
             val indent = "  ".repeat(depth)
             // An execution still open when the session ended has no span: its row keeps the
@@ -1436,24 +1441,31 @@ class Profile internal constructor(
                             String.format(Locale.ROOT, "%9s  %s", duration(slow.nanos.toDouble()), slow.key)
                 )
             }
-            // The fine steps, on the leaves only: a parent's would be its children's over again.
-            // Rows like the coarse ones, so `% parent` lines up, and `fine` where a coarse row has
-            // its count, which says why the rest is blank: a fine operation is not timed per call,
-            // and its calls are counted per operation, not per path. The total is its share of the
-            // samples inside the leaf applied to the leaf's measured total, so the two columns
-            // agree. It was one `made of:` line until 2026-10-16; Andrey asked for rows.
+            // The leaf's time split by the innermost label, on the leaves only: a parent's would be
+            // its children's over again. **A split, not children** - each sample inside the leaf has
+            // one innermost label, so the rows are own time and add up to 100%. That stays true when
+            // fine labels nest, and drawing them as children would not: a fine label with labels
+            // inside it would read as containing them, at a share that is only its own part. The
+            // nesting cannot be seen for free - the outer label lives only in the hook's `prev`, on
+            // the thread's stack - so the rows say `own` and carry a `-`, and do not look like one
+            // more level of the tree. For a hierarchy, the outer label is made coarse and pays
+            // for it. plan.md, "Fine rows in the coarse table are a split", 2026-10-16.
+            //
+            // The total is the share of the leaf's samples applied to the leaf's measured total, so
+            // it agrees with `% parent`. It was one `made of:` line until 2026-10-16.
             if (n.children.isEmpty() && n.inclusiveHits > 0) {
                 val parts = operations
-                    .map { Triple(it.name, "fine", n.fine[it.id]) }
-                    .plus(Triple("unlabelled", "", n.fine[NO_OP_INDEX]))
-                    .filter { it.third > 0 }
-                    .sortedByDescending { it.third }
-                for ((name, tier, hits) in parts.take(FINE_ROWS_SHOWN)) {
+                    .map { it.name to n.fine[it.id] }
+                    .plus("unlabelled" to n.fine[NO_OP_INDEX])
+                    .filter { it.second > 0 }
+                    .sortedByDescending { it.second }
+                if (parts.isNotEmpty()) anySplit = true
+                for ((name, hits) in parts.take(FINE_ROWS_SHOWN)) {
                     val share = hits.toDouble() / n.inclusiveHits
                     appendLine(
                         String.format(
                             Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
-                            "$indent  $name", tier, "",
+                            "$indent  $SPLIT_MARK $name", "own", "",
                             if (timed) duration(n.spanSumNanos * share) else "-",
                             shareText(share * 100), "", "", "", "", "", "", ""
                         ).trimEnd()
@@ -1461,7 +1473,7 @@ class Profile internal constructor(
                 }
                 val rest = parts.drop(FINE_ROWS_SHOWN)
                 if (rest.isNotEmpty()) appendLine(
-                    "$indent  and ${rest.size} more, " + shareText(rest.sumOf { it.third } * 100.0 / n.inclusiveHits) + " between them"
+                    "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.second } * 100.0 / n.inclusiveHits) + " between them"
                 )
             }
             // The two parallelism questions, under the root they are about, and only on a run
@@ -1498,6 +1510,11 @@ class Profile internal constructor(
             node(root, 0, null)
         }
         appendLine("-".repeat(COARSE_WIDTH))
+        // The key, once and next to the rows that need it, as the star's is under the own-time table.
+        if (anySplit) appendLine(
+            "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
+                    " a fine label with labels inside it shows only its own part"
+        )
         // An operation with more than one caller is a row under each, and those rows are its
         // figures under that caller alone. Its percentiles over everything are a different
         // question - "how long does a parse take" - and they are answered here, once, only when

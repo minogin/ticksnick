@@ -2143,6 +2143,46 @@ same: the block's `this` is that receiver either way.
 registry, and this change pushed it to 65; the new tests reuse names instead. The next coarse test
 will hit it again - a fork per test class, or a registry reset for tests, is the lasting fix.
 
+## Fine rows in the coarse table are a split, not children · 2026-10-16
+
+**The problem.** The fine rows under a coarse leaf (just introduced, see below) looked like children:
+indented, with a Total and a `% parent` like the coarse rows. Andrey's maven-graph code nested fine
+labels - `filter` containing `filter1..3`, all inside `passedOn` - and the table showed `filter`
+at 5% and `passedOn` folded into "2 more, 1%", while in the code they contain about 40% and 45%.
+Each number was right (own time) and the page as a whole was wrong (it read as inclusive).
+
+**Decided: render them as what they are, a split of the leaf's time by the innermost label.** A
+`-` before the name, `own` where a coarse row has its count, a key under the table: *rows split a
+leaf's time by the innermost label, each sample once - they add up to 100%; a fine label with
+labels inside it shows only its own part*. The 100% is what tells the reader no row contains
+another. **For a hierarchy, make the outer label coarse** and take its ~40 ns per execution; the
+floor warning then names the cost, and that is the honest price. Written into the README (*How to
+use it*), profiler.md (*Two tiers*) and output.md.
+
+**Why not detect the nesting.** The outer fine label exists only in the hook's local `prev`, on the
+thread's stack; the sampler sees one int, the innermost label. Every way to expose the outer one
+puts work on every fine call:
+- *pack `prev` into the same store* (`current = id | (prev + 1 & 0xFFFF) << 16`): no extra memory
+  access, but four ALU instructions on every call, in every run. Rejected: Andrey does not want the
+  fine hook's own latency touched at all, measurable or not.
+- *a `static final` switch the JIT folds away* (`-Dticksnick.nesting`, or `checkNesting` set only in
+  the test task): zero cost when off, but a mode to remember. Rejected as not an option.
+- *the parent declared at registration* (`FILTER.registerFine("filter1")`): zero cost, but nothing
+  checks it, and a wrong declaration silently adds time to the wrong row - the failure this tool
+  exists to avoid. Not built; the need is rare (`passedOn` is between the tiers: too frequent for
+  coarse, big enough to have parts), and taking the inner labels off for one run gives the total.
+
+**Why not forbid nesting (fail fast).** The bench's `Workload` nests fine labels on purpose
+(`execFine` runs its children inside its own label), and the verification that the fine tier's own
+time is right is done on exactly that. Fine own time is correct under nesting; only the drawing was
+wrong. "Fine is atomic" in profiler.md describes typical use, not a rule the code enforces.
+
+**And concurrency is a second reason for the same rule.** A fine label lives in one thread's slot
+and does not travel: work forked inside it runs on other threads under no outer label, and the
+outer thread's row shows its wait at the join as own time. Cross-thread structure is the coarse
+tier's (propagation, threads per execution, executions at once). The split stays correct under
+concurrency because it is per sample.
+
 ## Families indexed by an enum · 2026-10-16
 
 `registerCoarse<E>(name)` and `registerFine<E>(name)`: a family with one member per constant, rows

@@ -2126,6 +2126,16 @@ execution - and the tick is a knob. Above it, the histogram exists; the longest 
 between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
 both; this is the answer.
 
+## The fine steps as rows of the coarse table · 2026-10-16
+
+The `made of: passedOn 43.5%, merge 36.8%, unlabelled 19.7%` line under a leaf became one row per
+fine operation, indented under it like a child, with `fine` in the Executions column and only Total
+and `% parent` filled. Andrey asked for rows like the others; `fine` in the count's place was
+chosen over a marker on the name, since it also says why the rest of the row is blank. Total is the
+share of the leaf's samples times the leaf's measured total, so it agrees with `% parent` - a
+thread-time from hits would be a different clock on a span that forks. Up to `FINE_ROWS_SHOWN` = 6
+rows, the rest one line with their share between them.
+
 ## The coarse table first; start coarse · 2026-10-16
 
 **The coarse table now comes before the own-time table**, in the report and in the diff. Andrey:

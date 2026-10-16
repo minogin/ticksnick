@@ -5,6 +5,9 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
 
+/** How many fine operations a coarse leaf lists as rows under it; the rest are one line. */
+const val FINE_ROWS_SHOWN = 6
+
 /** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
@@ -1343,7 +1346,7 @@ class Profile internal constructor(
             appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
             appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
-            appendLine("    the executions on that path alone; 'made of' under a leaf is its cross-tabulation, sampled")
+            appendLine("    the executions on that path alone; the 'fine' rows under a leaf are its fine operations, sampled")
             appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
             if (coarseTree.any { t -> t.flatten().any { it.slowest.isNotEmpty() } }) {
                 appendLine("  'slowest:' under a row opened with a key: its longest executions on that path, measured,")
@@ -1383,17 +1386,7 @@ class Profile internal constructor(
         fun waitSplit(inclusive: Long, running: Long): String =
             runnableSplit(if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive)
 
-        fun madeOf(fine: LongArray, inclusiveHits: Long): String {
-            val parts = operations
-                .map { it.name to fine[it.id] }
-                .plus("unlabelled" to fine[NO_OP_INDEX])
-                .filter { it.second > 0 }
-                .sortedByDescending { it.second }
-            if (parts.isEmpty()) return ""
-            val shown = parts.take(6).joinToString(", ") { it.first + " " + percent(it.second * 100.0 / inclusiveHits) }
-            val rest = parts.size - 6
-            return shown + (if (rest > 0) ", and $rest more" else "")
-        }
+        fun shareText(share: Double): String = if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
 
         // Against the row above: how many executions per execution of the parent - the loop count -
         // and what part of the parent's total this row is. Left blank where there is nothing to
@@ -1411,8 +1404,7 @@ class Profile internal constructor(
         fun shareOfParent(n: CoarseNode, parent: CoarseNode?): String = when {
             parent == null || parent.spanSumNanos == 0L || n.count == 0L -> ""
             else -> {
-                val share = n.spanSumNanos * 100.0 / parent.spanSumNanos
-                if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
+                shareText(n.spanSumNanos * 100.0 / parent.spanSumNanos)
             }
         }
 
@@ -1445,9 +1437,32 @@ class Profile internal constructor(
                 )
             }
             // The fine steps, on the leaves only: a parent's would be its children's over again.
+            // Rows like the coarse ones, so `% parent` lines up, and `fine` where a coarse row has
+            // its count, which says why the rest is blank: a fine operation is not timed per call,
+            // and its calls are counted per operation, not per path. The total is its share of the
+            // samples inside the leaf applied to the leaf's measured total, so the two columns
+            // agree. It was one `made of:` line until 2026-10-16; Andrey asked for rows.
             if (n.children.isEmpty() && n.inclusiveHits > 0) {
-                val made = madeOf(n.fine, n.inclusiveHits)
-                if (made.isNotEmpty()) appendLine("$indent  made of: $made")
+                val parts = operations
+                    .map { Triple(it.name, "fine", n.fine[it.id]) }
+                    .plus(Triple("unlabelled", "", n.fine[NO_OP_INDEX]))
+                    .filter { it.third > 0 }
+                    .sortedByDescending { it.third }
+                for ((name, tier, hits) in parts.take(FINE_ROWS_SHOWN)) {
+                    val share = hits.toDouble() / n.inclusiveHits
+                    appendLine(
+                        String.format(
+                            Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
+                            "$indent  $name", tier, "",
+                            if (timed) duration(n.spanSumNanos * share) else "-",
+                            shareText(share * 100), "", "", "", "", "", "", ""
+                        ).trimEnd()
+                    )
+                }
+                val rest = parts.drop(FINE_ROWS_SHOWN)
+                if (rest.isNotEmpty()) appendLine(
+                    "$indent  and ${rest.size} more, " + shareText(rest.sumOf { it.third } * 100.0 / n.inclusiveHits) + " between them"
+                )
             }
             // The two parallelism questions, under the root they are about, and only on a run
             // with more than one thread: on one thread every number on the line is fixed by

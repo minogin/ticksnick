@@ -287,9 +287,13 @@ COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to
 Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
 query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
   level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
-    made of: visitedAdd 82.1%, node 11.4%, id 4.67%, nextAdd 1.79%
+    visitedAdd                        fine              7.32 s      82%
+    node                              fine              1.02 s      11%
+    id                                fine              417 ms       5%
+    nextAdd                           fine              160 ms       2%
   level[5]                               1              2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
-    made of: node 94.3%, id 5.70%
+    node                              fine              2.40 s      94%
+    id                                fine              145 ms       6%
 
 COARSE AND FINE OPERATIONS - own time, out of 11.8 s active time
                            |                                       Load                                       |           Long            |               Spread                |      Trust

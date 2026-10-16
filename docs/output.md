@@ -256,7 +256,7 @@ program. What makes one table honest is that the hits partition: a fine row's sa
 where it was the innermost label, a starred coarse row's are the samples inside its span with **no
 fine label open** - its own work - and no sample is counted twice. `request` above did 2.542% of the
 labelled work itself and delegated the rest to the four operations above it, which is the same
-2.5% the *was made of* line reports under the coarse table.
+2.5% its `unlabelled` row reports in the coarse table.
 
 An **inclusive** coarse number could not share this column: `request` covers 99.5% of the run's
 labelled time, so it would outrank every operation it contains and the column would sum to about
@@ -359,13 +359,23 @@ run                                      1              16.2 s              768 
   runBatch                               1              16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
     query                                1              16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
       level[4]                           1              11.2 s      69%     421 ms     11.2 s     11.2 s     11.2 s     11.2 s     11.2 s          100% / 0%
-        made of: visitedAdd 80.5%, node 10.8%, id 5.97%, nextAdd 2.78%
+        visitedAdd                    fine              9.02 s      80%
+        node                          fine              1.21 s      11%
+        id                            fine              669 ms       6%
+        nextAdd                       fine              311 ms       3%
       level[5]                           1              3.92 s      24%     177 ms     3.92 s     3.92 s     3.92 s     3.92 s     3.92 s          100% / 0%
-        made of: node 90.4%, id 9.65%
+        node                          fine              3.54 s      90%
+        id                            fine              378 ms      10%
       level[3]                           1              1.02 s       6%     169 ms     1.02 s     1.02 s     1.02 s     1.02 s     1.02 s          100% / 0%
-        made of: visitedAdd 73.0%, node 13.3%, nextAdd 8.26%, id 5.43%
+        visitedAdd                    fine              745 ms      73%
+        node                          fine              136 ms      13%
+        nextAdd                       fine             84.3 ms       8%
+        id                            fine             55.4 ms       5%
       level[2]                           1             29.4 ms      <1%          -    29.4 ms    29.4 ms    29.4 ms    29.4 ms    29.4 ms          100% / 0%
-        made of: visitedAdd 51.7%, node 37.9%, id 6.90%, nextAdd 3.45%
+        visitedAdd                    fine             15.2 ms      52%
+        node                          fine             11.1 ms      38%
+        id                            fine             2.03 ms       7%
+        nextAdd                       fine             1.01 ms       3%
 ------------------------------------------------------------------------------------------------------------------------------------------------------------
 ```
 
@@ -384,7 +394,7 @@ percentiles repeat the total; on a request served a million times they are the p
 | **mean, p50, p90, p99, max** | **measured**, two timestamps per execution | the only numbers in the whole report that are not sampled. Percentiles come from a log-bucket histogram: **at most 12.5% high, never low** |
 | **runnable / waiting** | the same split as the fine table, over the samples caught anywhere inside the span on that path | `0%` waiting here because the benchmark never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
 | **slowest:, under a row** | for an operation opened with `op(x, key = { ... })`: its five longest executions on that path, longest first, with the key each was opened with. **Measured** | which cases to run again. Wall time, so a GC pause in one can be all that put it there; `paused` on the row says whether there were any |
-| **made of, under a leaf** | the cross-tabulation, **sampled**: which fine operations ran under this one | on the leaves only. A parent's would be its children's over again. Neither tier produces this alone |
+| **the `fine` rows, under a leaf** | the cross-tabulation, **sampled**: which fine operations ran under this one, as rows with `fine` where a count would be. Total is the operation's share of the leaf's samples applied to the leaf's measured total, so it agrees with `% parent` | on the leaves only. A parent's would be its children's over again. The rest of the row is blank because a fine operation is not timed per call and its calls are counted per operation, not per path. Neither tier produces this alone |
 | **`parallelism:` line** | the two parallelism questions, in words, under a root | see below - they are different questions and used to be adjacent columns |
 
 ### The two parallelisms, which are not the same question

@@ -47,6 +47,12 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### The share of the parent was worked out by hand · 2026-10-16
+
+Andrey, on a maven-graph profile: `select` 9.78 s under `resolve` 16.7 s, and the first thing done
+with the table was to divide the two. Also asked for executions per parent, for nested loops. Reached
+for, not there. **Acted on the same day: plan.md, "`x parent` and `% parent`".**
+
 ### A finding was read out of the Trust group · 2026-10-13
 
 The resizes on the graph benchmark - 0.78 s of `visitedAdd` and 46 ms of `nextAdd` in executions

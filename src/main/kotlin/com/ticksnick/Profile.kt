@@ -1359,7 +1359,7 @@ class Profile internal constructor(
         )
         appendLine(
             String.format(
-                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "Total v", "Paused", "Mean",
+                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Total v", "% parent", "Paused", "Mean",
                 "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
         )
@@ -1382,7 +1382,28 @@ class Profile internal constructor(
             return shown + (if (rest > 0) ", and $rest more" else "")
         }
 
-        fun StringBuilder.node(n: CoarseNode, depth: Int) {
+        // Against the row above: how many executions per execution of the parent - the loop count -
+        // and what part of the parent's total this row is. Left blank where there is nothing to
+        // read: a root has no parent, and a child run exactly once per parent execution is x1. The
+        // share is not capped at 100%: children forked onto other threads sum past their parent's
+        // wall time, and the excess is the parallelism. Andrey, 2026-10-16.
+        fun perParent(n: CoarseNode, parent: CoarseNode?): String = when {
+            parent == null || parent.count == 0L || n.count == parent.count -> ""
+            else -> {
+                val x = n.count.toDouble() / parent.count
+                if (x < 100) String.format(Locale.ROOT, "x%.1f", x) else String.format(Locale.ROOT, "x%,.0f", x)
+            }
+        }
+
+        fun shareOfParent(n: CoarseNode, parent: CoarseNode?): String = when {
+            parent == null || parent.spanSumNanos == 0L || n.count == 0L -> ""
+            else -> {
+                val share = n.spanSumNanos * 100.0 / parent.spanSumNanos
+                if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
+            }
+        }
+
+        fun StringBuilder.node(n: CoarseNode, depth: Int, parent: CoarseNode?) {
             val indent = "  ".repeat(depth)
             // An execution still open when the session ended has no span: its row keeps the
             // samples and the children, and says `-` where the clock would go.
@@ -1390,8 +1411,9 @@ class Profile internal constructor(
             appendLine(
                 String.format(
                     Locale.ROOT, COARSE_ROW,
-                    indent + n.name, n.count,
+                    indent + n.name, n.count, perParent(n, parent),
                     if (timed) duration(n.spanSumNanos.toDouble()) else "-",
+                    shareOfParent(n, parent),
                     if (n.pausedNanos > 0) duration(n.pausedNanos.toDouble()) else "-",
                     if (timed) duration(n.meanSpanNanos) else "-",
                     if (timed) duration(n.percentileNanos(0.50)) else "-",
@@ -1433,11 +1455,11 @@ class Profile internal constructor(
                 appendLine("$indent  parallelism: $perExecution$atOnce")
             }
             for (child in n.children.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
-                node(child, depth + 1)
+                node(child, depth + 1, n)
             }
         }
         for (root in coarseTree.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
-            node(root, 0)
+            node(root, 0, null)
         }
         appendLine("-".repeat(COARSE_WIDTH))
         // An operation with more than one caller is a row under each, and those rows are its
@@ -1452,8 +1474,8 @@ class Profile internal constructor(
                 appendLine(
                     String.format(
                         Locale.ROOT, COARSE_ROW,
-                        "  " + c.name, c.count,
-                        duration(c.spanSumNanos.toDouble()),
+                        "  " + c.name, c.count, "",
+                        duration(c.spanSumNanos.toDouble()), "",
                         if (paused > 0) duration(paused.toDouble()) else "-",
                         duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
                         duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
@@ -2159,10 +2181,10 @@ class Profile internal constructor(
          * which is true and is in the friction log. Then the parallelism columns left and took
          * more than `Total` had added.
          */
-        const val COARSE_WIDTH = 138
+        const val COARSE_WIDTH = 156
 
-        /** One row of the coarse table: name, executions, total, paused, five durations, the split. */
-        const val COARSE_ROW = "%-30s %,11d %10s %10s %10s %10s %10s %10s %10s %18s"
+        /** One row of the coarse table: name, executions and per parent, total and its share of the parent, paused, five durations, the split. */
+        const val COARSE_ROW = "%-30s %,11d %8s %10s %8s %10s %10s %10s %10s %10s %10s %18s"
 
         /**
          * The fine table, likewise drawn to itself.

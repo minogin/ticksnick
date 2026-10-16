@@ -591,6 +591,31 @@ class CoarseTest {
         assertFalse("all callers together" in text, "a one-caller tree got the shared-operation block")
     }
 
+    /**
+     * Each child row says how many times it ran per execution of its parent and what part of the
+     * parent's total it is; a root has neither, and a child run once per parent leaves the loop
+     * count blank.
+     */
+    @Test
+    fun `a child row carries its executions per parent and its share of the parent`() {
+        val run = stat(count = 1, sumNanos = 4_000_000_000, hits = 0, running = 0, inclusive = 4000, runningInclusive = 4000, name = "run", id = 0)
+        val resolve = stat(count = 12, sumNanos = 4_000_000_000, hits = 0, running = 0, inclusive = 4000, runningInclusive = 4000, name = "resolve", id = 1)
+        val select = stat(count = 12, sumNanos = 2_400_000_000, hits = 0, running = 0, inclusive = 2400, runningInclusive = 2400, name = "select", id = 2)
+        val via = stat(count = 36, sumNanos = 1_200_000_000, hits = 0, running = 0, inclusive = 1200, runningInclusive = 1200, name = "via", id = 3)
+        val tree = listOf(node(run, children = listOf(node(resolve, children = listOf(node(select), node(via))))))
+        val lines = report(listOf(run, resolve, select, via), labelled = 4000, tree = tree).render().lines()
+        val header = lines.first { it.startsWith("Coarse operation") }
+        val xAt = header.indexOf("x parent")
+        val shareAt = header.indexOf("% parent")
+        assertTrue(xAt > 0 && shareAt > 0, "the columns have no header: $header")
+        fun cells(prefix: String): Pair<String, String> =
+            lines.first { it.startsWith(prefix) }.let { it.substring(xAt, xAt + 8).trim() to it.substring(shareAt, shareAt + 8).trim() }
+        assertEquals("" to "", cells("run "), "a root has no parent")
+        assertEquals("x12.0" to "100%", cells("  resolve "))
+        assertEquals("" to "60%", cells("    select "), "once per resolve is not a loop count")
+        assertEquals("x3.0" to "30%", cells("    via "))
+    }
+
     /** An operation under two callers is a row under each and, once, the figure over both. */
     @Test
     fun `an operation with two callers is drawn under each and summed once`() {

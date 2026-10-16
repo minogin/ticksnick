@@ -253,11 +253,11 @@ id                         |          4.53%      534 ms          100% / 0%    16
 nextAdd                    |          1.67%      197 ms          100% / 0%    16,038,134              12.3 ns |       9  48.2 ms  13.1 ms |    197 ms        1.00       1     - |      196  7.14%
 
 COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
-Coarse operation                Executions    Total v     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
-query                                    1     12.1 s     674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
-  level[4]                               1     8.92 s     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
+Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
+  level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
     made of: visitedAdd 82.1%, node 11.4%, id 4.67%, nextAdd 1.79%
-  level[5]                               1     2.54 s     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
+  level[5]                               1              2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
     made of: node 94.3%, id 5.70%
 ```
 

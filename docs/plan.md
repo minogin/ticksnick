@@ -2126,6 +2126,17 @@ execution - and the tick is a knob. Above it, the histogram exists; the longest 
 between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
 both; this is the answer.
 
+## `x parent` and `% parent` in the coarse table · 2026-10-16
+
+Andrey, reading a maven-graph profile where `select` was 9.78 s under a 16.7 s `resolve`: the
+share is the number a reader works out by hand on every row, and in a nested loop so is the count
+per parent. Two columns, beside the figures they are about: `x parent` after `Executions`, `% parent`
+after `Total`. Both blank on a root; `x parent` also blank when a child ran exactly once per parent
+execution, so `run > runBatch` stays quiet. The share is not capped at 100%: forked children sum
+past their parent's wall time and that excess is a reading, not an error. Not added to the
+*all callers together* rows, which have no single parent. The diff keeps its own columns. The
+table goes from 138 to 156 wide.
+
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 
 Three questions from Andrey on the tree above, in order. *The tree repeats the executions and

@@ -54,6 +54,7 @@ table heading uses it.
 
 | word | what it is | why it matters |
 |---|---|---|
+| **% parent** | this row's total over its parent's total. Blank on a root | the share without dividing by hand. Siblings that sum to well under 100% leave the rest in the parent's own work, outside any child. **Not capped at 100%**: children forked onto other threads sum past their parent's wall time, and the excess is the parallelism |
 | **paused** | the JVM stopped every thread | how much the collector costs. Tuning it or cutting allocation attacks this directly |
 | **active** | the rest of wall time; the only time samples exist in | the time the code is responsible for. 30% in the table means 30% of this |
 | **waiting** | the thread sat on a lock, a sleep or a park, by JVM state | locks and parked I/O. Removing a wait costs no CPU, only a design change |
@@ -352,20 +353,20 @@ it ran inside, and its figures are the executions on that path alone.
 
 ```
 COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
-Coarse operation                Executions    Total v     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
-------------------------------------------------------------------------------------------------------------------------------------------
-run                                      1     16.2 s     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
-  runBatch                               1     16.2 s     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
-    query                                1     16.2 s     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
-      level[4]                           1     11.2 s     421 ms     11.2 s     11.2 s     11.2 s     11.2 s     11.2 s          100% / 0%
+Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+run                                      1              16.2 s              768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+  runBatch                               1              16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+    query                                1              16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+      level[4]                           1              11.2 s      69%     421 ms     11.2 s     11.2 s     11.2 s     11.2 s     11.2 s          100% / 0%
         made of: visitedAdd 80.5%, node 10.8%, id 5.97%, nextAdd 2.78%
-      level[5]                           1     3.92 s     177 ms     3.92 s     3.92 s     3.92 s     3.92 s     3.92 s          100% / 0%
+      level[5]                           1              3.92 s      24%     177 ms     3.92 s     3.92 s     3.92 s     3.92 s     3.92 s          100% / 0%
         made of: node 90.4%, id 9.65%
-      level[3]                           1     1.02 s     169 ms     1.02 s     1.02 s     1.02 s     1.02 s     1.02 s          100% / 0%
+      level[3]                           1              1.02 s       6%     169 ms     1.02 s     1.02 s     1.02 s     1.02 s     1.02 s          100% / 0%
         made of: visitedAdd 73.0%, node 13.3%, nextAdd 8.26%, id 5.43%
-      level[2]                           1    29.4 ms          -    29.4 ms    29.4 ms    29.4 ms    29.4 ms    29.4 ms          100% / 0%
+      level[2]                           1             29.4 ms      <1%          -    29.4 ms    29.4 ms    29.4 ms    29.4 ms    29.4 ms          100% / 0%
         made of: visitedAdd 51.7%, node 37.9%, id 6.90%, nextAdd 3.45%
-------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------------------
 ```
 
 The graph benchmark: `run` around the measured batches, `runBatch` around each, `query` around
@@ -377,6 +378,7 @@ percentiles repeat the total; on a request served a million times they are the p
 |---|---|---|
 | **the nesting** | an operation under the one it ran inside; siblings by total | the figures on a row are the executions on **that path**. An operation with two callers is a row under each, and once more under the table as *all callers together* |
 | **executions** | completed executions on that path, counted exactly | not sampled. If this disagrees with what you think ran, a label is leaking |
+| **x parent** | executions per execution of the parent: the loop count. Blank on a root, and where it is once per parent | `x12.0` under `resolve` means each resolve ran it twelve times. A fraction means it ran on only some of the parent's executions |
 | **total** | the measured spans summed, **wall time** | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** - a parent contains its children. Inclusive time is monotone up a path, so the heaviest operation anywhere is at the end of the first branch. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
 | **paused** | of the total, time every thread was stopped - usually GC - charged to every span open when the pause lifted | the span the pause **interrupted**, not the one that caused it: a young collection lands in whoever allocated last. A `-` is none. Rows sum to at most the header's paused figure |
 | **mean, p50, p90, p99, max** | **measured**, two timestamps per execution | the only numbers in the whole report that are not sampled. Percentiles come from a log-bucket histogram: **at most 12.5% high, never low** |

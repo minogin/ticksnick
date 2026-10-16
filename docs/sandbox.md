@@ -47,6 +47,13 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### The diff's header numbers did not line up · 2026-10-16
+
+Andrey, on a maven-graph diff (naive -> centralEdges): `Wall time`, `Active` and `Paused` each
+printed `before -> after   change` as one run of text, so `20.6 s`, `20.2 s` and `378 ms` started in
+different columns and the eye had to hunt for each number. **Fixed the same day: `HEADER_DIFF_ROW`
+in `Diff.kt`, every column right-aligned.**
+
 ### The share of the parent was worked out by hand · 2026-10-16
 
 Andrey, on a maven-graph profile: `select` 9.78 s under `resolve` 16.7 s, and the first thing done

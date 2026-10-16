@@ -86,6 +86,27 @@ class RegistryTest {
         assertFailsWith<IndexOutOfBoundsException> { stage[2] }
     }
 
+    private enum class Kind { COMPILE, RUNTIME, TEST }
+    private enum class Only { ONE }
+
+    /** An enum family is the integer family with the constants as the index and their names on the rows. */
+    @Test
+    fun `an enum family is indexed and named by its constants`() {
+        val fine = Profiler.registerFine<Kind>("test:byKind")
+        for (k in Kind.entries) {
+            assertEquals(fine.base + k.ordinal, fine[k].id)
+            assertEquals("test:byKind[${k.name}]", Profiler.nameOf(fine[k]))
+        }
+        assertEquals(fine.base, Profiler.registerFine<Kind>("test:byKind").base, "not idempotent")
+        assertFailsWith<IllegalStateException> { Profiler.registerFine("test:byKind") }
+
+        val coarse = Profiler.registerCoarse<Kind>("test:resolve")
+        assertEquals("test:resolve[RUNTIME]", Profiler.nameOf(coarse[Kind.RUNTIME]))
+        assertEquals(coarse.base + 2, coarse[Kind.TEST].id)
+        // One constant is still a family: the row says which.
+        assertEquals("test:single[ONE]", Profiler.nameOf(Profiler.registerCoarse<Only>("test:single")[Only.ONE]))
+    }
+
     /** One slot per thread, and it is the same object every time that thread asks. */
     @Test
     fun `a thread gets one slot and keeps it`() {

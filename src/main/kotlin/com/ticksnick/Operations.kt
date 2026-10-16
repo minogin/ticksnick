@@ -82,3 +82,21 @@ class CoarseOps internal constructor(val base: Int, val arity: Int) {
 
     override fun toString(): String = "coarse#$base[0..${arity - 1}]"
 }
+
+/**
+ * A family of fine operations indexed by an enum: `byKind[kind]`, rows `name[CONSTANT]`. The index
+ * is the constant's ordinal, so there is no map and no bounds check, and a wrong type does not
+ * compile. See [Profiler.registerFine].
+ */
+class FineEnumOps<E : Enum<E>> @PublishedApi internal constructor(val base: Int) {
+    operator fun get(e: E): FineOp = FineOp(base + e.ordinal)
+
+    override fun toString(): String = "fine#$base[enum]"
+}
+
+/** A family of coarse operations indexed by an enum. The coarse twin of [FineEnumOps]. */
+class CoarseEnumOps<E : Enum<E>> @PublishedApi internal constructor(val base: Int) {
+    operator fun get(e: E): CoarseOp = CoarseOp(base + e.ordinal)
+
+    override fun toString(): String = "coarse#$base[enum]"
+}

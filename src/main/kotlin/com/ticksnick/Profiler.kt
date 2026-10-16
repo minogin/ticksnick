@@ -432,6 +432,18 @@ object Profiler {
     fun registerFine(name: String, arity: Int): FineOps =
         FineOps(reserve(name, arity, ids, arities, nextId, names, MAX_OPERATIONS, "operations"), arity)
 
+    /**
+     * A family of fine operations indexed by an enum: `byKind[kind]`, rows `name[COMPILE]` and so
+     * on. As the integer family, with the enum's constants as the index and their names in the
+     * report; the hot path is `base + ordinal`, and an index of the wrong type does not compile.
+     */
+    inline fun <reified E : Enum<E>> registerFine(name: String): FineEnumOps<E> =
+        FineEnumOps(registerFineFamily(name, enumValues<E>().map { it.name }))
+
+    @PublishedApi
+    internal fun registerFineFamily(name: String, labels: List<String>): Int =
+        reserve(name, labels.size, ids, arities, nextId, names, MAX_OPERATIONS, "operations", labels)
+
     /** The raw id, for the internals that index arrays by it. See [registerFine]. */
     internal fun registerFineId(name: String): Int = reserve(name, 1, ids, arities, nextId, names, MAX_OPERATIONS, "operations")
 
@@ -441,18 +453,18 @@ object Profiler {
 
     /**
      * [arity] consecutive ids for [name], once. A single operation is a family of one, and keeps
-     * its bare name; a family's members are named `name[i]`.
+     * its bare name; a family's members are named `name[i]`, or `name[label]` given [labels].
      */
     private fun reserve(
         name: String, arity: Int, ids: ConcurrentHashMap<String, Int>, arities: ConcurrentHashMap<String, Int>,
-        next: AtomicInteger, names: Array<String?>, max: Int, what: String,
+        next: AtomicInteger, names: Array<String?>, max: Int, what: String, labels: List<String>? = null,
     ): Int {
         require(arity > 0) { "a family needs at least one member, not $arity" }
         val base = ids.computeIfAbsent(name) {
             val b = next.getAndAdd(arity)
             check(b + arity <= max) { "more than $max distinct $what registered" }
-            if (arity == 1) names[b] = name
-            else for (i in 0 until arity) names[b + i] = "$name[$i]"
+            if (arity == 1 && labels == null) names[b] = name
+            else for (i in 0 until arity) names[b + i] = "$name[${labels?.get(i) ?: i}]"
             arities[name] = arity
             b
         }
@@ -500,6 +512,14 @@ object Profiler {
         reserve(name, arity, coarseIds, coarseArities, nextCoarseId, coarseNames, MAX_COARSE_TYPES, "coarse operations"),
         arity,
     )
+
+    /** A family of coarse operations indexed by an enum. The coarse twin of the enum [registerFine]. */
+    inline fun <reified E : Enum<E>> registerCoarse(name: String): CoarseEnumOps<E> =
+        CoarseEnumOps(registerCoarseFamily(name, enumValues<E>().map { it.name }))
+
+    @PublishedApi
+    internal fun registerCoarseFamily(name: String, labels: List<String>): Int =
+        reserve(name, labels.size, coarseIds, coarseArities, nextCoarseId, coarseNames, MAX_COARSE_TYPES, "coarse operations", labels)
 
     /** The raw id, for the internals that index arrays by it. See [registerCoarse]. */
     internal fun registerCoarseId(name: String): Int =

@@ -244,6 +244,14 @@ for (depth in 0..5) op(LEVEL[depth]) { expand(depth) }   // base + depth, and a 
 The index is a small number known up front, not a value: the family comes out of the same
 256-operation budget as everything else. `registerFine(name, arity)` is the fine twin.
 
+When the index is an enum, register the family by the enum and the rows carry its names:
+
+```kotlin
+val RESOLVE = Profiler.registerCoarse<ClasspathKind>("resolve")   // rows resolve[COMPILE], resolve[RUNTIME], ...
+
+op(RESOLVE[kind]) { resolve(root, kind) }                          // base + ordinal; a wrong type does not compile
+```
+
 **If the work is handed to a pool, carry the context with it.** A context lives in the slot of the
 thread that made it, so a request that fans out leaves it behind: the helper threads run under no
 context, and the caller's span reports the time they spent as *waiting*. Wrap the pool once —

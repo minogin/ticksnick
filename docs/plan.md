@@ -2126,6 +2126,14 @@ execution - and the tick is a knob. Above it, the histogram exists; the longest 
 between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
 both; this is the answer.
 
+## Families indexed by an enum · 2026-10-16
+
+`registerCoarse<E>(name)` and `registerFine<E>(name)`: a family with one member per constant, rows
+`name[CONSTANT]`, indexed by `family[e]` = `base + e.ordinal`. Andrey, wanting `resolve` per
+classpath kind: `registerCoarse("resolve", arity = 3)` and `[kind.ordinal]` would have worked and
+printed `resolve[1]`. A one-constant enum is still a family and keeps its `[ONE]`, unlike a
+family of arity one. Same name with the plain registration is the arity mismatch it always was.
+
 ## The fine steps as rows of the coarse table · 2026-10-16
 
 The `made of: passedOn 43.5%, merge 36.8%, unlabelled 19.7%` line under a leaf became one row per

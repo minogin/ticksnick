@@ -1321,6 +1321,28 @@ Executions, the mean per unit, and the percentiles marked per batch; it is a des
 coarse table and not a sentence in a warning, so the warning gives the batch without `times` for
 now.
 
+## 46. Say which slowest executions had a pause in them · open
+
+Seen on maven-graph, 2026-10-16: `resolve` per classpath kind, and `resolve[RUNTIME]` had the
+slowest executions (86.3, 69.1, 60.4 ms) while `resolve[TEST]` did the most work. The RUNTIME row
+had 280 ms of pauses against 40 ms on the other two: its top five are most likely a few ms of
+resolving plus a collection each. The list names keys by wall time, so a pause is enough to put a
+key on it, and nothing on the line says so.
+
+**Cheap to know per execution.** The sampler already detects pauses by its own lateness; it can
+bump a pause counter (and add the paused nanoseconds to a running sum) when it does. A keyed
+execution reads the sum at entry and at exit - one opaque read each, about a nanosecond - and the
+difference is the pause inside it, to the sampler's resolution. Kept beside the key only when the
+execution makes the list.
+
+**Then rank and print by active time, not wall time plus a pause column.** Andrey: we probably do
+not need to show both, just the active time. For the slowest list that is clearly right - the
+question is which keys are slow to *work*, and a key that is slow only because a collection landed
+in it is the wrong answer to it. For the table rows it **reverses a decision** (plan.md and the
+note on `renderCoarse`, 2026-10-13: the total is wall time with the pauses in, because the caller
+waited for them and where they fell is a lead). So: the slowest list by active time first, and the
+table's `Total` + `Paused` re-argued separately rather than changed along with it.
+
 ## Promoted to plan.md
 
 **Phase 3.5** is item 9 above, reframed from detecting bad operations to bounding the error on every

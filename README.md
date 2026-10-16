@@ -140,11 +140,11 @@ or Rust would, which is why a native implementation would not help.
 Everything a caller needs, and there is nothing else:
 
 ```kotlin
-val parse = Profiler.registerFine("parseRecord")  // once, at startup — keep the handle
+val PARSE = Profiler.registerFine("parseRecord")  // once, at startup — keep the handle
 
 Profiler.start(stepMillis = 1.0)
 
-s = op(parse) { parseRecord(input) }              // wrap the work; nesting is fine
+s = op(PARSE) { parseRecord(input) }              // wrap the work; nesting is fine
 
 val profile = Profiler.stop()                     // the data of the session: a Profile
 println(profile.render())                         // the report
@@ -169,6 +169,21 @@ it looks: a run too short to sample is fixed by running for longer, and 1 ms is 
 the OS will hold — the spinning sampler achieves 1.001 ms, while parking drifts to 1.62 ms and to
 13.5 ms with every core loaded.
 
+**Keep the handles as top-level constants, named in capitals**, one file for all of them:
+
+```kotlin
+// Ops.kt
+val RESOLVE_ROOT = Profiler.registerCoarse("resolveRoot")
+val SELECT = Profiler.registerCoarse("select")
+val MERGE = Profiler.registerFine("merge")
+```
+
+`op(SELECT) { walk.select() }` then reads as a label and not as a call, in an IDE or on a slide,
+and does not clash with the function it wraps. The string is what the report prints, so it stays in
+the code's own case. Top-level rather than in an `object`: IntelliJ can give package-level
+properties a colour of their own, and a member of an object is coloured like any field. They are
+registered together on first use, as an object's would be.
+
 **One verb, and the tier is chosen once.** `Profiler.registerFine` gives back a `FineOp`,
 `Profiler.registerCoarse` a `CoarseOp`, and `op(x) { }` takes either — so promoting an operation
 when the report tells you to is one word in one place, not an edit at every call site. It is also
@@ -189,9 +204,9 @@ were named.
 **For a whole request, query or plan, add a coarse label as well:**
 
 ```kotlin
-val request = Profiler.registerCoarse("request")   // a separate id space
+val REQUEST = Profiler.registerCoarse("request")   // a separate id space
 
-op(request) {                                      // same verb; the handle says which tier
+op(REQUEST) {                                      // same verb; the handle says which tier
     handle(input)                                  // your other op(...) labels nest inside
 }
 ```
@@ -205,7 +220,7 @@ be quiescent, which for a coarse label means *between* requests and not inside o
 slowest executions under it, longest first, by name:
 
 ```kotlin
-op(request, key = { input.id }) { handle(input) }
+op(REQUEST, key = { input.id }) { handle(input) }
 ```
 
 ```
@@ -221,9 +236,9 @@ it is never part of the time it names; every other execution pays one compare.
 them apart, register a family once and index it on the hot path:
 
 ```kotlin
-val level = Profiler.registerCoarse("level", arity = 6)   // ids reserved once, rows level[0]..level[5]
+val LEVEL = Profiler.registerCoarse("level", arity = 6)   // ids reserved once, rows level[0]..level[5]
 
-for (depth in 0..5) op(level[depth]) { expand(depth) }   // base + depth, and a bounds check
+for (depth in 0..5) op(LEVEL[depth]) { expand(depth) }   // base + depth, and a bounds check
 ```
 
 The index is a small number known up front, not a value: the family comes out of the same
@@ -236,7 +251,7 @@ context, and the caller's span reports the time they spent as *waiting*. Wrap th
 ```kotlin
 val pool = Executors.newFixedThreadPool(8).propagating()
 
-op(request) {
+op(REQUEST) {
     pool.invokeAll(shards.map { Callable { search(it) } })   // each shard runs inside `request`
 }
 ```

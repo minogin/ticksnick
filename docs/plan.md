@@ -2139,6 +2139,12 @@ the first run places the labels and the second is read. Seen on maven-graph: `me
 executions of 196 ns) and `passedOn` (21M of 490 ns) labelled coarse took the batch from 16.7 s to
 20.8 s, and both were the two warnings at the top. Written into the README and profiler.md.
 
+**Handles as top-level capitals**, `val RESOLVE_ROOT = registerCoarse("resolveRoot")`, one file of
+them: `op(SELECT)` reads as a label in any viewer and does not clash with the `select()` it wraps,
+and IntelliJ colours package-level properties apart where an object's members look like any field.
+`op` itself stays - it matches the report's `Operation`, where `profile` would clash with `Profile`
+and `span` or `measure` fit only the coarse tier. The README's examples follow it.
+
 ## The slowest executions, by key · 2026-10-16
 
 Andrey, on the same profile: `resolveRoot` p50 590 us and max 85.3 ms, and nothing said which

@@ -2126,6 +2126,23 @@ execution - and the tick is a knob. Above it, the histogram exists; the longest 
 between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
 both; this is the answer.
 
+## `op` in the middle of a chain · 2026-10-16
+
+`x.op(LABEL) { filter { ... } }`, for both tiers, with `times` and with a key. Andrey: a label
+should not make you break the chain to place it - which is the sandbox's own test, *does a label
+go where you want it*. **`this`, not `it`, in the block** (`T.() -> R`, as `run`): the block is
+usually one more call on the receiver, and the `let` form nests two `it`s in `it.filter { it.x }`.
+The price is `run`'s - a name the receiver also has now means the receiver's. The two forms cannot
+both exist as overloads. The key of the keyed form gets the receiver too, `key = { size }`.
+
+**Checked, not assumed:** a plain `op(X) { }` without an explicit receiver inside a class may now
+resolve to the chain form on the implicit `this`. It compiles unambiguously, and the two do the
+same: the block's `this` is that receiver either way.
+
+**The tests are at the 64-coarse-type ceiling.** One JVM runs every test class against one
+registry, and this change pushed it to 65; the new tests reuse names instead. The next coarse test
+will hit it again - a fork per test class, or a registry reset for tests, is the lasting fix.
+
 ## Families indexed by an enum · 2026-10-16
 
 `registerCoarse<E>(name)` and `registerFine<E>(name)`: a family with one member per constant, rows

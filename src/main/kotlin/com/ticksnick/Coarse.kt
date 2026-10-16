@@ -440,6 +440,12 @@ inline fun <T> op(op: CoarseOp, key: () -> Any?, body: () -> T): T {
     }
 }
 
+/** The chain form of the coarse [op]: `rows.op(SORT) { sortedBy { it.key } }`. See the fine one. */
+inline fun <T, R> T.op(op: CoarseOp, body: T.() -> R): R = com.ticksnick.op(op) { body() }
+
+/** The chain form of the keyed coarse [op]; the key sees the receiver too: `rows.op(SORT, key = { size }) { sorted() }`. */
+inline fun <T, R> T.op(op: CoarseOp, key: T.() -> Any?, body: T.() -> R): R = com.ticksnick.op(op, key = { key() }) { body() }
+
 /** A key that throws is named rather than allowed to replace whatever the body threw. */
 @PublishedApi
 internal inline fun keyOf(key: () -> Any?): String =

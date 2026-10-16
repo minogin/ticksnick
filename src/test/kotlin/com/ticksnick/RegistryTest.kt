@@ -104,7 +104,7 @@ class RegistryTest {
         assertEquals("test:resolve[RUNTIME]", Profiler.nameOf(coarse[Kind.RUNTIME]))
         assertEquals(coarse.base + 2, coarse[Kind.TEST].id)
         // One constant is still a family: the row says which.
-        assertEquals("test:single[ONE]", Profiler.nameOf(Profiler.registerCoarse<Only>("test:single")[Only.ONE]))
+        assertEquals("test:single[ONE]", Profiler.nameOf(Profiler.registerFine<Only>("test:single")[Only.ONE]))
     }
 
     /** One slot per thread, and it is the same object every time that thread asks. */

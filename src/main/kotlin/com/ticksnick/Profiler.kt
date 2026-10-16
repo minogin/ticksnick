@@ -1074,3 +1074,19 @@ inline fun <T> op(op: FineOp, times: Int, body: () -> T): T {
     }
 }
 
+/**
+ * The same label in the middle of a chain, with the receiver as `this` in the block, as `run` has
+ * it: `deps.op(FILTER) { filter { it.scope in scopes } }.sorted()`. Only the block is labelled; the
+ * receiver was evaluated before the label opened.
+ *
+ * `this`, not `it`, because the block is usually one more call on the receiver, and `it.filter { it }`
+ * nests two `it`s. The price is `run`'s: an unqualified name the receiver also has now means the
+ * receiver's. Called without an explicit receiver this resolves to the plain form or to this one on
+ * the implicit `this`, and the two do the same, since the block's `this` is that receiver either way.
+ * Andrey, 2026-10-16: a label should not make you break the chain to place it.
+ */
+inline fun <T, R> T.op(op: FineOp, body: T.() -> R): R = com.ticksnick.op(op) { body() }
+
+/** The chain form of [op] with [times]. */
+inline fun <T, R> T.op(op: FineOp, times: Int, body: T.() -> R): R = com.ticksnick.op(op, times) { body() }
+

@@ -169,6 +169,14 @@ it looks: a run too short to sample is fixed by running for longer, and 1 ms is 
 the OS will hold — the spinning sampler achieves 1.001 ms, while parking drifts to 1.62 ms and to
 13.5 ms with every core loaded.
 
+**In the middle of a chain**, the same `op` on the receiver, which is `this` in the block, as in `run`:
+
+```kotlin
+deps.map { it.target }
+    .op(FILTER) { filter { it.scope in scopes } }   // only the block is labelled
+    .op(SORT, key = { size }) { sorted() }          // the key sees the receiver too
+```
+
 **Keep the handles as top-level constants, named in capitals**, one file for all of them:
 
 ```kotlin

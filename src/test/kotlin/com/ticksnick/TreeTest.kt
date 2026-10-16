@@ -331,4 +331,28 @@ class TreeTest {
         assertEquals(42, result)
         assertEquals("(the key threw IllegalStateException)", assertNotNull(p.root("tree-key-throws")).slowest.single().key)
     }
+
+    /** A label in the middle of a chain: the block's `this` is the receiver, and only the block is labelled. */
+    @Test
+    fun `the chain form labels the block and keeps the chain`() {
+        // Names the keyed test registered already: the tests share one registry of 64 coarse types.
+        val outer = Profiler.registerCoarse("tree-keyed-outer")
+        val keyed = Profiler.registerCoarse("tree-keyed")
+        val filter = Profiler.registerFine("tree-chain-filter")
+        val sort = Profiler.registerFine("tree-chain-sort")
+        start()
+        val out = op(outer) {
+            (1..50_000).map { it * 7 % 1000 }
+                .op(filter) { filter { it % 2 == 0 } }
+                .op(sort) { sorted() }
+                .op(keyed, key = { "k$size" }) { distinct() }
+        }
+        val p = Profiler.stop()
+        assertEquals((1..50_000).map { it * 7 % 1000 }.filter { it % 2 == 0 }.sorted().distinct(), out)
+        val root = assertNotNull(p.root("tree-keyed-outer"))
+        val k = assertNotNull(root.child("tree-keyed"))
+        assertEquals(listOf("k25000"), k.slowest.map { it.key }, "the key is not evaluated on the receiver")
+        assertEquals(1L, p.operations.first { it.name == "tree-chain-filter" }.calls)
+        assertEquals(1L, p.operations.first { it.name == "tree-chain-sort" }.calls)
+    }
 }

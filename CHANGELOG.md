@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.3.0 — 2026-10-16
+
+```kotlin
+repositories { maven("https://jitpack.io") }
+dependencies { implementation("com.github.minogin:ticksnick:v0.3.0") }
+```
+
+Nothing breaking: new ways to place a label, and a report that reads from the top down. All of it
+came from labelling a real program, the maven-graph classpath resolver.
+
+### `op` in the middle of a chain
+
+`x.op(LABEL) { ... }` labels one step of a call chain, with the receiver as `this`, on both tiers
+and with `times` and `key`:
+
+```kotlin
+graph.dependencies.getValue(release)
+    .op(FILTER) { filter { it.scope in scopes } }   // only the block is labelled
+    .op(SORT, key = { size }) { sorted() }          // the key sees the receiver too
+```
+
+### Families indexed by an enum
+
+`registerCoarse<E>(name)` and `registerFine<E>(name)` register one label per enum constant, and the
+rows carry its names: `resolve[COMPILE]`, `resolve[RUNTIME]`, ...
+
+### A coarse op with a key: the five slowest executions
+
+`op(REQUEST, key = { input.id }) { handle(input) }` keeps the five slowest executions of each path
+under the key each was opened with, prints them under its row and saves them with the profile. The
+key is called only for an execution that makes the slowest so far; every other one pays one compare,
+not measurable on the cost bench (44.6 vs 45.5 ns, ten runs).
+
+### The coarse table
+
+- **First**, in the report and in the diff: the shape of the run, then the own-time detail.
+- **`x parent` and `% parent`**: executions per execution of the parent, and the share of the
+  parent's total, so nobody divides two rows by hand.
+- **The fine steps under a leaf** as rows, splitting its time by the innermost label; they add up to
+  100%. Fine labels do not nest in this split: for a hierarchy, make the outer label coarse.
+- The coarse floor warning names the registration, not a call.
+
+### The diff header
+
+`Wall time`, `Active` and `Paused` print before, after, the change and the percentage in
+right-aligned columns.
+
+### The README
+
+*How to use it*: label everything, let the report prune; handles as top-level capitals in one file.
+
+JitPack publishes the root project only, so a trial that fails to compile no longer fails a release.
+
 ## v0.2.1 — 2026-10-14
 
 v0.2.0 did not build on JitPack: the `Report` to `Profile` rename had missed the trial modules,

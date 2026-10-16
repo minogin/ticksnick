@@ -21,8 +21,8 @@ were both the integer 0.
   expected to have moved — but a close comparison against an older figure should re-run `--hook`
   first. See [plan.md](plan.md), "The toolchain".
 
-**Where we are right now.** The fine tier is built, verified and released, **v0.2.1 on
-2026-10-13** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on our own bench and on **four** foreign codebases: Apache
+**Where we are right now.** The fine tier is built, verified and released, **v0.3.0 on
+2026-10-16** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on our own bench and on **four** foreign codebases: Apache
 Calcite, Apache Lucene, Netty, and PostgreSQL over a socket. Phases 1, 2, 3, 3.5 and 3.75 are done; phase 6 is half done —
 thread state and per-operation concurrency exist, the whole-application coefficient does not; phase 7
 is far enough for a 0.x but has no annotations and no agent.

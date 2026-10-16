@@ -3,14 +3,14 @@
 **ticksnick.com** · a profiler for operations too short to profile — finding out which of twenty nanosecond-scale
 operations eats your time, by sampling labels instead of measuring durations.
 
-**v0.2.1** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on a synthetic
+**v0.3.0** — Apache-2.0, one dependency (the Kotlin stdlib), Java 21+. Verified on a synthetic
 workload whose true answer is known independently and on four foreign codebases: Apache Calcite,
 Apache Lucene, Netty and PostgreSQL over a socket. Used in anger on a graph benchmark, where it took
 a BFS from 12.2 s to 1.75 s and said, row for row, why.
 
 ```kotlin
 repositories { maven("https://jitpack.io") }
-dependencies { implementation("com.github.minogin:ticksnick:v0.2.1") }
+dependencies { implementation("com.github.minogin:ticksnick:v0.3.0") }
 ```
 
 ### What it does, and what it does not
@@ -561,7 +561,8 @@ actually spread out.
 on the error of every share — the `waiting`, `concurrency` and `workers` columns are those. And the
 library surface enough to publish: **v0.1.0**, Apache-2.0, on JitPack; **v0.2.1** on 2026-10-13 with
 the coarse table drawn as a tree with the pauses on it, the `Long` group, operation families, and a
-`Profile` that saves to a file and diffs against another.
+`Profile` that saves to a file and diffs against another; **v0.3.0** on 2026-10-16 with `op` in the
+middle of a chain, enum families, keyed coarse ops and the `x parent` and `% parent` columns.
 
 **And the coarse tier is built, and contexts now cross threads.** A coarse label around a logical operation gives
 executions, mean, p50/p90/p99 and max — **measured**, two timestamps per execution, the only numbers

@@ -169,6 +169,13 @@ two clock reads are lost in the noise.
 **They meet at the slot**, which carries the fine operation id *and* a reference to the current
 coarse context. Every sample records the pair.
 
+**Which to start with: coarse.** Coarse is strictly more, so the default is to register an
+operation coarse unless it is certainly tiny, and to let the report say which ones to demote. The
+floor check is exact on the coarse tier - it compares durations it measured - so the advice is
+never a guess. The price is one run spent placing labels: the over-small coarse labels distort it,
+and the run after demoting them is the one to read. The ceiling is the other limit: 64 coarse
+types against 256 fine.
+
 ### Where the boundary is
 
 Stating the tiers as size ranges — "tens of nanoseconds" against "milliseconds" — is how this

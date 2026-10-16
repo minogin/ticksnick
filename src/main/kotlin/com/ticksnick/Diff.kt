@@ -34,6 +34,20 @@ class ProfileDiff(
         appendLine(headerLine("Wall time", before.samplingSpanNanos.toDouble(), after.samplingSpanNanos.toDouble()))
         appendLine(headerLine("  Active", before.activeNanos.toDouble(), after.activeNanos.toDouble()))
         appendLine(headerLine("  Paused", before.pause.confirmedPausedIn(before.samplingSpanNanos).toDouble(), after.pause.confirmedPausedIn(after.samplingSpanNanos).toDouble()))
+        // The tree first, as in the report: the shape, then the own-time detail.
+        if (before.coarseTree.isNotEmpty() || after.coarseTree.isNotEmpty()) {
+            appendLine()
+            appendLine("COARSE OPERATIONS - inclusive wall time, matched by path")
+            appendLine(
+                String.format(
+                    Locale.ROOT, COARSE_DIFF_ROW,
+                    "Coarse operation", "Total", "change", "Paused", "Executions"
+                )
+            )
+            appendLine("-".repeat(DIFF_WIDTH))
+            tree(after.coarseTree, before.coarseTree, 0)
+            appendLine("-".repeat(DIFF_WIDTH))
+        }
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS - own time, matched by name, sorted by the change")
         appendLine(
@@ -69,19 +83,6 @@ class ProfileDiff(
             )
         }
         appendLine("-".repeat(DIFF_WIDTH))
-        if (before.coarseTree.isNotEmpty() || after.coarseTree.isNotEmpty()) {
-            appendLine()
-            appendLine("COARSE OPERATIONS - inclusive wall time, matched by path")
-            appendLine(
-                String.format(
-                    Locale.ROOT, COARSE_DIFF_ROW,
-                    "Coarse operation", "Total", "change", "Paused", "Executions"
-                )
-            )
-            appendLine("-".repeat(DIFF_WIDTH))
-            tree(after.coarseTree, before.coarseTree, 0)
-            appendLine("-".repeat(DIFF_WIDTH))
-        }
         appendLine("=".repeat(DIFF_WIDTH))
     }
 

@@ -2126,6 +2126,19 @@ execution - and the tick is a knob. Above it, the histogram exists; the longest 
 between a resize and a lock, and more buckets would be a column nobody reads. Andrey asked about
 both; this is the answer.
 
+## The coarse table first; start coarse · 2026-10-16
+
+**The coarse table now comes before the own-time table**, in the report and in the diff. Andrey:
+the tree is the overview and the nesting, and the own-time table is what he looks into for detail.
+The order had been set when the coarse table was a flat list under the fine one; it is the tree
+since 2026-10-13, and the reading order changed with it.
+
+**The usage pattern: start coarse, demote what the warnings name.** A coarse label gives everything
+a fine one does and more, and an over-small one is named by the floor check with exact numbers, so
+the first run places the labels and the second is read. Seen on maven-graph: `merge` (24M
+executions of 196 ns) and `passedOn` (21M of 490 ns) labelled coarse took the batch from 16.7 s to
+20.8 s, and both were the two warnings at the top. Written into the README and profiler.md.
+
 ## The slowest executions, by key · 2026-10-16
 
 Andrey, on the same profile: `resolveRoot` p50 590 us and max 85.3 ms, and nothing said which

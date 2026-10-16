@@ -627,7 +627,7 @@ class CoarseTest {
             node(load, children = listOf(node(parse, count = 1, sumNanos = 1_000_000_000, inclusive = 1000))),
         )
         val text = report(listOf(load, query, parse), labelled = 3000, tree = tree).render()
-        val rows = text.substringAfter("COARSE OPERATIONS").lines().filter { it.trim().startsWith("parse ") }
+        val rows = text.substringAfter("COARSE OPERATIONS").substringBefore("COARSE AND FINE OPERATIONS").lines().filter { it.trim().startsWith("parse ") }
         assertEquals(3, rows.size, "parse should be under each caller and once over both: $text")
         assertTrue("all callers together" in text, "the figure over both callers is missing: $text")
         assertTrue(rows.any { "2.00 s" in it } && rows.any { "1.00 s" in it }, "the per-caller figures are not per caller: $rows")

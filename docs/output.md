@@ -107,8 +107,8 @@ Sections, in order, each with a heading and a blank line before it:
 (banner)            the title
 Wall time           one line, active + paused; then a Careful line per thing that is unreliable
 WARNINGS            anything the run wants to tell you about itself, before the numbers it is about
-COARSE AND FINE OPERATIONS   the fine table, "own time, out of N s active time", or one line saying why it is empty
-COARSE OPERATIONS   the coarse table over wall time, present only if you placed a coarse label
+COARSE OPERATIONS   the coarse table over wall time, present only if you placed a coarse label: the overview
+COARSE AND FINE OPERATIONS   the fine table, "own time, out of N s active time", or one line saying why it is empty: the detail
 Sampled             samples, ticks, step, threads: the precision of everything above
 HOW TO READ THIS    five lines: the things that will make you draw the wrong conclusion
 ```

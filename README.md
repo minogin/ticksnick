@@ -177,6 +177,15 @@ the first coarse one were both the integer `0`, and passing one where the other 
 and reported a plausible wrong answer. The handles erase to a bare `int`, so none of it costs
 anything at run time.
 
+**Start coarse, then demote what the report names.** Unless an operation is certainly tiny - a hash
+probe, a field read - register it coarse: it gives everything a fine label does, plus timings per
+execution, the tree and the slowest keys. Treat the first run as placing the labels, not as the
+result. A coarse label on something that runs millions of times at a few hundred nanoseconds adds
+about 40 ns and an allocation to every call, which moves every share; the warnings at the top of
+the report name each such label with its numbers. Make those `registerFine`, run again, and read
+that run. On a classpath resolver, two such labels took a batch from 16.7 s to 20.8 s, and both
+were named.
+
 **For a whole request, query or plan, add a coarse label as well:**
 
 ```kotlin
@@ -259,6 +268,14 @@ labels on the steps and a coarse label per depth:
 ```
 Wall time     12.5 s = 11.8 s active + 680 ms paused (5.45%) in 7 pauses, longest 259 ms
 
+COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
+Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
+  level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
+    made of: visitedAdd 82.1%, node 11.4%, id 4.67%, nextAdd 1.79%
+  level[5]                               1              2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
+    made of: node 94.3%, id 5.70%
+
 COARSE AND FINE OPERATIONS - own time, out of 11.8 s active time
                            |                                       Load                                       |           Long            |               Spread                |      Trust
 Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call |   Execs     Time  Longest | Wall-time Concurrency Workers  Pool |     Hits  Noise
@@ -267,14 +284,6 @@ visitedAdd                 |          64.0%      7.55 s          100% / 0%    32
 node                       |          29.8%      3.51 s          100% / 0%    16,038,234               219 ns |       -        -        - |    3.51 s        1.00       1     - |     3498  1.69%
 id                         |          4.53%      534 ms          100% / 0%    16,038,234              33.3 ns |       -        -        - |    534 ms        1.00       1     - |      532  4.34%
 nextAdd                    |          1.67%      197 ms          100% / 0%    16,038,134              12.3 ns |       9  48.2 ms  13.1 ms |    197 ms        1.00       1     - |      196  7.14%
-
-COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
-Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
-query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
-  level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
-    made of: visitedAdd 82.1%, node 11.4%, id 4.67%, nextAdd 1.79%
-  level[5]                               1              2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
-    made of: node 94.3%, id 5.70%
 ```
 
 Three things that table says which a flame graph would not:

@@ -1596,7 +1596,7 @@ class Profile internal constructor(
      * knows exact numbers for two of them - the measured span mean, and wall time as a union of
      * measured intervals - and using them would make a column whose rows are exact or inferred with
      * nothing saying which, and whose values answer different questions: an inclusive wall time per
-     * execution against a self thread-time per call. Those live in the coarse table below, which is
+     * execution against a self thread-time per call. Those live in the coarse table above, which is
      * what it is for.
      */
     inner class OperationRow internal constructor(
@@ -1796,13 +1796,17 @@ class Profile internal constructor(
             appendLine("  an operation label placed with enter/exit has no finally: a body that throws leaves it set")
         }
         renderWarnings()
+        // The tree first: the overview - what ran inside what, how often, what part of its parent -
+        // and the own-time table after it for the detail. It was the other way round until
+        // 2026-10-16, when Andrey said the tree is what he reads and the table is what he looks up.
+        renderCoarse()
         appendLine()
         // FINE, not bare OPERATIONS. `OPERATIONS` beside `COARSE OPERATIONS` makes one tier the
         // default and the other the exception, which is the asymmetry `registerFine`/`registerCoarse`
         // was introduced to remove — reproduced in the output an hour after it was fixed in the API.
         // The heading carries the one thing a reader has to hold between the two tables. A coarse
         // operation appears in both with different numbers - `request` at 5.03% of its own work
-        // here and 99.6% including everything it contains below - and without the two words that
+        // here and 99.6% including everything it contains above - and without the two words that
         // reads as a contradiction rather than as two questions.
         // The clock the table is over, said once in the heading and not in every column name: a
         // thread-time is a sum over threads and `active` is the span it was summed in, and on one
@@ -2028,7 +2032,7 @@ class Profile internal constructor(
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.
         if (seen.any { it.coarse } || contained.isNotEmpty()) {
-            appendLine("  * a coarse operation, showing its OWN work - its full span is in the table below")
+            appendLine("  * a coarse operation, showing its OWN work - its full span is in the table above")
         }
         // A note and not a warning: it is the threshold the `Long` group is printed against, so it
         // belongs under the table that has those columns rather than in the warning section. The
@@ -2041,7 +2045,6 @@ class Profile internal constructor(
                 percent(stuckBaseline * 100), percent(machineFloor * 100)
             )
         )
-        renderCoarse()
         // The run's own facts, after the tables: how much evidence there is, which is the precision
         // of everything above. It was the first two lines of the header and said nothing a reader
         // acts on before the numbers; it says something after them, when a share looks too close

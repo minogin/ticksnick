@@ -1343,7 +1343,7 @@ note on `renderCoarse`, 2026-10-13: the total is wall time with the pauses in, b
 waited for them and where they fell is a lead). So: the slowest list by active time first, and the
 table's `Total` + `Paused` re-argued separately rather than changed along with it.
 
-## 47. Record the CPU clock in the profile, and say when it moved · proposed 2026-10-17
+## 47. Record the CPU clock in the profile, and say when it moved · **done 2026-10-17**, see plan.md
 
 Seen on maven-graph, 2026-10-17: naive, 2 warmup and 3 measured batches on `org.apache.*`, about
 6 minutes. The clock sat at about 205% of base for the first 80 s and at about 135% for the rest;
@@ -1371,8 +1371,9 @@ would never know this happens".
 - **In `.tsp`:** the samples with their timestamps, a format version bump, older files read as
   "clock not recorded".
 
-Open: whether `_Total` is right on a hybrid CPU, where the clock rule prefers per-core; the
-threshold; whether `typeperf`'s counter names are localised on a non-English Windows.
+Settled with Andrey: per core, weighted by how busy each core was; 15% as a constant; English
+counter names only for now. Built as planned except the report's `Clock` line: a `Careful` line only
+when the clock moved, by the header rule. See plan.md.
 
 ## Promoted to plan.md
 

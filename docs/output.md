@@ -76,6 +76,8 @@ What can appear:
 | *the JVM counts N s of GC, more than the sampler saw ... inside active* | pauses shorter than one step, which lose no tick | the same, the other way: a little GC is inside active |
 | *pauses not measured: a parked sampler ...* | the sampler was not spinning, so its lateness says nothing | `wait = SPIN` if the split matters |
 | *N thread CPU readings went backwards and were dropped* | the OS clock misbehaved | rare; the bound is taken on the rest |
+| *the CPU clock moved during the run: X of base at the start, Y at the end, ...* | the machine changed speed - turbo running out, heat, the power plan - by more than 15% between the 10th and 90th percentile of one-second samples | shares hold; times and per-call costs drift with the clock, so compare them only with a run at the same clock. A long run on a laptop: fix the clock, or measure on a machine that holds it |
+| *clock not measured: ...* | macOS (root only), a Windows whose counter names are not English, or no cpufreq on Linux | the same, with nothing to tell you whether it happened |
 
 **What the `Runnable` check is.** The sampler counts a thread as inside an operation whether it is
 running, blocked, parked or descheduled - that is **occupancy**, not CPU. Occupancy counts waiting in

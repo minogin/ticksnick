@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### The CPU clock, in the report and the diff
+
+The profiler reads the CPU clock once a second - per core, weighted by how busy each core was - and
+says when it moved by more than 15% during the run: times and per-call costs drift with the clock,
+shares do not. The diff prints both runs' clocks and warns when they differ. Windows (English
+counter names) and Linux; macOS needs root and the report says the clock was not measured.
+
 ## v0.3.0 — 2026-10-16
 
 ```kotlin

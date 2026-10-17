@@ -407,6 +407,8 @@ object Profiler {
     @Volatile
     private var sampler: Sampler? = null
     private var startedAt: Long = 0
+    /** The CPU clock over the session. See [ClockReport]. */
+    private var clock: ClockProbe? = null
 
     /** The JVM's collection-pause count when the current session began, or -1. See [GcPauseClock]. */
     private var gcAtStart: Long = -1
@@ -943,6 +945,7 @@ object Profiler {
         reclaimedAtStart = reclaimedSlots()
         sampler = Sampler((stepMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
             .also { it.start() }
+        clock = ClockProbe().also { it.start() }
     }
 
     /** Stops sampling and returns what was collected. */
@@ -950,6 +953,8 @@ object Profiler {
         val s = checkNotNull(sampler) { "not sampling" }
         s.shutdown()
         sampler = null
+        val clockReport = clock?.stop() ?: ClockReport.NOT_RECORDED
+        clock = null
         val duration = System.nanoTime() - startedAt
         // Both ends or neither: a clock that could not be read at one of them has no difference.
         val gcAtStop = GcPauseClock.pauseNanos()
@@ -1024,6 +1029,7 @@ object Profiler {
             coarseSampleHits = s.coarseSampleHits,
             pause = pauses,
             coarseTree = coarseTree,
+            clock = clockReport,
         )
     }
 }

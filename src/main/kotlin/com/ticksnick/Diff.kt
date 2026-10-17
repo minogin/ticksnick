@@ -42,6 +42,7 @@ class ProfileDiff(
         appendLine(headerLine("Wall time", before.samplingSpanNanos.toDouble(), after.samplingSpanNanos.toDouble()))
         appendLine(headerLine("  Active", before.activeNanos.toDouble(), after.activeNanos.toDouble()))
         appendLine(headerLine("  Paused", before.pause.confirmedPausedIn(before.samplingSpanNanos).toDouble(), after.pause.confirmedPausedIn(after.samplingSpanNanos).toDouble()))
+        for (l in ClockReport.diffLines(before.clock, after.clock)) appendLine(l)
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.coarseTree.isNotEmpty() || after.coarseTree.isNotEmpty()) {
             appendLine()

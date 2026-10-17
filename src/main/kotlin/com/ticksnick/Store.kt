@@ -79,6 +79,15 @@ object ProfileStore {
         line("pause.gcNanos", z.gcNanos)
         line("pause.confirmedNanos", z.confirmedNanos)
 
+        // Only when there is a clock, so a file from before it was recorded reads the same. NaN, a
+        // second the machine was idle, is written as `-`.
+        val clock = p.clock
+        if (clock.samples.isNotEmpty() || clock.notMeasured != null) {
+            line("clock.ofBase", clock.ofBase)
+            text("clock.notMeasured", clock.notMeasured)
+            line("clock.samples", clock.samples.joinToString(" ") { if (it.isNaN()) "-" else it.toString() })
+        }
+
         line("operations", p.operations.size)
         p.operations.forEachIndexed { i, o ->
             val k = "op.$i."
@@ -202,6 +211,12 @@ object ProfileStore {
             pauses = long("pause.pauses"), longestNanos = long("pause.longestNanos"),
             gcNanos = long("pause.gcNanos"), confirmedNanos = long("pause.confirmedNanos"),
         )
+        val clock = if ("clock.ofBase" !in m) ClockReport.NOT_RECORDED else ClockReport(
+            samples = str("clock.samples").split(' ').filter { it.isNotEmpty() }
+                .map { if (it == "-") Double.NaN else it.toDouble() }.toDoubleArray(),
+            ofBase = bool("clock.ofBase"),
+            notMeasured = text("clock.notMeasured"),
+        )
         val operations = (0 until int("operations")).map { i ->
             val k = "op.$i."
             OperationStat(
@@ -254,7 +269,7 @@ object ProfileStore {
             openAtEnd = int("openAtEnd"), untrackedSlots = int("untrackedSlots"), reclaimedSlots = int("reclaimedSlots"),
             coarse = coarse, openContextsAtEnd = int("openContextsAtEnd"),
             labelledOutsideCoarse = long("labelledOutsideCoarse"), staleContextHits = long("staleContextHits"),
-            coarseSampleHits = long("coarseSampleHits"), pause = pause, coarseTree = tree,
+            coarseSampleHits = long("coarseSampleHits"), pause = pause, coarseTree = tree, clock = clock,
         )
     }
 

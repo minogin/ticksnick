@@ -2279,6 +2279,34 @@ without one fails there. The credentials live in `~/.gradle/gradle.properties`, 
 repository. A release: `./gradlew publishToMavenCentral`, then "Publish" on
 central.sonatype.com/publishing/deployments.
 
+## The CPU clock, recorded in the profile · 2026-10-17
+
+ideas.md 47. A six-minute maven-graph run fell from 205% of the base clock to 135% after its first
+80 s, and nothing in the report said so; the measured batches looked 1.5x slower than the warmup
+for that reason alone. CLAUDE.md asks for a clock trace beside every measurement, and a user does
+not run one. So the profiler reads the clock itself (`Clock.kt`):
+
+- **The OS counter, once a second, on a thread of its own** that never touches a label. Not a
+  calibration loop: it measures the core it lands on, not the worker's, and takes a core.
+- **Per core, weighted by how busy each core was that second** (Andrey: per core is more precise).
+  A single-threaded run reads the clock of the core it ran on, not a mean diluted by idle cores. A
+  second with less than half a core busy is a gap: an idle machine's clock says nothing.
+- **Windows: `typeperf`** with `% Processor Performance` and `% Processor Time` per core, as a child
+  process, so the library takes no native binding. English counter names only (Andrey: for now); a
+  localised Windows gets a `Careful` line saying so. **Linux:** `/proc/stat` and
+  `cpufreq/scaling_cur_freq`, as a percentage of `base_frequency` where the driver publishes it, MHz
+  otherwise. **macOS:** not read - `powermetrics` needs root - and a `Careful` line says so.
+- **The report: a `Careful` line only when the clock moved** by more than `CLOCK_MOVED` (15%,
+  Andrey: a constant) between the 10th and 90th percentile of the samples - one second caught in a
+  collection is not a trend - with the clock at the start and at the end. No `Clock` line on a
+  steady run: the header rule of 2026-10-11 (silence says fine), and one run's level alone says
+  nothing.
+- **The diff: a `Clock` line** with each run's mean whenever either recorded one, and a `Careful`
+  line when they differ by more than `CLOCK_MOVED`: up to that ratio of a time difference is the
+  machine.
+- **The file: optional `clock.*` keys**, written only when there is a clock, so the format version
+  stays at 1 and a file saved before reads as not recorded and says nothing.
+
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 
 Three questions from Andrey on the tree above, in order. *The tree repeats the executions and

@@ -594,6 +594,8 @@ class Profile internal constructor(
     val pause: PauseReport = PauseReport.NONE,
     /** The coarse tree: the roots, each with what ran under it. Empty when no coarse label was placed. */
     val coarseTree: List<CoarseNode> = emptyList(),
+    /** The CPU clock over the session; [ClockReport.NOT_RECORDED] for a profile saved before it was. */
+    val clock: ClockReport = ClockReport.NOT_RECORDED,
 ) {
     /** False when a fatal finding stopped the session. See the severity ladder in plan.md. */
     val ok: Boolean get() = failure == null
@@ -1813,7 +1815,9 @@ class Profile internal constructor(
         // says "fine" now, and a `Careful` line says what is unreliable, before the numbers it is
         // about and not in a footnote after them.
         appendLine(pause.headerLine(samplingSpanNanos))
-        for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots)) appendLine(row("Careful", c))
+        // The clock only when it moved or could not be read: a steady clock is the healthy case, and
+        // its level alone says nothing about this run. Two runs' levels are compared in the diff.
+        for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful()) appendLine(row("Careful", c))
         // The warnings here, before the tables, for the same reason `Careful` is: a warning is read
         // before the numbers it is about, not found thirty lines after them. They used to close the
         // report, and Andrey met one - a coarse label on a 40 ns lookup - under the second table.

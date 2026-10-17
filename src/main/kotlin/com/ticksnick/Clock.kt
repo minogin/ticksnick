@@ -136,9 +136,15 @@ internal class ClockProbe {
     @Volatile private var source: ClockSource? = null
     private var thread: Thread? = null
 
-    /** Returns at once: the source is opened on the probe's thread, since `typeperf` takes a second to start. */
+    /**
+     * Closes the source if the JVM exits without [stop]. A `typeperf` is a process of its own and
+     * outlives the JVM that started it: left running, it samples the machine forever.
+     */
+    private val onExit = Thread { source?.close() }
+
     fun start() {
         running = true
+        Runtime.getRuntime().addShutdownHook(onExit)
         thread = Thread({
             try {
                 val s = ClockSource.forThisOs()
@@ -161,9 +167,15 @@ internal class ClockProbe {
     fun stop(): ClockReport {
         running = false
         source?.close()
-        // Not waiting for the thread: what it read is in [samples] already, and a `typeperf` still starting
-        // closes itself when it sees the probe stopped.
-        thread?.join(100)
+        try {
+            Runtime.getRuntime().removeShutdownHook(onExit)
+        } catch (_: IllegalStateException) {
+            // Already shutting down: the hook runs anyway.
+        }
+        // Woken from its sleep or its read, the thread closes the source itself if it opened one after
+        // the line above; waited for, so that no `typeperf` can outlive a JVM that exits right after.
+        thread?.interrupt()
+        thread?.join(2 * CLOCK_PERIOD_MILLIS)
         val values = synchronized(samples) { samples.toDoubleArray() }
         return ClockReport(values, ofBase = source?.ofBase ?: true, notMeasured = failure)
     }
@@ -215,8 +227,9 @@ internal class WindowsClock : ClockSource {
     override val ofBase = true
     private val process: Process
     private val reader: BufferedReader
-    /** For each core: the column of its clock and the column of its busy time. */
-    private val columns: List<Pair<Int, Int>>
+
+    /** Read on the first [next], not here: `typeperf` prints it a second after starting, and [close] must work before. */
+    private var columns: List<Pair<Int, Int>>? = null
 
     init {
         process = try {
@@ -228,27 +241,28 @@ internal class WindowsClock : ClockSource {
             throw ClockUnavailable("typeperf could not be started: ${e.message}")
         }
         reader = BufferedReader(InputStreamReader(process.inputStream))
+    }
+
+    private fun columns(): List<Pair<Int, Int>> {
+        columns?.let { return it }
         val header = generateSequence { reader.readLine() }.firstOrNull { it.startsWith("\"(PDH-CSV") }
-        if (header == null) {
-            process.destroy()
-            throw ClockUnavailable(
+            ?: throw ClockUnavailable(
                 "typeperf found no '$WINDOWS_PERFORMANCE' counter; the counter names are English and a localised Windows names them differently"
             )
-        }
-        columns = typeperfColumns(header)
-        if (columns.isEmpty()) {
-            process.destroy()
-            throw ClockUnavailable("typeperf listed no per-core '$WINDOWS_PERFORMANCE' counters")
+        return typeperfColumns(header).also {
+            if (it.isEmpty()) throw ClockUnavailable("typeperf listed no per-core '$WINDOWS_PERFORMANCE' counters")
+            columns = it
         }
     }
 
     override fun next(): Double {
+        val columns = columns()
         val line = reader.readLine() ?: throw IllegalStateException("typeperf exited")
         return typeperfSample(line, columns)
     }
 
     override fun close() {
-        process.destroy()
+        process.destroyForcibly()
     }
 
     companion object {

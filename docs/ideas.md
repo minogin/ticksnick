@@ -1343,6 +1343,37 @@ note on `renderCoarse`, 2026-10-13: the total is wall time with the pauses in, b
 waited for them and where they fell is a lead). So: the slowest list by active time first, and the
 table's `Total` + `Paused` re-argued separately rather than changed along with it.
 
+## 47. Record the CPU clock in the profile, and say when it moved · proposed 2026-10-17
+
+Seen on maven-graph, 2026-10-17: naive, 2 warmup and 3 measured batches on `org.apache.*`, about
+6 minutes. The clock sat at about 205% of base for the first 80 s and at about 135% for the rest;
+the measured batches took 82 s against 54 s for the first warmup, which is the clock ratio (1.52),
+not the profiler. The report said nothing about it. It was seen only because the session ran
+`scripts/clock.ps1` beside the run, as CLAUDE.md asks - and a user does not. Andrey: "if not you I
+would never know this happens".
+
+**Proposal: the OS counter, sampled once a second, stored in the profile.**
+
+- **What is read.** Linux: the mean of `/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq`,
+  as a percentage of `base_frequency` where the driver publishes it, MHz otherwise. Windows: `\Processor
+  Information(_Total)\% Processor Performance`, the counter this file's clock rule uses, read from a
+  `typeperf -si 1` child process so no native binding is needed. macOS: nothing - `powermetrics`
+  needs root - and a `Careful` line says the clock was not measured and why. A failed read is written
+  as a gap, never skipped silently.
+- **Not a calibration loop** (time a fixed piece of work each second): it measures the core it lands
+  on, not the worker's, and on a hybrid CPU that can be an efficiency core reporting a drop that did
+  not happen. The OS counter costs nothing on the measured threads.
+- **In the report:** a `Clock` line under `Wall time` - `Clock  205% -> 135% of base, min 120%, max
+  230%, sampled every 1 s` - and a `Careful` line when it moved by more than a threshold (15%?):
+  *the clock moved by 1.5x during the run: times and per-call costs drift with it, shares hold*.
+- **In the diff:** both runs' mean clock in the header, and a `Careful` line when they differ:
+  *before ran at 205%, after at 135%: up to 1.5x of the time difference is the clock*.
+- **In `.tsp`:** the samples with their timestamps, a format version bump, older files read as
+  "clock not recorded".
+
+Open: whether `_Total` is right on a hybrid CPU, where the clock rule prefers per-core; the
+threshold; whether `typeperf`'s counter names are localised on a non-English Windows.
+
 ## Promoted to plan.md
 
 **Phase 3.5** is item 9 above, reframed from detecting bad operations to bounding the error on every

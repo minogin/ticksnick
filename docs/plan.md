@@ -2307,6 +2307,22 @@ not run one. So the profiler reads the clock itself (`Clock.kt`):
 - **The file: optional `clock.*` keys**, written only when there is a clock, so the format version
   stays at 1 and a file saved before reads as not recorded and says nothing.
 
+## The coarse table's parallelism, where it forks · 2026-10-23
+
+Andrey, reading a parallel maven-graph run: the heading said *inclusive wall time*, and `resolveRoot`
+read `31.5 s`, `988%` of a 3.19 s batch, while the one `parallelism:` line, under the root, said
+*"1.00 executions at once"*. Settled:
+
+- **The heading says `measured durations`, not wall time.** Each execution is timed by the clock;
+  `Total` adds them, and executions side by side sum past the wall time they shared. *Durations* is
+  the tracing tools' word for it, and `Total` stays: their column is "total duration", and *Sum*
+  would read as a statistic beside `Mean`.
+- **A `parallelism:` line under every row whose own figure is above 1:** threads per execution
+  under the row that forks, executions at once under the rows it forks into. A half is printed only
+  at 1.1 or over and at least 1.1 times its parent's (`PARALLEL_SHOWN`), so a child repeating its
+  parent's figure, or holding part of the parent's time, gets nothing. Per type, as before: a type
+  under two parents shows its figures under both.
+
 ## The thread-state probe · 2026-10-23 · shelved on branch `probe`
 
 **Shelved 2026-10-23: built and measured, then put on branch `probe`; master has none of it.** Andrey's call: a big task of its own - Windows only, an undocumented call, Java 22+ through a multi-release jar and a JVM flag, 5-7.5 µs per thread per tick on the sampler and 2.3% off the workers, only 0.2% of which is explained - against easier ways to say the same thing first. On a CPU-bound program with no I/O inside its labels, such as maven-graph, the gap the duty cycle measures between `Runnable` and CPU can only be threads waiting for a core, probe or not. What follows is the design as it is on the branch.

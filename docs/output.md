@@ -357,7 +357,7 @@ cannot: **how long did one execution take.** It is drawn as a tree: an operation
 it ran inside, and its figures are the executions on that path alone.
 
 ```
-COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
+COARSE OPERATIONS - measured durations, inclusive, nested as it ran; a pause is charged to every operation it interrupted
 Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
 ------------------------------------------------------------------------------------------------------------------------------------------------------------
 run                                      1              16.2 s              768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
@@ -386,40 +386,51 @@ run                                      1              16.2 s              768 
 
 The graph benchmark: `run` around the measured batches, `runBatch` around each, `query` around
 each query and a family `level[0..5]` around each depth. With one execution per row the
-percentiles repeat the total; on a request served a million times they are the point. The
-`parallelism:` line appears under a root on a run with more than one thread.
+percentiles repeat the total; on a request served a million times they are the point. A
+`parallelism:` line appears only on a run with more than one thread - see below.
 
 | column | what it is | what to watch for |
 |---|---|---|
 | **the nesting** | an operation under the one it ran inside; siblings by total | the figures on a row are the executions on **that path**. An operation with two callers is a row under each, and once more under the table as *all callers together* |
 | **executions** | completed executions on that path, counted exactly | not sampled. If this disagrees with what you think ran, a label is leaking |
 | **x parent** | executions per execution of the parent: the loop count. Blank on a root, and where it is once per parent | `x12.0` under `resolve` means each resolve ran it twelve times. A fraction means it ran on only some of the parent's executions |
-| **total** | the measured spans summed, **wall time** | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** - a parent contains its children. Inclusive time is monotone up a path, so the heaviest operation anywhere is at the end of the first branch. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
+| **total** | the measured durations summed. **Not wall time** once executions overlap: 5,262 `resolveRoot`s ten at a time sum to 31.5 s inside a 3.19 s batch, and `% parent` reads 988% - which is how many ran at once | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** - a parent contains its children. Inclusive time is monotone up a path, so the heaviest operation anywhere is at the end of the first branch. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
 | **paused** | of the total, time every thread was stopped - usually GC - charged to every span open when the pause lifted | the span the pause **interrupted**, not the one that caused it: a young collection lands in whoever allocated last. A `-` is none. Rows sum to at most the header's paused figure |
 | **mean, p50, p90, p99, max** | **measured**, two timestamps per execution | the only numbers in the whole report that are not sampled. Percentiles come from a log-bucket histogram: **at most 12.5% high, never low** |
 | **runnable / waiting** | the same split as the fine table, over the samples caught anywhere inside the span on that path | `0%` waiting here because the benchmark never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
 | **slowest:, under a row** | for an operation opened with `op(x, key = { ... })`: its five longest executions on that path, longest first, with the key each was opened with. **Measured** | which cases to run again. Wall time, so a GC pause in one can be all that put it there; `paused` on the row says whether there were any |
 | **the `- ... own` rows, under a leaf** | the leaf's time **split by the innermost label**, sampled: each sample inside the leaf counted once, under the fine label that was innermost, or `unlabelled`. They add up to 100%. Total is the share of the leaf's samples applied to the leaf's measured total, so it agrees with `% parent` | **a split, not children.** A fine label with fine labels inside it shows only its own part - the inner ones are their own rows, not inside it. The report cannot see fine nesting; for a hierarchy, make the outer label coarse. On the leaves only: a parent's would be its children's over again |
-| **`parallelism:` line** | the two parallelism questions, in words, under a root | see below - they are different questions and used to be adjacent columns |
+| **`parallelism:` line** | under a row whose threads per execution or executions at once is above 1 and above its parent's | see below - they are different questions, and each is printed under the row where it starts |
 
 ### The two parallelisms, which are not the same question
 
-The `parallelism:` line carries three numbers, and the split matters more than any of them:
+A fork shows in two rows, and the `parallelism:` line goes under each, saying the half that is
+that row's own. maven-graph's batch hands each root to a pool of ten:
 
 ```
-  request parallelism: 1.00 thread per execution, 0.08 of it on a CPU; 2.00 executions at once over 2 threads
+runBatch                                 1              3.19 s  ...
+  parallelism: 10.87 threads per execution, 9.88 of them on a CPU
+  resolveRoot                        5,262   x5,262     31.5 s     988%  ...
+    parallelism: 9.88 executions at once
+    resolve                         15,786     x3.0     31.5 s     100%  ...
 ```
 
-- **`n thread per execution`** — **a property of your code.** Does one execution of this operation
-  use more than one thread? `1.00` means no: it runs on the thread that opened it. This only moves
-  above 1 when work is handed to a pool wrapped with `.propagating()`.
-- **`n of it on a CPU`** — of those threads, the ones a sample caught running. `working = inside ×
+- **`n threads per execution`** — **a property of your code,** under the row that forks. Does one
+  execution of this operation use more than one thread? This only moves above 1 when work is handed
+  to a pool wrapped with `.propagating()`.
+- **`n of them on a CPU`** — of those threads, the ones a sample caught running. `working = inside ×
   (1 − waiting)`, so it is what splitting the work actually *bought*: a caller parked on a join
   contributes nothing here, correctly. Printed as `0.08 (at most 0.31)` when the measured
   time on CPU says the machine cannot have supported the figure.
-- **`n executions at once over k threads`** — **a property of your load,** not your code. How many
-  of these were in the system simultaneously. Add threads or clients and it moves; change the code
-  and it may not.
+- **`n executions at once`** — **a property of your load,** not your code, under the rows forked
+  into: how many of these ran side by side. It is the `% parent` over 100% read out. Add threads or
+  clients and it moves; change the code and it may not.
+
+A half is left off when it is under 1.1, or when it is not at least 1.1 times its parent's:
+`resolve` runs ten at once only because it is inside `resolveRoot`, and `select` inside `resolve`
+runs 5.5 at once only because it is half of `resolve`'s time. Until 2026-10-23 the line was under
+each root with all three numbers, which put "1.00 executions at once" under the batch and nothing
+beside the 988% two rows down.
 
 They were three columns named `inside`, `working` and `in flight` until 2026-08-31, when a reader
 looked for parallelism, could not find it, and turned out to have been staring at all three. The word

@@ -46,7 +46,7 @@ class ProfileDiff(
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.coarseTree.isNotEmpty() || after.coarseTree.isNotEmpty()) {
             appendLine()
-            appendLine("COARSE OPERATIONS - inclusive wall time, matched by path")
+            appendLine("COARSE OPERATIONS - measured durations, inclusive, matched by path")
             appendLine(
                 String.format(
                     Locale.ROOT, COARSE_DIFF_ROW,

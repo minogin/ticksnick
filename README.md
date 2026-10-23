@@ -316,7 +316,7 @@ labels on the steps and a coarse label per depth:
 ```
 Wall time     12.5 s = 11.8 s active + 680 ms paused (5.45%) in 7 pauses, longest 259 ms
 
-COARSE OPERATIONS - inclusive wall time, nested as it ran; a pause is charged to every operation it interrupted
+COARSE OPERATIONS - measured durations, inclusive, nested as it ran; a pause is charged to every operation it interrupted
 Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
 query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
   level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%

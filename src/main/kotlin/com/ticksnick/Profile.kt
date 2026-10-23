@@ -1376,10 +1376,10 @@ class Profile internal constructor(
             appendLine("    12.5% high and never low, and never above max, which is exact")
             appendLine("  Total sums the executions' durations, so executions side by side sum past the parent's:")
             appendLine("    % parent over 100% is how many ran at once")
-            appendLine("  'N at once, M on a CPU' under a row: its executions ran N side by side, more than its")
+            appendLine("  'parallelism: N at once, M on a CPU' under a row: its executions ran N side by side, more than its")
             appendLine("    parent's did, with M threads in them running. A saturated pool reads it low, and M is an")
             appendLine("    upper bound on the speedup rather than the speedup itself")
-            appendLine("  'its work on N more threads' under a row: work it forked with no coarse label of its own")
+            appendLine("  'parallelism: its work on N more threads' under a row: work it forked with no coarse label of its own")
             appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
             appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
@@ -1534,7 +1534,7 @@ class Profile internal constructor(
                     )
                     else -> null
                 }
-                if (line != null) appendLine("$indent  $line")
+                if (line != null) appendLine("$indent  parallelism: $line")
             }
             for (child in n.children.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
                 node(child, depth + 1, n)

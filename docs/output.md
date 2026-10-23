@@ -400,7 +400,7 @@ percentiles repeat the total; on a request served a million times they are the p
 | **runnable / waiting** | the same split as the fine table, over the samples caught anywhere inside the span on that path | `0%` waiting here because the benchmark never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
 | **slowest:, under a row** | for an operation opened with `op(x, key = { ... })`: its five longest executions on that path, longest first, with the key each was opened with. **Measured** | which cases to run again. Wall time, so a GC pause in one can be all that put it there; `paused` on the row says whether there were any |
 | **the `- ... own` rows, under a leaf** | the leaf's time **split by the innermost label**, sampled: each sample inside the leaf counted once, under the fine label that was innermost, or `unlabelled`. They add up to 100%. Total is the share of the leaf's samples applied to the leaf's measured total, so it agrees with `% parent` | **a split, not children.** A fine label with fine labels inside it shows only its own part - the inner ones are their own rows, not inside it. The report cannot see fine nesting; for a hierarchy, make the outer label coarse. On the leaves only: a parent's would be its children's over again |
-| **`N at once, M on a CPU`, under a row** | its executions ran `N` side by side, more than its parent's did | see below. The row that forks has no line; the rows it forks into do |
+| **`parallelism: N at once, M on a CPU`, under a row** | its executions ran `N` side by side, more than its parent's did | see below. The row that forks has no line; the rows it forks into do |
 
 ### How many ran at once, under the rows that did
 
@@ -410,7 +410,7 @@ pool of ten:
 ```
 runBatch                                 1              3.19 s  ...
   resolveRoot                        5,262   x5,262     31.5 s     988%  ...
-    9.88 at once, 9.88 on a CPU
+    parallelism: 9.88 at once, 9.88 on a CPU
     resolve                         15,786     x3.0     31.5 s     100%  ...
 ```
 
@@ -425,7 +425,7 @@ runBatch                                 1              3.19 s  ...
 line under it used to say *"10.87 threads per execution"*, counting the parked caller with the
 workers, and read as if the batch were the parallel thing. The one exception is work forked with
 no coarse label of its own: no child row exists to carry the line, so the parent says
-**`its work on N more threads, M threads on a CPU`**.
+**`parallelism: its work on N more threads, M threads on a CPU`**.
 
 The line is left off when `N` is under 1.1, or not at least 1.1 times the parent's: `resolve` runs
 ten at once only because it is inside `resolveRoot`, and `select` inside `resolve` runs 5.5 at once

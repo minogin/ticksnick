@@ -252,7 +252,7 @@ class ProfileTest {
         assertTrue(d.unbounded, "the Netty regime is no longer recognised as unbounded")
         val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
         assertTrue(lines.contains("unchecked") && lines.contains("label around the waiting"), "no diagnosis for an unbounded run")
-        assertFalse(lines.contains("overstates"), "printed a bound it does not have")
+        assertFalse(lines.contains("may be off by"), "printed a bound it does not have")
     }
 
     /** When the bound *did* find something, it prints it — and the diagnosis stays away. */
@@ -261,7 +261,7 @@ class ProfileTest {
         val d = duty(labelled = 0.9846, aggregate = 0.6927, invisible = 0.014, labelledFraction = 0.595)
         assertFalse(d.unbounded)
         val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
-        assertTrue(lines.contains("overstates CPU work by up to 1.56 pp"), "the bound was not printed")
+        assertTrue(lines.contains("off by up to 1.56 pp"), "the bound was not printed")
         assertFalse(lines.contains("unchecked"), "printed the diagnosis over a real bound")
         assertEquals(1.56, d.boundPp, 0.05, "Lucene's recorded 1.57 pp moved")
     }

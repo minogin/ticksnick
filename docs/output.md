@@ -19,7 +19,7 @@ a mistake on purpose.
 
 ```
 Wall time     12.0 s = 12.0 s active + 3.00 ms paused (0.025%)
-Careful       Runnable overstates CPU work by up to 2.53 pp of any share: blocking I/O, native calls or a busy machine
+Careful       Thread-time% may be off by up to 2.53 pp as a share of CPU time: only 97.5% of the time inside labels is sure to have been on a CPU, the rest may have been waiting. Likely causes: too many threads for the cores (use fewer), or blocking I/O or native calls (label them, so their waiting is a row of its own)
 ```
 
 **Two criteria decide what the report prints**, Andrey's, 2026-10-11: it matters for optimising
@@ -69,7 +69,7 @@ What can appear:
 
 | line | what happened | what to do |
 |---|---|---|
-| *Runnable overstates CPU work by up to N pp of any share: blocking I/O, native calls or a busy machine* | the OS clock says the threads were on a CPU less than `Runnable` claims, by more than a point | the left half of `Runnable / Waiting` is an upper bound; the gap is I/O the JVM cannot see, or the scheduler. Under 5 pp the ranking holds; the line says when a share is only where threads *sat* |
+| *Thread-time% may be off by up to N pp as a share of CPU time: only D of the time inside labels is sure to have been on a CPU, the rest may have been waiting. Likely causes: ...* | the OS clock says the threads were on a CPU less than `Runnable` claims, by more than a point. `D` is the worst-case CPU part of the labelled thread-time, and `N = (1 - D) / D`: a row's thread-time% read as a share of CPU could be that far out, if all the waiting was in that one row | **too many threads for the cores**: runnable threads waiting their turn - run fewer workers than cores, leaving room for GC, the JIT and the sampler, which spins a core. **Blocking I/O or native calls**: a socket read reads RUNNABLE to Java - put a label around the call, and its waiting is a row of its own rather than hidden in the others. Under 5 pp the ranking holds; under 75% the line says to read a share as where threads *sat* |
 | *Runnable is unchecked against the CPU clock: ...* | no per-thread CPU clock, or no one-second window closed: the run was shorter than a second, or the threads exited first | read `Runnable` as an upper bound with nothing bounding it. Run for longer, or call `Profiler.release()` from threads that finish |
 | *Runnable is unchecked: N% of thread-time was off the CPU while reading runnable ... Put a label around the waiting* | more invisible off-CPU time than labelled time - Netty's event loops in `epoll_wait` - so the bound swallows everything | label the waiting, not only the work. A selector loop with a label on it turns invisible off-CPU into labelled occupancy and the bound becomes tight again |
 | *the sampler lost N s the JVM did not count as GC ... counted as active* | late ticks with no collection behind them: another kind of JVM pause, or the sampler kept off its core | active time is high by up to N s; nothing in the table is charged for it |

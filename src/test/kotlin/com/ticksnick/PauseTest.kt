@@ -316,7 +316,7 @@ class PauseTest {
         assertFalse("wall time" in line, line)
         // 1.11 pp is over the point the report keeps quiet below, so this run gets the line.
         val careful = d.careful(60_220_000_000, 0).single()
-        assertTrue("overstates CPU work by up to 1.11 pp" in careful, careful)
+        assertTrue("off by up to 1.11 pp" in careful, careful)
     }
 
     @Test

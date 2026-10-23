@@ -47,6 +47,16 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### The Careful line about Runnable did not say what to do · 2026-10-23
+
+Andrey, on a parallel maven-graph run printing *"Runnable overstates CPU work by up to 29.8 pp of
+any share: blocking I/O, native calls or a busy machine"*: "feels like 30 pp is A LOT", asked what
+"shares" were - the report says thread-time% everywhere else - and whether blocking I/O made the
+tool unusable. The line named three causes and no remedy. **Reworded the same day, close to his own
+draft: what it means for thread-time%, how much of the labelled time was surely CPU, and a remedy
+per cause.** The deeper fix, splitting each runnable sample by asking the OS, was built and shelved
+on branch `probe` (plan.md).
+
 ### The diff's header numbers did not line up · 2026-10-16
 
 Andrey, on a maven-graph diff (naive -> centralEdges): `Wall time`, `Active` and `Paused` each

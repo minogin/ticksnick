@@ -569,12 +569,20 @@ class DutyReport internal constructor(
                     "threads, so all of it could be inside them. Put a label around the waiting, not only the work",
             invisibleOffCpu * 100, labelledFraction * 100
         )
+        // Said as what it means for the column a reader looks at, then the number behind it, then
+        // what to do. It was "Runnable overstates CPU work by up to 29.8 pp of any share: blocking
+        // I/O, native calls or a busy machine", and Andrey, 2026-10-23, reading it on a maven-graph
+        // run: "can we make the message more self-explanatory and also add some advices there?" -
+        // "shares" was a word the report used nowhere else, and the causes came with no remedy.
         else if (boundPp > CAREFUL_PP) out += String.format(
             Locale.ROOT,
-            "Runnable overstates CPU work by up to %s pp of any share: blocking I/O, native calls or a busy machine",
-            threeDigits(boundPp)
+            "Thread-time%% may be off by up to %s pp as a share of CPU time: only %s of the time inside labels " +
+                    "is sure to have been on a CPU, the rest may have been waiting. Likely causes: too many threads " +
+                    "for the cores (use fewer), or blocking I/O or native calls (label them, so their waiting is a " +
+                    "row of its own)",
+            threeDigits(boundPp), percent(shareDuty * 100)
         ) + (if (shareDuty < OCCUPANCY_ONLY)
-            " - read a share as where threads SIT, not where cycles GO, and do not add two up" else "")
+            ". Read a share as where threads SIT, not where cycles GO, and do not add two up" else "")
         if (anomalies > 0) out += "$anomalies thread CPU readings went backwards and were dropped"
         return out
     }

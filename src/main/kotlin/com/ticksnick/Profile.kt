@@ -12,8 +12,8 @@ const val FINE_ROWS_SHOWN = 6
 const val SPLIT_MARK = "-"
 
 /**
- * Threads per execution, or executions at once, from which a coarse row gets a `parallelism:` line:
- * at least this, and at least this many times its parent's. Sampled figures, so a tenth is the row
+ * Executions at once - or, for forked work with no label of its own, threads per execution - from
+ * which a coarse row gets its *at once* line: at least this, and at least this many times its parent's. Sampled figures, so a tenth is the row
  * repeating its parent rather than a fork of its own.
  */
 const val PARALLEL_SHOWN = 1.1

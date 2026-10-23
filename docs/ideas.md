@@ -776,15 +776,15 @@ and it is worth building. The suspension half in particular is not covered by an
 the bench's fan-out is threads handing work to threads, while a suspended coroutine occupies no
 thread at all, and phase 5 has to decide deliberately what a span means across one.
 
-## 24. Measure CPU per label, instead of bounding thread state after the fact · **done on Windows, 2026-10-23: the cycle counter, not the CPU clock**
+## 24. Measure CPU per label, instead of bounding thread state after the fact · **built on Windows 2026-10-23, shelved on branch `probe`**
 
-**Reopened and built, 2026-10-23.** The CPU clock is still too coarse, as below. What is not is the
+**Reopened and built, 2026-10-23, then shelved on branch `probe` the same day** - see plan.md for why. The CPU clock is still too coarse, as below. What is not is the
 thread's *cycle counter*, `QueryThreadCycleTime`, which moves within a microsecond: read twice 1 µs
 apart it says whether the thread is on a CPU right now, and a second call says whether a thread off
 the CPU is in a system call or waiting for a core. So each sample is on a CPU, waiting for a core, in
 I/O or a native call, or parked - measured, not bounded. Numbers in
 [findings.md](findings.md#telling-a-runnable-threads-state-apart-per-sample-on-windows), the design
-in [plan.md](plan.md#the-thread-state-probe--2026-10-23). Linux and macOS are item 48.
+in [plan.md](plan.md#the-thread-state-probe--2026-10-23--shelved-on-branch-probe). Linux and macOS are item 48.
 
 What follows is the entry as it was closed.
 
@@ -1385,9 +1385,9 @@ Settled with Andrey: per core, weighted by how busy each core was; 15% as a cons
 counter names only for now. Built as planned except the report's `Clock` line: a `Careful` line only
 when the clock moved, by the header rule. See plan.md.
 
-## 48. The thread-state probe beyond Windows, and for threads it cannot see yet · open
+## 48. The thread-state probe beyond Windows, and for threads it cannot see yet · open, if the probe comes back
 
-The probe (item 24, plan.md "The thread-state probe") is Windows on Java 22+ only, and even there it
+The probe (item 24, plan.md "The thread-state probe", on branch `probe`) is Windows on Java 22+ only, and even there it
 misses two kinds of thread. What would close each:
 
 - **Linux.** Per thread, `/proc/self/task/<tid>/syscall` says `running` or names the system call the
@@ -1421,7 +1421,7 @@ in [trial-calcite.md](trial-calcite.md#6-the-friction--what-the-trial-says-about
 - The coarse tier's shape: per-instance spans with percentiles, and the cross-tabulation that reads
   *of the 48 ms median plan, 40% is `FilterIntoJoinRule`*.
 
-## 42. On CPU per sample, replacing `Runnable / Wait` with `on CPU / off CPU` · **done on Windows 2026-10-23**, see item 24
+## 42. On CPU per sample, replacing `Runnable / Wait` with `on CPU / off CPU` · **built on Windows 2026-10-23, shelved on branch `probe`**, see item 24
 
 Built as a four-way split rather than two, on Windows, from the cycle counter rather than the CPU
 clock - see item 24. The entry as it was:

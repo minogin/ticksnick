@@ -2,15 +2,6 @@
 
 ## Unreleased
 
-### `CPU / Core / I/O / Wait`, measured per sample, on Windows
-
-On Windows with Java 22 or later, every runnable sample is split by asking the operating system:
-on a CPU, waiting for a core, or blocked in I/O or a native call. The `Runnable / Waiting` column
-becomes `CPU / Core / I/O / Wait`, and the `Careful` line bounding `Runnable` is gone where the split
-is measured. The jar is multi-release, so the library still runs on Java 21, as before. Pass
-`--enable-native-access=ALL-UNNAMED` to the JVM to avoid its warning; `Profiler.start(probe = false)`
-turns it off.
-
 ### The CPU clock, in the report and the diff
 
 The profiler reads the CPU clock once a second - per core, weighted by how busy each core was - and

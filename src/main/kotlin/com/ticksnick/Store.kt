@@ -53,12 +53,6 @@ object ProfileStore {
         line("labelledOutsideCoarse", p.labelledOutsideCoarse)
         line("staleContextHits", p.staleContextHits)
         line("coarseSampleHits", p.coarseSampleHits)
-        // The probe's figures, added after the format was: a file without them loads as unprobed.
-        line("stateProbed", p.stateProbed)
-        text("probeUnavailable", p.probeUnavailable)
-        line("idleCoreHits", p.idleCoreHits)
-        line("idleIoHits", p.idleIoHits)
-        line("unprobedHits", p.unprobedHits)
 
         val d = p.duty
         line("duty.labelledDuty", d.labelledDuty)
@@ -110,8 +104,6 @@ object ProfileStore {
             line(k + "peakInside", o.peakInside)
             line(k + "longestStuckTicks", o.longestStuckTicks)
             sparse(k + "stuckRuns", o.stuckRuns)
-            line(k + "coreHits", o.coreHits)
-            line(k + "ioHits", o.ioHits)
         }
 
         line("coarse", p.coarse.size)
@@ -137,10 +129,6 @@ object ProfileStore {
             line(k + "selfActiveTicks", c.selfActiveTicks)
             line(k + "selfPeak", c.selfPeak)
             line(k + "threads", c.threads)
-            line(k + "selfCoreHits", c.selfCoreHits)
-            line(k + "selfIoHits", c.selfIoHits)
-            line(k + "coreInclusiveHits", c.coreInclusiveHits)
-            line(k + "ioInclusiveHits", c.ioInclusiveHits)
         }
 
         // The tree in pre-order, each node with the index of its parent, -1 for a root.
@@ -166,8 +154,6 @@ object ProfileStore {
             line(k + "runningInclusiveHits", n.runningInclusiveHits)
             sparse(k + "fine", n.fine)
             line(k + "pausedNanos", n.pausedNanos)
-            line(k + "coreInclusiveHits", n.coreInclusiveHits)
-            line(k + "ioInclusiveHits", n.ioInclusiveHits)
             // Only where there are any, so a file from before keys existed reads the same.
             if (n.slowest.isNotEmpty()) {
                 line(k + "slowest", n.slowest.size)
@@ -197,8 +183,6 @@ object ProfileStore {
         fun int(k: String) = str(k).toInt()
         fun dbl(k: String) = str(k).toDouble()
         fun bool(k: String) = str(k).toBoolean()
-        // For a figure added after the format: absent in an older file, and zero is what it would have read.
-        fun longOr0(k: String) = m[k]?.toLong() ?: 0L
         fun text(k: String): String? = unescape(str(k))
         fun sparse(k: String, size: Int): LongArray {
             val a = LongArray(size)
@@ -241,7 +225,6 @@ object ProfileStore {
                 long(k + "stuckWaitingHits"), long(k + "activeTicks"), int(k + "threads"), int(k + "peakInside"),
                 longestStuckTicks = long(k + "longestStuckTicks"),
                 stuckRuns = sparse(k + "stuckRuns", STUCK_BUCKETS),
-                coreHits = longOr0(k + "coreHits"), ioHits = longOr0(k + "ioHits"),
             )
         }
         val coarse = (0 until int("coarse")).map { i ->
@@ -254,8 +237,6 @@ object ProfileStore {
                 staleHits = long(k + "staleHits"), selfHits = long(k + "selfHits"),
                 selfRunningHits = long(k + "selfRunningHits"), selfActiveTicks = long(k + "selfActiveTicks"),
                 selfPeak = int(k + "selfPeak"), threads = int(k + "threads"),
-                selfCoreHits = longOr0(k + "selfCoreHits"), selfIoHits = longOr0(k + "selfIoHits"),
-                coreInclusiveHits = longOr0(k + "coreInclusiveHits"), ioInclusiveHits = longOr0(k + "ioInclusiveHits"),
             )
         }
         // The tree: read every node flat, then build from the leaves up, since a node's children
@@ -272,7 +253,6 @@ object ProfileStore {
                 spanMaxNanos = long(k + "spanMaxNanos"), hist = sparse(k + "hist", SpanHistogram.BUCKETS),
                 inclusiveHits = long(k + "inclusiveHits"), runningInclusiveHits = long(k + "runningInclusiveHits"),
                 fine = sparse(k + "fine", MAX_OPERATIONS + 1), pausedNanos = long(k + "pausedNanos"),
-                coreInclusiveHits = longOr0(k + "coreInclusiveHits"), ioInclusiveHits = longOr0(k + "ioInclusiveHits"),
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
                 slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
                     SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))
@@ -290,9 +270,6 @@ object ProfileStore {
             coarse = coarse, openContextsAtEnd = int("openContextsAtEnd"),
             labelledOutsideCoarse = long("labelledOutsideCoarse"), staleContextHits = long("staleContextHits"),
             coarseSampleHits = long("coarseSampleHits"), pause = pause, coarseTree = tree, clock = clock,
-            stateProbed = m["stateProbed"]?.toBoolean() ?: false,
-            probeUnavailable = if ("probeUnavailable" in m) text("probeUnavailable") else null,
-            idleCoreHits = longOr0("idleCoreHits"), idleIoHits = longOr0("idleIoHits"), unprobedHits = longOr0("unprobedHits"),
         )
     }
 

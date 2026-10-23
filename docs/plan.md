@@ -2307,7 +2307,9 @@ not run one. So the profiler reads the clock itself (`Clock.kt`):
 - **The file: optional `clock.*` keys**, written only when there is a clock, so the format version
   stays at 1 and a file saved before reads as not recorded and says nothing.
 
-## The thread-state probe · 2026-10-23
+## The thread-state probe · 2026-10-23 · shelved on branch `probe`
+
+**Shelved 2026-10-23: built and measured, then put on branch `probe`; master has none of it.** Andrey's call: a big task of its own - Windows only, an undocumented call, Java 22+ through a multi-release jar and a JVM flag, 5-7.5 µs per thread per tick on the sampler and 2.3% off the workers, only 0.2% of which is explained - against easier ways to say the same thing first. On a CPU-bound program with no I/O inside its labels, such as maven-graph, the gap the duty cycle measures between `Runnable` and CPU can only be threads waiting for a core, probe or not. What follows is the design as it is on the branch.
 
 ideas.md 24 and 42. Java's `RUNNABLE` covered three things that want opposite fixes - on a CPU,
 waiting for a core (fewer threads), blocked in I/O or a native call (a label around the call) - and
@@ -2341,9 +2343,9 @@ runnable thread's state apart". Settled with Andrey:
   `on a CPU` in the `parallelism:` line is the probe's figure, and its duty-cycle ceiling is skipped.
 - **The file:** optional keys, so the format stays at 1 and an older file reads as unprobed.
 
-Measured since, 2026-10-23: 4.7-7.5 µs per slot against 0.24-0.30 µs without, 4-6% of the
+Measured on the branch, 2026-10-23: 4.7-7.5 µs per slot against 0.24-0.30 µs without, 4-6% of the
 sampler's tick at eight threads, and perhaps 4% off the workers (findings.md). Not done: making it
-cheaper; Linux, macOS and the threads it misses are ideas.md 48.
+cheaper - probing a few threads per tick, in turn, was the next step; Linux, macOS and the threads it misses are ideas.md 48.
 
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 

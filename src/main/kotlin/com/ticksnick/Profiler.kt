@@ -113,16 +113,6 @@ class OpSlot(
     val thread: java.lang.ref.WeakReference<Thread> =
         java.lang.ref.WeakReference(Thread.currentThread())
 
-    /**
-     * The owning thread's operating-system id, so the sampler can ask where it is when Java says
-     * only RUNNABLE. See [ThreadStates]. 0 when there is no probe, for a virtual thread, and for a
-     * slot made before the first session enabled the probe: the id can only be read on the thread
-     * itself, and reading it means linking native calls that a program which never profiles should
-     * not pay for or be warned about.
-     */
-    @JvmField
-    val osThreadId: Int = ThreadStates.currentThreadId()
-
     @JvmField var p1: Long = 0
     @JvmField var p2: Long = 0
     @JvmField var p3: Long = 0
@@ -946,20 +936,14 @@ object Profiler {
         jitter: Double = 0.25,
         strict: Boolean = true,
         sampleState: Boolean = true,
-        /**
-         * Whether a runnable thread's samples are split further into on a CPU, waiting for a core
-         * and in I/O or a native call. Needs [sampleState], Windows and Java 22+; see [ThreadStates].
-         */
-        probe: Boolean = true,
     ) {
         check(sampler == null) { "already sampling" }
-        if (sampleState && probe) ThreadStates.enable()
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()
         untrackedAtStart = untrackedSlots()
         reclaimedAtStart = reclaimedSlots()
-        sampler = Sampler((stepMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState, probe = probe)
+        sampler = Sampler((stepMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
             .also { it.start() }
         clock = ClockProbe().also { it.start() }
     }
@@ -980,7 +964,6 @@ object Profiler {
                 id, nameOf(id), s.counters[id], s.sessionCalls(id), s.stuckHits[id], s.stuckInstances[id],
                 s.waitingHits[id], s.stuckWaitingHits[id], s.activeTicks[id], s.sessionThreads(id),
                 s.peakInside[id],
-                coreHits = s.coreHits[id], ioHits = s.ioHits[id],
                 longestStuckTicks = s.longestStuckTicks[id],
                 stuckRuns = LongArray(STUCK_BUCKETS) { s.stuckRunHist[id * STUCK_BUCKETS + it] },
             )
@@ -1005,10 +988,6 @@ object Profiler {
                 hits = s.coarseHits[t],
                 selfHits = s.coarseSelfHits[t],
                 selfRunningHits = s.coarseSelfRunningHits[t],
-                selfCoreHits = s.coarseSelfCoreHits[t],
-                selfIoHits = s.coarseSelfIoHits[t],
-                coreInclusiveHits = s.coarseCoreInclusiveHits[t],
-                ioInclusiveHits = s.coarseIoInclusiveHits[t],
                 selfActiveTicks = s.coarseSelfActiveTicks[t],
                 selfPeak = s.coarseSelfPeak[t],
                 threads = coarseThreadsOf(t),
@@ -1031,7 +1010,6 @@ object Profiler {
             count = n.count, spanSumNanos = n.sumNanos,
             spanMinNanos = if (n.count == 0L) 0L else n.minNanos, spanMaxNanos = n.maxNanos,
             hist = n.hist, inclusiveHits = n.inclusiveHits, runningInclusiveHits = n.runningInclusiveHits,
-            coreInclusiveHits = n.coreInclusiveHits, ioInclusiveHits = n.ioInclusiveHits,
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),
@@ -1044,8 +1022,6 @@ object Profiler {
             untrackedSlots = (untrackedSlots() - untrackedAtStart).coerceAtLeast(0),
             reclaimedSlots = (reclaimedSlots() - reclaimedAtStart).coerceAtLeast(0),
             idleWaitingHits = s.idleWaitingHits,
-            stateProbed = s.probed, probeUnavailable = ThreadStates.unavailable(),
-            idleCoreHits = s.idleCoreHits, idleIoHits = s.idleIoHits, unprobedHits = s.unprobedHits,
             coarse = coarse,
             openContextsAtEnd = openContexts(),
             labelledOutsideCoarse = s.labelledOutsideCoarse,

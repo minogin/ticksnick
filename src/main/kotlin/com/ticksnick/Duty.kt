@@ -537,29 +537,15 @@ class DutyReport internal constructor(
      *   condition it found rather than assuming the only cause it used to know about.
      * @param reclaimedSlots threads that exited during the run. The other way to get no window:
      *   the walk reads -1 from a dead thread's CPU clock, so it counts nothing.
-     * @param probed whether the probe split every runnable sample, in which case there is no
-     *   `Runnable` left to bound and only the clock's own anomalies are said.
-     * @param noProbe why there was no probe, said after a line about `Runnable`, since the probe
-     *   is what would have answered it.
      */
-    fun careful(activeNanos: Long, reclaimedSlots: Int, probed: Boolean = false, noProbe: String? = null): List<String> {
+    fun careful(activeNanos: Long, reclaimedSlots: Int): List<String> {
         val out = ArrayList<String>()
-        if (!probed) runnableCareful(activeNanos, reclaimedSlots)?.let {
-            out += if (noProbe == null) it else "$it. Splitting it per sample needs the probe, and there is none here: $noProbe"
-        }
-        if (anomalies > 0) out += "$anomalies thread CPU readings went backwards and were dropped"
-        return out
-    }
-
-    /** The line about `Runnable` against the CPU clock, or null when it has nothing to say. */
-    private fun runnableCareful(activeNanos: Long, reclaimedSlots: Int): String? {
-        var out: String? = null
-        if (reason != null) out = "Runnable is unchecked against the CPU clock: $reason. $UNCHECKED"
+        if (reason != null) out += "Runnable is unchecked against the CPU clock: $reason. $UNCHECKED"
         // Three ways to finish with no window, and the message used to assert the first one
         // whichever had happened. On a 1.7 s run against a 1.000 s window it therefore printed "the
         // run is shorter than the 1.000 s window" four lines under "3,178 taken over 1.7 s" - a
         // report contradicting its own numbers, which is worse than a report that says nothing.
-        else if (!available) out = "Runnable is unchecked against the CPU clock: " + when {
+        else if (!available) out += "Runnable is unchecked against the CPU clock: " + when {
             activeNanos in 1..<windowNanos -> String.format(
                 Locale.ROOT, "the %.1f s run is shorter than the %.3f s check window",
                 activeNanos / 1e9, windowNanos / 1e9
@@ -576,19 +562,20 @@ class DutyReport internal constructor(
         // The bound has not found anything; it has run out of evidence, and that is a different
         // sentence. It also names the fix, which is a label around the waiting rather than only
         // around the work.
-        else if (unbounded) out = String.format(
+        else if (unbounded) out += String.format(
             Locale.ROOT,
             "Runnable is unchecked: %.1f%% of thread-time was off the CPU while reading runnable - a native " +
                     "call, an event loop in a poll, or the scheduler - and operations cover %.1f%% of these " +
                     "threads, so all of it could be inside them. Put a label around the waiting, not only the work",
             invisibleOffCpu * 100, labelledFraction * 100
         )
-        else if (boundPp > CAREFUL_PP) out = String.format(
+        else if (boundPp > CAREFUL_PP) out += String.format(
             Locale.ROOT,
             "Runnable overstates CPU work by up to %s pp of any share: blocking I/O, native calls or a busy machine",
             threeDigits(boundPp)
         ) + (if (shareDuty < OCCUPANCY_ONLY)
             " - read a share as where threads SIT, not where cycles GO, and do not add two up" else "")
+        if (anomalies > 0) out += "$anomalies thread CPU readings went backwards and were dropped"
         return out
     }
 

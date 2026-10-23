@@ -1224,6 +1224,8 @@ and that is the configuration where a cost would show up if there is one.
 
 ### Telling a runnable thread's state apart, per sample, on Windows
 
+*The probe measured here is on branch `probe`, not on master: shelved 2026-10-23, plan.md "The thread-state probe" says why. `ThreadStatesTest`, `gradlew probeTest`, `gradlew probeRun` and `--probe=on` exist only there. The trial programs and logs are in [probe-trial/](probe-trial/).*
+
 **Java's `RUNNABLE` can be split into on a CPU, waiting for a core, and blocked in a system call, at
 every tick, on Windows.** Measured 2026-10-22/23 with the two programs in
 [probe-trial/](probe-trial/), on this laptop (16 logical CPUs), against Windows' own per-thread state

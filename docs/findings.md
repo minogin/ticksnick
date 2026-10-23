@@ -1274,10 +1274,26 @@ resyncs against 0-2. The probe found 0.4-1.1% of samples waiting for a core and 
 on a running thread, against the ~1 µs the probe trial measured; why it is dearer is not checked.
 At this rate 64 threads would take 0.3-0.5 ms of a 1 ms tick.
 
-**The workers, not settled:** `tinyStep` calls per 15 s were 151.8 M, 153.0 M, 151.7 M with the
-probe off and 150.5 M, 141.3 M, 146.6 M with it on, about 4% fewer. Three runs per arm, so this is a
-direction rather than a finding: the cycle read on a running thread may interrupt it, which would
-be a cost on the workers rather than on the sampler.
+**The workers lose 2.3%, and the interruption explains a tenth of it.** Ten runs per arm,
+alternating off/on, the same bench, clock 208-233% of base (10th-90th percentile) throughout,
+`tinyStep` calls per 15 s:
+
+| | runs | mean |
+|---|---|---|
+| probe off | 150.0 - 152.0 M | 151.0 M |
+| probe on | 143.6 - 150.3 M | 147.6 M |
+
+Nine of the ten probe-on runs are below every probe-off run. The walk in the same runs: 211-236 ns
+per slot off, 6.9-7.6 µs on. (The three-run series before it read about 4%.)
+
+**Reading a running thread's cycle counter does interrupt it** (`InterruptCost.java` in
+[probe-trial/](probe-trial/)): a worker spinning while another thread reads its counter at fixed
+rates, rates interleaved over four rounds, loses **0.99, 1.87, 1.02, 0.90 µs of its own time per
+read** at 1k, 10k, 100k and 640k reads a second - 58% of its work at the last. The read costs the
+reader **1.49 µs on a running thread and 0.16 µs on a sleeping one**: the running thread's core is
+asked. The last-system-call query costs 0.13-0.14 µs either way and costs the target nothing
+(0.03 µs per call, noise). At the probe's two reads per running thread per millisecond, that is
+**about 0.2%** of a worker. **The other ~2% is not explained.**
 
 **The limits.** `ThreadLastSystemCall` is not documented. A virtual thread cannot be probed: its
 operating-system thread is its carrier's. On Linux the same split should come from

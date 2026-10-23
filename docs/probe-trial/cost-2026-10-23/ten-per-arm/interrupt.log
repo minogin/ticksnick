@@ -1,0 +1,7 @@
+worker work at rate 0: 31.6 M units/s (rounds: 31.8 31.8 31.6 31.7; beside the query: 30.7 31.7 31.7 31.6)
+  1,000 cycle reads/s: 31.5 M units/s (rounds: 31.6 31.8 31.2 31.6), 0.10% less work, 0.99 us of the worker's time per call
+ 10,000 cycle reads/s: 31.0 M units/s (rounds: 31.6 29.8 31.3 31.3), 1.87% less work, 1.87 us of the worker's time per call
+100,000 cycle reads/s: 28.4 M units/s (rounds: 28.8 27.6 28.4 28.8), 10.16% less work, 1.02 us of the worker's time per call
+642,765 cycle reads/s: 13.4 M units/s (rounds: 12.9 13.7 13.6 13.4), 57.62% less work, 0.90 us of the worker's time per call
+100,000 last-call queries/s: 31.5 M units/s (rounds: 31.1 31.7 31.6 31.6), 0.29% less work, 0.03 us of the worker's time per call
+cost of one call: cycles of a running thread 1491 ns, of a sleeping one 164 ns; last-call query on a running thread 134 ns, on a sleeping one 144 ns

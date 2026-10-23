@@ -1,0 +1,268 @@
+probe: on
+================================================================================================
+PHASE 1 - BENCH + PHASE 2 - SAMPLER
+threads: 8, of them working: 8, run: 15 s
+labels:  on
+sampler: on, step 1.0 ms
+JVM: OpenJDK 64-Bit Server VM 26.0.2.1, cores: 16
+================================================================================================
+
+--- Busy-loop calibration (provisional, before the workload warm-up) ---
+  0.7943 ns/iteration + -0.40 ns/call (R2 = 1.00000)
+
+--- JIT warm-up (8 threads, 4 x 500 ms) ---
+  slice 1:   20,730,409 root calls/s
+  slice 2:   21,319,706 root calls/s
+  slice 3:   21,774,615 root calls/s
+  slice 4:   21,789,804 root calls/s
+  second half +3.60% against the first - settled
+
+--- Busy-loop calibration (final, everything hot) ---
+  0.7864 ns/iteration + 6.06 ns/call (R2 = 0.99978)
+  drift of the iteration cost against the provisional one: -0.98%
+
+--- Fitting the iteration counts (single thread, quiet machine) ---
+  operation      target,ns    iters     achieved     error
+  nodeLookup            20       25       19.71n    -1.46%
+  hashProbe             25       31       25.06n     0.22%
+  edgeScan              45       56       45.40n     0.88%
+  degreeCheck           70       89       70.17n     0.25%
+  markVisited          110      139      109.49n    -0.46%
+  pushFrontier         170      215      169.65n    -0.20%
+  popFrontier          260      329      259.52n    -0.18%
+  filterNode           400      507      399.50n    -0.12%
+  scoreNode            620      787      620.98n     0.16%
+  compact              950     1205      950.59n     0.06%
+  rehash              1400     1772     1396.40n    -0.26%
+  serialize           2000     2535     1996.57n    -0.17%
+  expandNode            35       44       35.00n    -0.00%
+  visitNeighbor         30       38       29.95n    -0.16%
+  frontierStep          80      101       79.65n    -0.44%
+  rankBatch            120      152      119.84n    -0.13%
+  maintain             210      264      209.42n    -0.27%
+  checkpoint           150      190      151.26n     0.84%
+  tinyStep              20       25       19.72n    -1.41%
+  traverse              60       75       59.71n    -0.48%
+  clock at fit time: 0.7883 ns/iteration
+
+--- Run of 15 s ---
+  actual: 15.000 s, root calls: 304,731,392
+
+--- Root calls per thread ---
+  thread  0 working         38,224,384 calls
+  thread  1 working         38,160,640 calls
+  thread  2 working         38,071,808 calls
+  thread  3 working         37,960,192 calls
+  thread  4 working         37,926,400 calls
+  thread  5 working         38,058,496 calls
+  thread  6 working         38,216,960 calls
+  thread  7 working         38,112,512 calls
+
+--- Sampler ---
+  requested step: 1.000 ms
+  achieved step:  1.003 ms  (min 0.491, max 5.749)
+  slot walk:      6898.0 ns per slot (55.2 us per tick over 119,648 visits)
+  probe:          0.6% of samples waiting for a core, 0.0% in a system call, 0.0% not probed
+  ticks: 14,956 over 14.999 s, slots: 8, samples: 119,648, resynced: 3
+  one sample per slot per tick: yes
+  one slot per live worker: yes
+  covered 99.99% of the run
+
+--- CPU duty cycle: how much of the occupancy was CPU ---
+  Time on CPU 98.37% of active time, bound 1.66 pp, 15 windows over 8 threads
+  Careful    Runnable overstates CPU work by up to 1.66 pp of any share: blocking I/O, native calls or a busy machine
+  the workers' own account: 1,093 preemptions over 611.939 ms, worst 3.844 ms, 0.51% of their wall time
+  so the duty cycle should read 99.48%
+  the two independent readings agree - the two differ by 1.13 pp, tolerance 1.50 pp
+  (the workers see only preemptions longer than 0.5 ms, so their figure is a lower bound)
+  and a third view: 0.00% of occupancy sat inside executions that outlived a tick (floor 1 tick, so the lowest of the three)
+
+--- Long executions: is a fine operation actually fine? ---
+  run-wide: 0.00% of labelled occupancy sat inside executions that outlived a tick, of which the machine accounts for up to 0.00%
+  operation        configured implied/call      ratio over 1 tick long runs
+  popFrontier          260 ns       336 ns      1.29x       0.00%        1
+  pushFrontier         170 ns       216 ns      1.27x       0.00%        0
+  scoreNode            620 ns       803 ns      1.30x       0.01%        1
+  filterNode           400 ns       518 ns      1.30x       0.01%        1
+  markVisited          110 ns       141 ns      1.28x       0.01%        1
+  degreeCheck         70.0 ns      89.1 ns      1.27x       0.00%        0
+  frontierStep        80.0 ns       108 ns      1.35x       0.00%        0
+  traverse            60.0 ns      78.2 ns      1.30x       0.00%        0
+  rehash              1.40 us      1.87 us      1.33x       0.00%        0
+  edgeScan            45.0 ns      53.3 ns      1.18x       0.00%        0
+  visitNeighbor       30.0 ns      39.4 ns      1.31x       0.00%        0
+  tinyStep            20.0 ns      22.9 ns      1.15x       0.00%        0
+  expandNode          35.0 ns      48.1 ns      1.38x       0.00%        0
+  compact              950 ns      1.18 us      1.24x       0.00%        0
+  hashProbe           25.0 ns      29.9 ns      1.20x       0.00%        0
+  nodeLookup          20.0 ns      23.1 ns      1.16x       0.00%        0
+  serialize           2.00 us      2.60 us      1.30x       0.00%        0
+  rankBatch            120 ns       162 ns      1.35x       0.00%        0
+  maintain             210 ns       277 ns      1.32x       0.00%        0
+  checkpoint           150 ns       197 ns      1.31x       0.00%        0
+  worst is markVisited at 0.01%, 0.00x the machine floor on 1 long executions
+  nothing is flagged, which is the right answer: this bench has nothing that could block
+  (the floor is one tick: a stall shorter than 1.00 ms cannot be seen at all)
+
+  operation                hits  of total   waiting   elapsed  threads
+  popFrontier            22,430   18.747%     0.0%    12.1 s     1.86
+  pushFrontier           14,422   12.054%     0.0%    9.59 s     1.51
+  scoreNode              10,725    8.964%     0.0%    7.86 s     1.37
+  filterNode              9,994    8.353%     0.0%    7.55 s     1.33
+  markVisited             9,415    7.869%     0.0%    7.19 s     1.31
+  degreeCheck             7,935    6.632%     0.0%    6.31 s     1.26
+  frontierStep            7,209    6.025%     0.0%    5.90 s     1.23
+  traverse                5,221    4.364%     0.0%    4.52 s     1.16
+  rehash                  4,433    3.705%     0.0%    3.89 s     1.14
+  edgeScan                3,556    2.972%     0.0%    3.20 s     1.11
+  visitNeighbor           3,505    2.929%     0.0%    3.17 s     1.11
+  tinyStep                3,400    2.842%     0.0%    3.09 s     1.10
+  expandNode              3,213    2.685%     0.0%    2.94 s     1.10
+  compact                 2,801    2.341%     0.0%    2.58 s     1.09
+  hashProbe               2,665    2.227%     0.0%    2.48 s     1.08
+  nodeLookup              2,573    2.150%     0.0%    2.37 s     1.09
+  serialize               2,318    1.937%     0.0%    2.19 s     1.06
+  rankBatch               2,168    1.812%     0.0%    2.03 s     1.07
+  maintain                  657    0.549%     0.0%    646 ms     1.02
+  checkpoint                117    0.098%     0.0%    117 ms     1.00
+  (no operation)            891    0.745%        -         -        -
+
+  below the floor: tinyStep, nodeLookup, hashProbe, visitNeighbor
+  ! tinyStep: 148,794,531 calls at under 23.7 ns each, below the 50 ns floor.
+    The hook is a visible fraction of it, the sampler reads it 5-9% low, and C2 can move work across adjacent short labels.
+    Label the enclosing loop instead, op(tinyStep, times = n) { }, or drop it if its share has already answered the question.
+  ! nodeLookup: 111,596,028 calls at under 24.1 ns each, below the 50 ns floor.
+    The hook is a visible fraction of it, the sampler reads it 5-9% low, and C2 can move work across adjacent short labels.
+    Label the enclosing loop instead, op(nodeLookup, times = n) { }, or drop it if its share has already answered the question.
+  ! hashProbe: 89,276,867 calls at under 31.1 ns each, below the 50 ns floor.
+    The hook is a visible fraction of it, the sampler reads it 5-9% low, and C2 can move work across adjacent short labels.
+    Label the enclosing loop instead, op(hashProbe, times = n) { }, or drop it if its share has already answered the question.
+  ! visitNeighbor: 89,276,867 calls at under 40.7 ns each, below the 50 ns floor.
+    The hook is a visible fraction of it, the sampler reads it 5-9% low, and C2 can move work across adjacent short labels.
+    Label the enclosing loop instead, op(visitNeighbor, times = n) { }, or drop it if its share has already answered the question.
+  the run finished anyway - this is a warning, not a verdict
+
+================================================================================================
+TRUTH: share of an operation's self time
+A - configuration (configured duration x number of calls)
+B - batch measurement (measured duration x number of calls)
+================================================================================================
+operation               calls    target  measured   share A   share B  diff,pp incl.share
+------------------------------------------------------------------------------------------------
+popFrontier        66,957,618    260.0n    313.8n   18.745%   18.713%   -0.032   18.745%
+pushFrontier       66,957,618    170.0n    207.2n   12.256%   12.358%   +0.101   12.256%
+scoreNode          13,391,514    620.0n    753.6n    8.940%    8.988%   +0.048    8.940%
+filterNode         19,343,285    400.0n    481.3n    8.331%    8.291%   -0.040    8.331%
+markVisited        66,957,618    110.0n    133.5n    7.931%    7.963%   +0.032    7.931%
+degreeCheck        89,276,867     70.0n     86.1n    6.729%    6.843%   +0.114    6.729%
+frontierStep       66,957,618     80.0n     97.0n    5.768%    5.785%   +0.017   51.910%
+traverse           66,957,618     60.0n     69.9n    4.326%    4.169%   -0.157   65.248%
+rehash              2,380,708   1400.0n   1697.6n    3.589%    3.600%   +0.011    3.589%
+edgeScan           66,957,618     45.0n     54.0n    3.244%    3.219%   -0.025    3.244%
+tinyStep          148,794,531     20.0n     23.7n    3.204%    3.142%   -0.063    3.204%
+visitNeighbor      89,276,867     30.0n     36.7n    2.884%    2.921%   +0.037   12.016%
+expandNode         66,957,618     35.0n     42.4n    2.523%    2.526%   +0.003   15.140%
+compact             2,380,708    950.0n   1146.4n    2.435%    2.431%   -0.005    2.435%
+hashProbe          89,276,867     25.0n     29.8n    2.403%    2.373%   -0.030    2.403%
+nodeLookup        111,596,028     20.0n     24.2n    2.403%    2.402%   -0.001    2.403%
+serialize             892,765   2000.0n   2408.4n    1.923%    1.915%   -0.008    1.923%
+rankBatch          13,391,514    120.0n    145.2n    1.730%    1.732%   +0.002   16.438%
+maintain            2,380,708    210.0n    251.9n    0.538%    0.534%   -0.004    6.562%
+checkpoint            595,174    150.0n    181.6n    0.096%    0.096%   +0.000    3.018%
+------------------------------------------------------------------------------------------------
+  hook counters match the graph expansion exactly on all 20 operations
+
+--- How much of the run time the truth accounts for (estimate) ---
+  worker thread time:  120.001 s
+  accounted by truth A: 92.872 s (77.39%)
+  accounted by truth B: 112.281 s (93.57%)
+  root            incl.target   incl.meas.  surcharge
+  nodeLookup            20.0n        25.6n    +27.94%
+  filterNode           400.0n       496.1n    +24.03%
+  serialize           2000.0n      2450.7n    +22.54%
+  visitNeighbor        125.0n       176.0n    +40.78%
+  rankBatch           1140.0n      1416.2n    +24.23%
+  maintain            2560.0n      3150.3n    +23.06%
+  checkpoint          4710.0n      5752.6n    +22.14%
+  tinyStep              20.0n        24.3n    +21.59%
+  traverse             905.0n      1121.0n    +23.87%
+
+================================================================================================
+SAMPLER AGAINST TRUTH - 1.0 ms step, 15 s, 118,757 labelled samples
+================================================================================================
+operation             hits  A config   B batch C sampler    C-A rel       pp    noise
+------------------------------------------------------------------------------------------------
+popFrontier         22,430   18.745%   18.713%   18.887%     +0.76%   +0.142    0.67%
+pushFrontier        14,422   12.256%   12.358%   12.144%     -0.92%   -0.112    0.83%
+scoreNode           10,725    8.940%    8.988%    9.031%     +1.02%   +0.091    0.97%
+filterNode           9,994    8.331%    8.291%    8.416%     +1.01%   +0.084    1.00%
+markVisited          9,415    7.931%    7.963%    7.928%     -0.03%   -0.003    1.03%
+degreeCheck          7,935    6.729%    6.843%    6.682%     -0.70%   -0.047    1.12%
+frontierStep         7,209    5.768%    5.785%    6.070%     +5.25%   +0.303    1.18%
+traverse             5,221    4.326%    4.169%    4.396%     +1.63%   +0.071    1.38%
+rehash               4,433    3.589%    3.600%    3.733%     +4.01%   +0.144    1.50%
+edgeScan             3,556    3.244%    3.219%    2.994%     -7.71%   -0.250    1.68%
+tinyStep             3,400    3.204%    3.142%    2.863%    -10.65%   -0.341    1.71%
+visitNeighbor        3,505    2.884%    2.921%    2.951%     +2.34%   +0.068    1.69%
+expandNode           3,213    2.523%    2.526%    2.706%     +7.22%   +0.182    1.76%
+compact              2,801    2.435%    2.431%    2.359%     -3.15%   -0.077    1.89%
+hashProbe            2,665    2.403%    2.373%    2.244%     -6.62%   -0.159    1.94%
+nodeLookup           2,573    2.403%    2.402%    2.167%     -9.85%   -0.237    1.97%
+serialize            2,318    1.923%    1.915%    1.952%     +1.52%   +0.029    2.08%
+rankBatch            2,168    1.730%    1.732%    1.826%     +5.50%   +0.095    2.15%
+maintain               657    0.538%    0.534%    0.553%     +2.77%   +0.015    3.90%
+checkpoint             117    0.096%    0.096%    0.099%     +2.49%   +0.002    9.25%
+------------------------------------------------------------------------------------------------
+  ranking: the first 10 of 20 positions match; first swap is tinyStep and visitNeighbor, 0.320 pp apart in truth
+  the two truths themselves disagree by up to 0.157 pp, which is the floor on what any
+  comparison here can resolve - a smaller gap than that is not measurable, only lucky
+
+THREADS PER OPERATION DISAGREES WITH THE BENCH'S ROSTER of 8 working threads
+  nodeLookup                 111,596,028 calls, reported on 7 threads
+  hashProbe                   89,276,867 calls, reported on 7 threads
+  edgeScan                    66,957,618 calls, reported on 7 threads
+  degreeCheck                 89,276,867 calls, reported on 7 threads
+  markVisited                 66,957,618 calls, reported on 7 threads
+  pushFrontier                66,957,618 calls, reported on 7 threads
+  popFrontier                 66,957,618 calls, reported on 7 threads
+  filterNode                  19,343,285 calls, reported on 7 threads
+  scoreNode                   13,391,514 calls, reported on 7 threads
+  compact                      2,380,708 calls, reported on 7 threads
+  rehash                       2,380,708 calls, reported on 7 threads
+  serialize                      892,765 calls, reported on 7 threads
+  expandNode                  66,957,618 calls, reported on 7 threads
+  visitNeighbor               89,276,867 calls, reported on 7 threads
+  frontierStep                66,957,618 calls, reported on 7 threads
+  rankBatch                   13,391,514 calls, reported on 7 threads
+  maintain                     2,380,708 calls, reported on 7 threads
+  checkpoint                     595,174 calls, reported on 7 threads
+  tinyStep                   148,794,531 calls, reported on 7 threads
+  traverse                    66,957,618 calls, reported on 7 threads
+
+================================================================================================
+VERDICT
+================================================================================================
+  divergence of shares:     0.157 pp (traverse), tolerance 0.5 pp
+  price of parallelism:     x1.209, allowed 0.85..2.50
+    (how much more an operation costs under 8 threads than on a quiet machine; a factor common to all operations, cancels in the shares)
+  scatter around the shift: 3.66% (traverse), tolerance 6%
+  scatter, five worst:      traverse 3.66%, tinyStep 1.98%, degreeCheck 1.65%, hashProbe 1.30%, visitNeighbor 1.24%
+  warm-up settled:          yes
+  THE TWO TRUTHS AGREE. The bench is sound; the share table above is the reference for phase 3.
+================================================================================================
+
+(sink: 1372968376150359445)
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':probeRun' (registered in build file 'build.gradle.kts').
+> Process 'command 'C:\Users\Andrey\.jdks\openjdk-26.0.2.1\bin\java.exe'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 19s

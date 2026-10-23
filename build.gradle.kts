@@ -68,6 +68,16 @@ tasks.register<JavaExec>("cli") {
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.ticksnick.Cli")
 }
+// The bench on Java 26 with the probe class ahead of the Java 21 one, for `--probe=on`: `run` is on
+// 21 from the classes directories, where there is no probe.
+tasks.register<JavaExec>("probeRun") {
+    group = "application"
+    description = "the bench on Java 26 with the thread-state probe available: --args=\"--probe=on ...\""
+    classpath = java22.output + sourceSets["main"].runtimeClasspath
+    mainClass.set("com.ticksnick.bench.MainKt")
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(26) }
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
 application {
     mainClass.set("com.ticksnick.bench.MainKt")
 }

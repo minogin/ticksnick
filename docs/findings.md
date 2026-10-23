@@ -1256,8 +1256,28 @@ also tried: **0.2-1 µs**, and it misses `select()`.
 **Through the sampler, 2026-10-23** (`ThreadStatesTest`, `gradlew probeTest`, Java 26, 500 ms, 501
 samples per label): a spinning thread **99% CPU / 1% core / 0% I/O / 0% wait**, a blocking socket read
 **0 / 0 / 100 / 0**, a parked thread **0 / 0 / 0 / 100**. Twice as many spinning threads as cores
-waited for a core over 30% of the time, as the test asserts. The cost inside the sampler's walk has
-not been measured yet.
+waited for a core over 30% of the time, as the test asserts.
+
+**What it costs in the sampler: 20-30x the walk, 4-6% of the sampler's tick at eight threads.**
+Measured 2026-10-23 (logs and clock trace in [probe-trial/cost-2026-10-23/](probe-trial/cost-2026-10-23/)), `gradlew probeRun --args="--probe=off|on --seconds=15"`, both arms on the same
+Java 26 bench, alternated off/on three times, 8 worker threads, clock 200-231% of base and steady
+throughout:
+
+| | per slot | per tick, 8 slots |
+|---|---|---|
+| probe off | 241.5, 240.5, 301.2 ns | 1.9-2.4 µs |
+| probe on | 4,684, 7,350, 7,514 ns | 37.5-60.1 µs |
+
+The ranges are an order of magnitude apart. The achieved step stays at 1.003-1.004 ms with 2-7
+resyncs against 0-2. The probe found 0.4-1.1% of samples waiting for a core and none unprobed.
+**The price is the cross-thread cycle read**: two per running thread, so about 2-3.5 µs each here
+on a running thread, against the ~1 µs the probe trial measured; why it is dearer is not checked.
+At this rate 64 threads would take 0.3-0.5 ms of a 1 ms tick.
+
+**The workers, not settled:** `tinyStep` calls per 15 s were 151.8 M, 153.0 M, 151.7 M with the
+probe off and 150.5 M, 141.3 M, 146.6 M with it on, about 4% fewer. Three runs per arm, so this is a
+direction rather than a finding: the cycle read on a running thread may interrupt it, which would
+be a cost on the workers rather than on the sampler.
 
 **The limits.** `ThreadLastSystemCall` is not documented. A virtual thread cannot be probed: its
 operating-system thread is its carrier's. On Linux the same split should come from

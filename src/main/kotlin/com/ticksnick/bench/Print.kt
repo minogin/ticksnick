@@ -177,6 +177,18 @@ private fun printSampler(
             sampler.walkVisits
         )
     )
+    // What the probe found, so a run that priced it also shows it was asking.
+    if (sampler.probed) {
+        val all = sampler.totalSamples().toDouble()
+        val core = sampler.coreHits.sum() + sampler.idleCoreHits
+        val io = sampler.ioHits.sum() + sampler.idleIoHits
+        println(
+            String.format(
+                Locale.ROOT, "  probe:          %.1f%% of samples waiting for a core, %.1f%% in a system call, %.1f%% not probed",
+                core * 100 / all, io * 100 / all, sampler.unprobedHits * 100 / all
+            )
+        )
+    }
     println(
         String.format(
             Locale.ROOT, "  ticks: %,d over %.3f s, slots: %d, samples: %,d, resynced: %,d",

@@ -145,6 +145,13 @@ fun main(args: Array<String>) {
     // --labels and --sampler are: a cost that is always on can only be priced by argument.
     val sampleState = opt["state"] != "off"
 
+    // --probe=on asks the OS where each runnable thread is, as Profiler.start does by default. Off
+    // by default here, so the bench's numbers stay comparable with the ones before the probe. Needs
+    // a 22+ JVM with the probe class: `gradlew probeRun`. Enabled before the workers start, so
+    // their slots record their thread's id.
+    val probe = opt["probe"] == "on"
+    if (probe) println(enableProbe()?.let { "probe: unavailable, $it" } ?: "probe: on")
+
     // --lock=<hold micros>,<interval millis>. The one operation here that genuinely blocks, and
     // the only way anything in phase 3.5 can be checked against a known amount of waiting.
     val contended = opt["lock"]?.split(",")?.let { p ->
@@ -375,7 +382,7 @@ fun main(args: Array<String>) {
         println("\n--- Run of $seconds s ---")
         // The sampler covers the measured run only, never the warm-up.
         val sampler = if (sampling)
-            Sampler((stepMillis * 1_000_000).toLong(), sampleState = sampleState)
+            Sampler((stepMillis * 1_000_000).toLong(), sampleState = sampleState, probe = probe)
         else null
         val outcome = measureOnce(bench, seconds, sampler)
         printDetail(bench, outcome, sampler, stepMillis)

@@ -55,6 +55,15 @@ private const val WAITING: Byte = 4
 /** Read once, to be read again a microsecond later. */
 private const val PENDING: Byte = 5
 
+/**
+ * Enables the probe, as `Profiler.start` does, for a caller outside the package - the bench, which
+ * builds its own [Sampler]. Null when it is on, or why it is not.
+ */
+internal fun enableProbe(): String? {
+    ThreadStates.enable()
+    return if (ThreadStates.enabled()) null else ThreadStates.unavailable()
+}
+
 internal class Sampler(
     private val stepNanos: Long,
     private val wait: WaitStrategy = WaitStrategy.SPIN,

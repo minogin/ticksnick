@@ -2341,8 +2341,9 @@ runnable thread's state apart". Settled with Andrey:
   `on a CPU` in the `parallelism:` line is the probe's figure, and its duty-cycle ceiling is skipped.
 - **The file:** optional keys, so the format stays at 1 and an older file reads as unprobed.
 
-Not done: the cost inside the sampler's walk is not measured; Linux, macOS and the threads it misses
-are ideas.md 48.
+Measured since, 2026-10-23: 4.7-7.5 µs per slot against 0.24-0.30 µs without, 4-6% of the
+sampler's tick at eight threads, and perhaps 4% off the workers (findings.md). Not done: making it
+cheaper; Linux, macOS and the threads it misses are ideas.md 48.
 
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 

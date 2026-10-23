@@ -39,6 +39,14 @@ gradlew :sandbox:run
 With the colon. An unqualified `gradlew run` matches the `run` task in every module and launches the
 bench and all four trials as well.
 
+```
+gradlew :sandbox:branching
+```
+
+`Branching.kt`: a small parallel program to read reports on. Each request, on the main thread, forks
+branches onto a pool and waits; each branch prepares, then works through leaves. Its knobs - pool
+size, requests, branches, leaves, work - are the constants at the top of the file. About 3 s.
+
 ## The friction log
 
 Observations from using it, newest first. Raw and unfiltered on purpose: an observation is not yet a
@@ -46,6 +54,15 @@ task, and forcing it into one too early is how the interesting half gets lost. W
 something to do, it graduates into [ideas.md](ideas.md) and is marked here as having done so.
 
 ---
+
+### The Careful line blames threads and I/O for a join it can see · 2026-10-23
+
+Claude, on the first `:sandbox:branching` run: *"Thread-time% may be off by up to 21.6 pp ... Likely
+causes: too many threads for the cores (use fewer), or blocking I/O or native calls"* - on a pool of
+four on sixteen cores, with no I/O. The waiting is the main thread parked in `Future.get()` inside
+`request`, which the table already shows: `request` 97.9% waiting. The bound counts parked time
+inside a label as possibly-not-CPU, which is right, but the causes it names are only the ones Java
+cannot see. Not fixed: the line should name the visible waiting first when that is most of it.
 
 ### A warning about threads nobody had asked to release · 2026-10-23
 

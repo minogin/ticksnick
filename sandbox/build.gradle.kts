@@ -25,3 +25,12 @@ kotlin {
 application {
     mainClass.set("com.ticksnick.sandbox.SandboxKt")
 }
+
+// A small branching program to read parallel reports on: requests forking branches onto a pool,
+// branches working through leaves. Its knobs are the constants at the top of Branching.kt.
+tasks.register<JavaExec>("branching") {
+    group = "application"
+    description = "a request that forks branches onto a pool: gradlew :sandbox:branching"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("com.ticksnick.sandbox.BranchingKt")
+}

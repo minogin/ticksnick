@@ -39,6 +39,22 @@ enum class WaitStrategy {
  */
 const val STUCK_BUCKETS = 24
 
+/**
+ * How long the probe watches a thread's cycle counter for it to move. Measured in the probe trial: at
+ * 1 µs a busy thread read running 98-99% of the time and a sleeping one 0.3-0.5%.
+ */
+private const val PROBE_GAP_NANOS = 1_000L
+
+// What one sample found a thread doing. RUNNABLE is Java's word alone, for a thread the probe could
+// not ask about; the three before it split that word when it could.
+private const val CPU: Byte = 0
+private const val CORE: Byte = 1
+private const val IO: Byte = 2
+private const val RUNNABLE: Byte = 3
+private const val WAITING: Byte = 4
+/** Read once, to be read again a microsecond later. */
+private const val PENDING: Byte = 5
+
 internal class Sampler(
     private val stepNanos: Long,
     private val wait: WaitStrategy = WaitStrategy.SPIN,
@@ -64,7 +80,20 @@ internal class Sampler(
      * can only be priced by argument.
      */
     val sampleState: Boolean = true,
+    /** Whether runnable samples are split by asking the operating system. See [probed]. */
+    probe: Boolean = true,
 ) : Thread("sampler") {
+
+    /**
+     * Whether this session splits a runnable sample into on a CPU, waiting for a core, and in I/O
+     * or a native call, by asking the operating system - see [ThreadStates]. Only where the probe
+     * exists, Windows on Java 22+, and only after [Profiler.start] has enabled it.
+     *
+     * Java's RUNNABLE was the one word for all three, and they want opposite fixes: fewer threads
+     * for the second, a label around the call for the third. Without it the report can only bound
+     * how wrong RUNNABLE is, on the Careful line.
+     */
+    val probed: Boolean = sampleState && probe && ThreadStates.enabled()
 
     /**
      * Why the session stopped early, or null if it did not. Set the moment the leak is noticed, on
@@ -123,6 +152,14 @@ internal class Sampler(
     internal val waitingHits = LongArray(MAX_OPERATIONS)
 
     /**
+     * Of the hits whose thread was runnable, the ones the probe found waiting for a core, and the
+     * ones it found blocked in a system call. The rest of the runnable hits were on a CPU, or were
+     * on a thread the probe could not ask about - see [unprobedHits]. Zero unless [probed].
+     */
+    internal val coreHits = LongArray(MAX_OPERATIONS)
+    internal val ioHits = LongArray(MAX_OPERATIONS)
+
+    /**
      * Hits that were both stuck and waiting — a long execution caught with its thread parked.
      *
      * The pairing is the point. An operation that waits *somewhere* is not the same as one whose
@@ -157,6 +194,17 @@ internal class Sampler(
      * with nothing in common.
      */
     var idleWaitingHits: Long = 0; private set
+
+    /** As [coreHits] and [ioHits], for samples inside no label. */
+    var idleCoreHits: Long = 0; private set
+    var idleIoHits: Long = 0; private set
+
+    /**
+     * Runnable samples the probe could not ask about, while probing: a virtual thread, whose
+     * carrier is not its own, or a thread whose slot was made before the probe was enabled. They
+     * count as on a CPU, which is what RUNNABLE meant before the probe, and the report says how many.
+     */
+    var unprobedHits: Long = 0; private set
 
     /**
      * Ticks at which at least one thread was inside the operation — its wall-clock footprint,
@@ -212,6 +260,10 @@ internal class Sampler(
     /** Of [coarseSelfHits], the ones whose thread was runnable. */
     internal val coarseSelfRunningHits = LongArray(MAX_COARSE_TYPES)
 
+    /** Of [coarseSelfRunningHits], waiting for a core and in a system call. See [coreHits]. */
+    internal val coarseSelfCoreHits = LongArray(MAX_COARSE_TYPES)
+    internal val coarseSelfIoHits = LongArray(MAX_COARSE_TYPES)
+
     /** Ticks at which at least one thread was doing this type's own work. */
     internal val coarseSelfActiveTicks = LongArray(MAX_COARSE_TYPES)
 
@@ -236,6 +288,10 @@ internal class Sampler(
 
     /** Of [coarseInclusiveHits], the ones whose thread was runnable. `span - this` is the waiting. */
     internal val coarseRunningInclusiveHits = LongArray(MAX_COARSE_TYPES)
+
+    /** Of [coarseRunningInclusiveHits], waiting for a core and in a system call. See [coreHits]. */
+    internal val coarseCoreInclusiveHits = LongArray(MAX_COARSE_TYPES)
+    internal val coarseIoInclusiveHits = LongArray(MAX_COARSE_TYPES)
 
     /**
      * Distinct executions of this type occupied at each tick, summed over ticks.
@@ -392,6 +448,79 @@ internal class Sampler(
      */
     private val prevThreadId = LongArray(MAX_SLOTS) { -1L }
 
+    /**
+     * The probe's side of each slot: a native handle to its thread and the Java thread it was opened
+     * for, so a recycled index gets a handle of its own. Opened here, on first sight, rather than by
+     * the thread itself, so that a program which never profiles never opens one; closed when the
+     * session ends.
+     */
+    private val handles = LongArray(MAX_SLOTS)
+    private val handleThread = LongArray(MAX_SLOTS) { -1L }
+
+    /** What [probe] found at each index this tick, for the slot it found there. */
+    private val stateAt = ByteArray(MAX_SLOTS)
+    private val probedSlot = arrayOfNulls<OpSlot>(MAX_SLOTS)
+    private val cyclesAt = LongArray(MAX_SLOTS)
+
+    /** The handle for slot [s] at index [i], opened on first sight; 0 when it cannot be had. */
+    private fun handleOf(s: OpSlot, i: Int): Long {
+        if (handleThread[i] == s.threadId) return handles[i]
+        ThreadStates.close(handles[i])
+        handleThread[i] = s.threadId
+        handles[i] = ThreadStates.open(s.osThreadId)
+        return handles[i]
+    }
+
+    /**
+     * Where every slot's thread is this tick, into [stateAt]: parked or blocked by Java's own word,
+     * and a runnable one split by the probe.
+     *
+     * Two passes, so the microsecond the cycle counter is watched for is spent once per tick and not
+     * once per thread: every runnable thread's counter is read, then read again, in the same order,
+     * so each gets at least [PROBE_GAP_NANOS] between its two reads. A counter that moved was on a
+     * CPU; one that did not is in a system call if the kernel says so, and waiting for a core if not.
+     * Parked threads are not asked: Java already knows, and it costs nothing.
+     */
+    private fun probe(ceiling: Int) {
+        var pending = 0
+        var firstRead = 0L
+        for (i in 0 until ceiling) {
+            val s = Profiler.slotAt(i)
+            probedSlot[i] = s
+            if (s == null) continue
+            val t = s.thread.get()
+            if (t == null) {
+                stateAt[i] = RUNNABLE
+                continue
+            }
+            if (t.state != State.RUNNABLE) {
+                stateAt[i] = WAITING
+                continue
+            }
+            val h = handleOf(s, i)
+            val c = if (h == 0L) -1L else ThreadStates.cycles(h)
+            if (c < 0) {
+                stateAt[i] = RUNNABLE
+                continue
+            }
+            if (pending++ == 0) firstRead = System.nanoTime()
+            cyclesAt[i] = c
+            stateAt[i] = PENDING
+        }
+        if (pending == 0) return
+        while (System.nanoTime() - firstRead < PROBE_GAP_NANOS) onSpinWait()
+        for (i in 0 until ceiling) {
+            if (stateAt[i] != PENDING || probedSlot[i] == null) continue
+            val c = ThreadStates.cycles(handles[i])
+            stateAt[i] = when {
+                c < 0 -> RUNNABLE
+                c != cyclesAt[i] -> CPU
+                ThreadStates.inSystemCall(handles[i]) -> IO
+                else -> CORE
+            }
+        }
+    }
+
     var ticks: Long = 0; private set
     var lagged: Long = 0; private set
     var minStep: Long = Long.MAX_VALUE; private set
@@ -479,6 +608,7 @@ internal class Sampler(
             // A plain indexed loop and not forEachSlot: this body is large, and inlining it into an
             // already-large run() costs more than the lambda saves - measured at 2.7x the walk.
             val ceiling = Profiler.slotCeiling()
+            if (probed) probe(ceiling)
             for (i in 0 until ceiling) {
                 val s = Profiler.slotAt(i) ?: continue
                 live++
@@ -493,11 +623,20 @@ internal class Sampler(
                 // "waiting or working" is exactly as worth knowing there. A field read on the Thread
                 // object: no handshake, no safepoint. The weak reference is null only if the thread
                 // died and the slot outlived it, in which case there is nothing to ask.
-                var waiting = false
-                if (sampleState) {
+                //
+                // With the probe, the state was taken a moment ago by [probe], for this slot - a
+                // slot that arrived at this index since is read the old way.
+                var state = RUNNABLE
+                if (probed && probedSlot[i] === s) {
+                    state = stateAt[i]
+                } else if (sampleState) {
                     val t = s.thread.get()
-                    if (t != null && t.state != State.RUNNABLE) waiting = true
+                    if (t != null && t.state != State.RUNNABLE) state = WAITING
                 }
+                val waiting = state == WAITING
+                val core = state == CORE
+                val io = state == IO
+                if (probed && state == RUNNABLE) unprobedHits++
                 if (c >= 0) {
                     // Once per operation per tick, not once per slot: this counts the operation's
                     // wall-clock footprint, which is the same whether one thread was inside it or
@@ -513,8 +652,12 @@ internal class Sampler(
                     // reading every slot. The application's hook is untouched.
                     if (insideThisTick[c] > peakInside[c]) peakInside[c] = insideThisTick[c]
                     if (waiting) waitingHits[c]++
-                } else if (waiting) {
-                    idleWaitingHits++
+                    if (core) coreHits[c]++
+                    if (io) ioHits[c]++
+                } else {
+                    if (waiting) idleWaitingHits++
+                    if (core) idleCoreHits++
+                    if (io) idleIoHits++
                 }
 
                 // The coarse half of the same photograph. One reference read, and it costs nothing
@@ -553,6 +696,8 @@ internal class Sampler(
                         if (c < 0) {
                             coarseSelfHits[t]++
                             if (!waiting) coarseSelfRunningHits[t]++
+                            if (core) coarseSelfCoreHits[t]++
+                            if (io) coarseSelfIoHits[t]++
                             if (coarseSelfSeenAt[t] != ticks) {
                                 coarseSelfSeenAt[t] = ticks
                                 coarseSelfActiveTicks[t]++
@@ -583,6 +728,8 @@ internal class Sampler(
                         if (node != null && !(p.isClosed() && (if (stillMounted < 0) s.contextOpaque() === ctx else stillMounted == 1))) {
                             node.inclusiveHits++
                             if (!waiting) node.runningInclusiveHits++
+                            if (core) node.coreInclusiveHits++
+                            if (io) node.ioInclusiveHits++
                             val f = node.fine ?: LongArray(MAX_OPERATIONS + 1).also { node.fine = it }
                             f[fine]++
                             if (lateNanos > 0 && node.pauseStamp != ticks) {
@@ -613,6 +760,8 @@ internal class Sampler(
                             } else {
                             coarseInclusiveHits[pt]++
                             if (!waiting) coarseRunningInclusiveHits[pt]++
+                            if (core) coarseCoreInclusiveHits[pt]++
+                            if (io) coarseIoInclusiveHits[pt]++
                             // The pair, and the whole reason both halves are read in one visit.
                             pairHits[pt * (MAX_OPERATIONS + 1) + fine]++
                             if (coarseSeenAt[pt] != ticks) {
@@ -726,6 +875,8 @@ internal class Sampler(
         // Settled here whether or not the duty cycle takes a last window, so that the confirmed
         // total covers the whole session even where there is no CPU clock to correct.
         duty.finish(System.nanoTime(), pause.settle(GcPauseClock.pauseNanos()))
+        for (i in handles.indices) ThreadStates.close(handles[i])
+        handles.fill(0L)
     }
 
     /**

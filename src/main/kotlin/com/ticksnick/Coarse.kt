@@ -233,6 +233,9 @@ internal class CoarsePath(
     // The sampled half: written by the sampling thread.
     @JvmField var inclusiveHits: Long = 0
     @JvmField var runningInclusiveHits: Long = 0
+    /** Of the running ones, those the probe found waiting for a core, and in I/O or a native call. See `ThreadStates`. */
+    @JvmField var coreInclusiveHits: Long = 0
+    @JvmField var ioInclusiveHits: Long = 0
     /** Inclusive hits by the fine operation they caught, last entry no fine label. Allocated on the first hit. */
     @JvmField var fine: LongArray? = null
     /**
@@ -306,6 +309,8 @@ internal class CoarsePath(
         for (i in hist.indices) hist[i] += o.hist[i]
         inclusiveHits += o.inclusiveHits
         runningInclusiveHits += o.runningInclusiveHits
+        coreInclusiveHits += o.coreInclusiveHits
+        ioInclusiveHits += o.ioInclusiveHits
         pausedNanos += o.pausedNanos
         val of = o.fine
         if (of != null) {
@@ -326,6 +331,8 @@ internal class CoarsePath(
         hist.fill(0L)
         inclusiveHits = 0
         runningInclusiveHits = 0
+        coreInclusiveHits = 0
+        ioInclusiveHits = 0
         fine?.fill(0L)
         pausedNanos = 0
         pauseStamp = -1

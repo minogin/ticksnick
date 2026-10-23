@@ -37,6 +37,17 @@ kotlin {
     jvmToolchain(21)
 }
 
+// The one exception to the above: `ThreadStates`, which asks the operating system where a runnable
+// thread is, needs the foreign function API, final only from Java 22. The jar is multi-release:
+// the Java 21 class in src/main/java answers "no probe here", and on a 22+ JVM the one compiled
+// from src/main/java22 into META-INF/versions/22 replaces it. The library still runs on 21. See
+// plan.md, "The thread-state probe".
+val java22 = sourceSets.create("java22") { java.srcDir("src/main/java22") }
+tasks.named<JavaCompile>(java22.compileJavaTaskName) {
+    javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(26) }
+    options.release = 22
+}
+
 // The bench lives in this module so that `internal` reaches the sampler's counters, which is what
 // lets the library keep them out of its public API. That is right for the source tree and wrong for
 // the artifact: nobody depending on this wants Bench, Workload and StackCost on their classpath.
@@ -46,7 +57,8 @@ tasks.named<Jar>("jar") {
     // The saved-profile commands, see Cli.kt. The jar needs the Kotlin stdlib beside it, so the
     // plain form is `java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli diff a b`; the
     // task below is the same with the classpath found for you.
-    manifest { attributes("Main-Class" to "com.ticksnick.Cli") }
+    manifest { attributes("Main-Class" to "com.ticksnick.Cli", "Multi-Release" to "true") }
+    into("META-INF/versions/22") { from(java22.output) }
 }
 
 // `./gradlew :cli --args="diff before.tsp after.tsp"` and `--args="render profile.tsp"`.
@@ -62,6 +74,19 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// The probe's own test, on a 22+ JVM with the Java 22 class ahead of the Java 21 one: `test` runs
+// from the classes directories on 21, where the probe is always absent.
+tasks.register<Test>("probeTest") {
+    group = "verification"
+    description = "the thread-state probe on Java 26, Windows only"
+    useJUnitPlatform()
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = java22.output + sourceSets["test"].runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(26) }
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    filter { includeTestsMatching("com.ticksnick.ThreadStatesTest") }
 }
 
 // The library takes no dependencies at all, and the published POM has to keep saying so. The bench

@@ -2307,6 +2307,43 @@ not run one. So the profiler reads the clock itself (`Clock.kt`):
 - **The file: optional `clock.*` keys**, written only when there is a clock, so the format version
   stays at 1 and a file saved before reads as not recorded and says nothing.
 
+## The thread-state probe · 2026-10-23
+
+ideas.md 24 and 42. Java's `RUNNABLE` covered three things that want opposite fixes - on a CPU,
+waiting for a core (fewer threads), blocked in I/O or a native call (a label around the call) - and
+the report could only bound the gap, on a `Careful` line: a maven-graph run printed *"overstates CPU
+work by up to 29.8 pp"*. The probe asks Windows at every sample. Measured in findings.md, "Telling a
+runnable thread's state apart". Settled with Andrey:
+
+- **A multi-release jar, not a Java 22 floor and not JNA.** The foreign function API is final only
+  from 22 and the library stays on 21. One class, `ThreadStates`, exists twice: the Java 21 one in
+  `src/main/java` answers "no probe", the Java 22 one in `src/main/java22` is compiled by a JDK 26
+  with `--release 22` into `META-INF/versions/22`. Same package-private methods in both. JNA was a
+  2 MB dependency for a library that takes none. The probe's own test runs as `gradlew probeTest`, on
+  26: `test` runs from the classes directories, where the jar's versioning does not apply.
+- **Nothing native until a session asks.** `Profiler.start()` enables the probe (`probe = true`, the
+  default, and only with `sampleState`); before that no slot reads its thread's id, so a program that
+  never profiles links nothing and gets no native-access warning. The id is read on the thread itself
+  when its slot is made; the handle is opened by the sampler on first sight and closed when the
+  session ends, so a program that profiles holds no handle between sessions.
+- **Two passes per tick.** Every runnable thread's cycle counter is read, then read again in the same
+  order, so the microsecond each needs is spent once per tick, not once per thread. A parked thread
+  is not asked: Java already knows.
+- **Counted beside the old counters, not instead of them.** `waiting` keeps its meaning (Java not
+  RUNNABLE); `core` and `io` are subsets of the runnable hits, and `CPU` is what is left. A runnable
+  sample the probe could not ask about - a virtual thread, a slot made before the probe was enabled -
+  stays in `CPU`, which is what RUNNABLE meant before, and a `Careful` line says how much when it is
+  over 1%.
+- **The column: `CPU / Core / I/O / Wait`**, whole percents adding to 100, in both tables, replacing
+  `Runnable / Waiting` when the session was probed and only then. Whole percents because four parts
+  at three digits do not fit one column. The `Careful` line about `Runnable` is not printed for a
+  probed session - there is no `Runnable` left to bound - and where there is no probe it says why.
+  `on a CPU` in the `parallelism:` line is the probe's figure, and its duty-cycle ceiling is skipped.
+- **The file:** optional keys, so the format stays at 1 and an older file reads as unprobed.
+
+Not done: the cost inside the sampler's walk is not measured; Linux, macOS and the threads it misses
+are ideas.md 48.
+
 ## The coarse table is the tree, keyed by the whole path · 2026-10-13
 
 Three questions from Andrey on the tree above, in order. *The tree repeats the executions and

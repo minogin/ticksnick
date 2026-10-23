@@ -315,6 +315,36 @@ nothing does.
 That is also why the column says `runnable` and not `run`: the `-able` is the distinction. Runnable
 means *not blocked*, not *executing*.
 
+### `CPU / Core / I/O / Wait`: the split measured, where there is a probe
+
+On Windows with Java 22 or later, `Runnable / Waiting` is replaced, in both tables, by four parts of
+the thread-time that add to 100, in whole percents. Each sample asks the operating system where the
+thread was:
+
+| part | what it is | what to do about it |
+|---|---|---|
+| **CPU** | the thread's cycle counter moved: it was executing | the work itself - a better algorithm, less of it |
+| **Core** | runnable, not executing, not in a system call: ready and waiting for a core | the machine is overloaded - fewer threads, or less else running |
+| **I/O** | blocked inside a system call: I/O, or a native call that waits | the wait is outside the JVM - put a label around the call, so it is a row of its own |
+| **Wait** | parked, blocked or waiting by Java's state | waiting another thread caused - a lock, a queue, a join |
+
+```
+Operation                  | Thread-time% v Thread-time  CPU / Core /  I/O / Wait         Calls ...
+probe.busy                 |          33.3%      502 ms  99% /   1% /   0% /   0%             1 ...
+probe.read                 |          33.3%      502 ms   0% /   0% / 100% /   0%             1 ...
+probe.park                 |          33.3%      502 ms   0% /   0% /   0% / 100%             1 ...
+```
+
+With the probe the `Careful` line about `Runnable` is not printed - nothing is left to bound - and
+`on a CPU` in the `parallelism:` line is measured. Without it the column is `Runnable / Waiting` and
+the `Careful` line says why there was no probe. One `Careful` line is the probe's own:
+
+| line | what happened | what to do |
+|---|---|---|
+| *N of thread-time was runnable on threads the probe could not ask - virtual threads, or threads that labelled before the first Profiler.start() - and is counted as CPU* | over 1% of the samples were on threads whose operating-system id is unknown | start the profiler before the pool is made; a virtual thread cannot be probed |
+
+The JVM needs `--enable-native-access=ALL-UNNAMED`, or it prints a warning when the probe is enabled.
+
 ### `concurrency` is not parallelism, and not a property of your code
 
 `thread-time ÷ wall-time` is how many threads were inside an operation at the same time — `183 s`

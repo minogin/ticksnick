@@ -290,6 +290,10 @@ class OperationStat internal constructor(
     val longestStuckTicks: Long = 0,
     /** Long executions by length in ticks, [STUCK_BUCKETS] log-2 buckets. See [Sampler.stuckRunHist]. */
     internal val stuckRuns: LongArray = LongArray(STUCK_BUCKETS),
+    /** Runnable hits the probe found waiting for a core. Zero unless [Profile.stateProbed]. See [Sampler.coreHits]. */
+    val coreHits: Long = 0,
+    /** Runnable hits the probe found blocked in a system call: I/O, or a native call that waits. */
+    val ioHits: Long = 0,
 ) {
     /** The fraction of this operation's occupancy spent inside executions longer than a tick. */
     val stuckShare: Double get() = if (hits == 0L) 0.0 else stuckHits.toDouble() / hits
@@ -372,6 +376,9 @@ class CoarseNode internal constructor(
     val children: List<CoarseNode>,
     /** For an operation opened with a key: its slowest executions on this path, longest first. Measured. */
     val slowest: List<SlowExecution> = emptyList(),
+    /** Of [runningInclusiveHits], waiting for a core and in a system call. See [OperationStat.coreHits]. */
+    val coreInclusiveHits: Long = 0,
+    val ioInclusiveHits: Long = 0,
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -438,6 +445,11 @@ class CoarseStat internal constructor(
     val selfPeak: Int = 0,
     /** Distinct threads that ran an execution of this operation. See [Profiler.coarseThreadsOf]. */
     val threads: Int = 0,
+    /** Of [selfRunningHits] and of [runningInclusiveHits], waiting for a core and in a system call. See [OperationStat.coreHits]. */
+    val selfCoreHits: Long = 0,
+    val selfIoHits: Long = 0,
+    val coreInclusiveHits: Long = 0,
+    val ioInclusiveHits: Long = 0,
 ) {
     /** Mean measured duration of one execution. Exact, not sampled. */
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
@@ -596,6 +608,18 @@ class Profile internal constructor(
     val coarseTree: List<CoarseNode> = emptyList(),
     /** The CPU clock over the session; [ClockReport.NOT_RECORDED] for a profile saved before it was. */
     val clock: ClockReport = ClockReport.NOT_RECORDED,
+    /**
+     * Whether runnable samples were split into on a CPU, waiting for a core, and in I/O or a native
+     * call. See [Sampler.probed]. Without it the split column is Java's `Runnable / Waiting`.
+     */
+    val stateProbed: Boolean = false,
+    /** Why there was no probe, when there was not, for the Careful line that needed one. */
+    val probeUnavailable: String? = null,
+    /** Of [idleHits], waiting for a core and in a system call. See [OperationStat.coreHits]. */
+    val idleCoreHits: Long = 0,
+    val idleIoHits: Long = 0,
+    /** Runnable samples the probe could not ask about, counted as on a CPU. See [Sampler.unprobedHits]. */
+    val unprobedHits: Long = 0,
 ) {
     /** False when a fatal finding stopped the session. See the severity ladder in plan.md. */
     val ok: Boolean get() = failure == null
@@ -755,6 +779,54 @@ class Profile internal constructor(
      */
     fun runnableSplit(waiting: Double): String =
         percent((1 - waiting) * 100) + " / " + percent(waiting * 100)
+
+    /**
+     * The four parts of a row's thread-time when the probe ran, as ` 72% /   3% /   1% /  24%`: on a
+     * CPU, waiting for a core, in I/O or a native call, and parked or blocked.
+     *
+     * Whole percents, rounded so that the four add to 100 as the two halves of [runnableSplit] do. The
+     * column says where the time went, which two digits answer, and four shares at three significant
+     * digits would not fit one column.
+     */
+    fun stateSplit(hits: Long, running: Long, core: Long, io: Long): String {
+        if (hits <= 0L) return "-"
+        val parts = longArrayOf((running - core - io).coerceAtLeast(0), core, io, hits - running)
+        val whole = IntArray(4) { (parts[it] * 100 / hits).toInt() }
+        // Largest remainder: the points lost to rounding down go to the parts that lost the most.
+        val byRemainder = (0 until 4).sortedByDescending { parts[it] * 100 % hits }
+        repeat(100 - whole.sum()) { whole[byRemainder[it]]++ }
+        return String.format(Locale.ROOT, "%3d%% / %3d%% / %3d%% / %3d%%", whole[0], whole[1], whole[2], whole[3])
+    }
+
+    /** A row's split: by the probe when it ran, by Java's state when it did not. */
+    private fun split(hits: Long, running: Long, core: Long, io: Long): String =
+        if (stateProbed) stateSplit(hits, running, core, io)
+        else runnableSplit(if (hits == 0L) 0.0 else (hits - running).toDouble() / hits)
+
+    /** The head of the split column, lined up over [stateSplit]'s four parts. */
+    private val splitHead: String get() = if (stateProbed) " CPU / Core /  I/O / Wait" else "Runnable / Waiting"
+
+    /**
+     * [CoarseStat.working] with the probe's answer when there was one: the runnable samples less those
+     * waiting for a core or in a system call, so on a CPU as measured rather than as an upper bound.
+     */
+    fun onCpuOf(c: CoarseStat): Double =
+        if (!stateProbed || c.instanceTicks == 0L) c.working
+        else (c.runningInclusiveHits - c.coreInclusiveHits - c.ioInclusiveHits).toDouble() / c.instanceTicks
+
+    /**
+     * The Careful line for runnable samples the probe could not ask about, which are counted as on
+     * a CPU - what RUNNABLE meant before the probe. Silent under [UNPROBED_CAREFUL].
+     */
+    private fun probeCareful(): List<String> {
+        if (!stateProbed || allHits == 0L) return emptyList()
+        val share = unprobedHits.toDouble() / allHits
+        if (share < UNPROBED_CAREFUL) return emptyList()
+        return listOf(
+            percent(share * 100) + " of thread-time was runnable on threads the probe could not ask - virtual " +
+                    "threads, or threads that labelled before the first Profiler.start() - and is counted as CPU"
+        )
+    }
 
     fun occupancyNanosOf(op: OperationStat): Double = op.hits * stepNanos
 
@@ -1164,6 +1236,8 @@ class Profile internal constructor(
      * gained by being strict and a false accusation costs the reader their trust in the column.
      */
     fun workingIsContradicted(c: CoarseStat): Boolean {
+        // The probe measured on a CPU per sample, so there is nothing for a run-wide ceiling to catch.
+        if (stateProbed) return false
         val ceiling = workingCeilingOf(c)
         return ceiling.isFinite() && c.working.isFinite() && c.working > ceiling * WORKING_CEILING_SLACK
     }
@@ -1284,7 +1358,8 @@ class Profile internal constructor(
         // draw the wrong conclusion, and nothing else. Everything below them is reference, and
         // reference belongs in output.md where it can be read once rather than skipped thirty times.
         appendLine("  thread-time is sampled and summed across threads over ACTIVE time, NOT CPU")
-        appendLine("  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working")
+        if (stateProbed) appendLine("  CPU/core/I/O/wait splits the thread-time: on a CPU, waiting for a core, in I/O or native, parked")
+        else appendLine("  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working")
         appendLine("  concurrency is threads INSIDE at once, running or parked - not a speedup")
         appendLine("  a share is where time went, NOT what removing the operation would save")
         if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
@@ -1310,12 +1385,20 @@ class Profile internal constructor(
         appendLine("  sample is taken in a pause, so the fine table is ACTIVE time throughout: a pause does not")
         appendLine("  move a share, and thread-time and time per call are scaled to the active step. The coarse")
         appendLine("  table is WALL time, two timestamps per execution, so a span includes the pauses inside it")
-        appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
-        appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
-        appendLine("  NOT working - a thread the scheduler merely preempted reads runnable, and so does one")
-        appendLine("  stopped inside a native call, which the JVM cannot see into. So the left half is an UPPER")
-        appendLine("  BOUND on the work and the CPU clock is the only thing that bounds it in turn, which is what")
-        appendLine("  the Careful line about it says; the right half is waiting that some other thread caused")
+        if (stateProbed) {
+            appendLine("CPU / core / I/O / wait are the four parts of the thread-time beside them, asked of the")
+            appendLine("  operating system at every sample, in whole percents that add to 100: on a CPU; ready but")
+            appendLine("  waiting for a core, which is the machine overloaded - fewer threads; blocked inside a")
+            appendLine("  system call, which is I/O or a native call that waits - a label around the call; and")
+            appendLine("  parked, blocked or waiting in Java, which is waiting that some other thread caused")
+        } else {
+            appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
+            appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
+            appendLine("  NOT working - a thread the scheduler merely preempted reads runnable, and so does one")
+            appendLine("  stopped inside a native call, which the JVM cannot see into. So the left half is an UPPER")
+            appendLine("  BOUND on the work and the CPU clock is the only thing that bounds it in turn, which is what")
+            appendLine("  the Careful line about it says; the right half is waiting that some other thread caused")
+        }
         appendLine("wall-time is the clock with at least one thread inside, and it is NOT summed across threads,")
         appendLine("  which thread-time is. Not latency either: it is every execution's interval unioned, so it")
         appendLine("  says nothing about any single one of them")
@@ -1324,7 +1407,7 @@ class Profile internal constructor(
         appendLine("  is what turns a big thread-time back into real cost: 100 s of waiting is a convoy to break")
         appendLine("  up at 15 and steady contention to design out at 1.7. NOT parallelism: threads inside are")
         appendLine("  not threads executing, and two threads asleep in the same label is a concurrency of 2 with")
-        appendLine("  nothing running at all. Multiply by the runnable half for that")
+        appendLine("  nothing running at all. Multiply by the " + (if (stateProbed) "CPU part" else "runnable half") + " for that")
         appendLine("workers is the most threads ever inside at one tick - the maximum of the series concurrency")
         appendLine("  averages. The column to read against what you DISPATCHED: three submitted and workers 2")
         appendLine("  means something is off. Detected, not measured, so it is a lower bound - an overlap that")
@@ -1381,15 +1464,12 @@ class Profile internal constructor(
         appendLine(
             String.format(
                 Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Total v", "% parent", "Paused", "Mean",
-                "p50", "p90", "p99", "Max", "Runnable / Waiting"
+                "p50", "p90", "p99", "Max", splitHead
             )
         )
         appendLine("-".repeat(COARSE_WIDTH))
         val byType = coarse.associateBy { it.type }
         val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
-
-        fun waitSplit(inclusive: Long, running: Long): String =
-            runnableSplit(if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive)
 
         fun shareText(share: Double): String = if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
 
@@ -1432,7 +1512,7 @@ class Profile internal constructor(
                     if (timed) duration(n.percentileNanos(0.90)) else "-",
                     if (timed) duration(n.percentileNanos(0.99)) else "-",
                     if (timed) duration(n.spanMaxNanos.toDouble()) else "-",
-                    waitSplit(n.inclusiveHits, n.runningInclusiveHits)
+                    split(n.inclusiveHits, n.runningInclusiveHits, n.coreInclusiveHits, n.ioInclusiveHits)
                 )
             )
             // Which executions were the slowest, when the operation was opened with a key: a
@@ -1488,13 +1568,13 @@ class Profile internal constructor(
                     if (c.inside.isNaN()) "thread count per execution unknown"
                     else String.format(
                         Locale.ROOT, "%.2f thread per execution%s", c.inside,
-                        if (c.working.isNaN()) ""
+                        if (onCpuOf(c).isNaN()) ""
                         else if (workingIsContradicted(c))
                             String.format(
                                 Locale.ROOT, ", %.2f of it on a CPU (at most %.2f)",
                                 c.working, workingCeilingOf(c)
                             )
-                        else String.format(Locale.ROOT, ", %.2f of it on a CPU", c.working)
+                        else String.format(Locale.ROOT, ", %.2f of it on a CPU", onCpuOf(c))
                     )
                 val atOnce =
                     if (c.inFlight.isNaN()) ""
@@ -1535,7 +1615,7 @@ class Profile internal constructor(
                         duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
                         duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
                         duration(c.spanMaxNanos.toDouble()),
-                        waitSplit(c.inclusiveHits, c.runningInclusiveHits)
+                        split(c.inclusiveHits, c.runningInclusiveHits, c.coreInclusiveHits, c.ioInclusiveHits)
                     )
                 )
             }
@@ -1654,6 +1734,9 @@ class Profile internal constructor(
         val stuckInstances: Long = 0,
         val stuckHits: Long = 0,
         val longestStuckTicks: Long = 0,
+        /** Of [runningHits], waiting for a core and in a system call. See [OperationStat.coreHits]. */
+        val coreHits: Long = 0,
+        val ioHits: Long = 0,
     ) {
         /**
          * Whether the `Long` group prints for this row: a fine row whose share in long executions
@@ -1697,12 +1780,14 @@ class Profile internal constructor(
                 activeTicks = it.activeTicks, peakInside = it.peakInside, threads = it.threads,
                 calls = it.calls, stuckShare = it.stuckShare,
                 stuckInstances = it.stuckInstances, stuckHits = it.stuckHits, longestStuckTicks = it.longestStuckTicks,
+                coreHits = it.coreHits, ioHits = it.ioHits,
             )
         } + coarse.map {
             OperationRow(
                 it.name, coarse = true, hits = it.selfHits, inclusiveHits = it.inclusiveHits, runningHits = it.selfRunningHits,
                 activeTicks = it.selfActiveTicks, peakInside = it.selfPeak, threads = it.threads,
                 calls = it.count, stuckShare = null,
+                coreHits = it.selfCoreHits, ioHits = it.selfIoHits,
             )
         }
 
@@ -1817,7 +1902,9 @@ class Profile internal constructor(
         appendLine(pause.headerLine(samplingSpanNanos))
         // The clock only when it moved or could not be read: a steady clock is the healthy case, and
         // its level alone says nothing about this run. Two runs' levels are compared in the diff.
-        for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful()) appendLine(row("Careful", c))
+        val stateCareful = if (stateProbed) duty.careful(activeNanos, reclaimedSlots, probed = true) + probeCareful()
+        else duty.careful(activeNanos, reclaimedSlots, noProbe = probeUnavailable)
+        for (c in pause.careful() + stateCareful + clock.careful()) appendLine(row("Careful", c))
         // The warnings here, before the tables, for the same reason `Careful` is: a warning is read
         // before the numbers it is about, not found thirty lines after them. They used to close the
         // report, and Andrey met one - a coarse label on a 40 ns lookup - under the second table.
@@ -1882,6 +1969,8 @@ class Profile internal constructor(
                 NO_OPERATION, coarse = false, hits = unlabelledHits, inclusiveHits = unlabelledHits,
                 runningHits = if (stateSampled) unlabelledHits - unlabelledWaitingHits else unlabelledHits,
                 activeTicks = 0, peakInside = 0, threads = 0, calls = 0, stuckShare = null,
+                coreHits = (idleCoreHits - coarse.sumOf { it.selfCoreHits }).coerceAtLeast(0),
+                ioHits = (idleIoHits - coarse.sumOf { it.selfIoHits }).coerceAtLeast(0),
             )
         ) else emptyList()
         val anyRow = seen.isNotEmpty() || outside.isNotEmpty()
@@ -1910,7 +1999,7 @@ class Profile internal constructor(
                 // had differed - 20/14 against 26/8 - so that `Thread-time% v` could sit over an
                 // 8-wide number without shifting everything after it, and that trick is invisible
                 // until a vertical line is drawn through it and comes out crooked.
-                Locale.ROOT, "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s",
+                Locale.ROOT, "%-26s | %14s %11s %25s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s",
                 // `occupancy%` and not `share`, because it is the same quantity as the column beside
                 // it — one relative, one absolute. Calling one of them `share` invented a
                 // distinction that does not exist and hid the one that does: neither is CPU. A
@@ -1976,7 +2065,7 @@ class Profile internal constructor(
                 // configured.* `Max`, `Peak` and `Most` name a statistic and leave the reader to
                 // supply the noun; `Workers` names what was counted, and says "detected" rather
                 // than "measured", which is what a sampled maximum honestly is.
-                "Operation", "Thread-time% v", "Thread-time", "Runnable / Waiting",
+                "Operation", "Thread-time% v", "Thread-time", splitHead,
                 // `Impl/call` sits beside `Calls` because it is hits x step / calls, and it had
                 // been stranded among the statistics.
                 // `Thread-time per call` and not `Impl/call`, which was Andrey's: "implied" singled
@@ -2024,9 +2113,9 @@ class Profile internal constructor(
         for (r in (seen + outside).sortedByDescending { it.hits }) {
             appendLine(
                 String.format(
-                    Locale.ROOT, "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8d %6s",
+                    Locale.ROOT, "%-26s | %14s %11s %25s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8d %6s",
                     r.label, percent(r.shareOf() * 100), threadTime(r.hits * stepNanos),
-                    runnableSplit(r.waitingShare),
+                    split(r.hits, r.runningHits, r.coreHits, r.ioHits),
                     if (r.name == NO_OPERATION) "-" else String.format(Locale.ROOT, "%,d", r.calls),
                     duration(r.perCallNanos()),
                     // A dash for a coarse row rather than figures: the long-execution detector is
@@ -2241,10 +2330,10 @@ class Profile internal constructor(
          * which is true and is in the friction log. Then the parallelism columns left and took
          * more than `Total` had added.
          */
-        const val COARSE_WIDTH = 156
+        const val COARSE_WIDTH = 163
 
         /** One row of the coarse table: name, executions and per parent, total and its share of the parent, paused, five durations, the split. */
-        const val COARSE_ROW = "%-30s %,11d %8s %10s %8s %10s %10s %10s %10s %10s %10s %18s"
+        const val COARSE_ROW = "%-30s %,11d %8s %10s %8s %10s %10s %10s %10s %10s %10s %25s"
 
         /**
          * The fine table, likewise drawn to itself.
@@ -2259,7 +2348,7 @@ class Profile internal constructor(
          * Operation, thread-time% and thread-time, runnable/wait, wall-time,
          * concurrency/threads, calls, implied per call, hits, noise, over one tick.
          */
-        val FINE_COLUMNS = intArrayOf(26, 14, 11, 18, 13, 20, 7, 8, 8, 9, 11, 7, 5, 8, 6)
+        val FINE_COLUMNS = intArrayOf(26, 14, 11, 25, 13, 20, 7, 8, 8, 9, 11, 7, 5, 8, 6)
 
         /** After which columns a group bar comes down. */
         val FINE_BREAKS = intArrayOf(0, 5, 8, 12)
@@ -2312,6 +2401,9 @@ class Profile internal constructor(
 
         /** Above this share, calling it waiting rather than working is the honest description. */
         const val WAITING_MOSTLY = 0.5
+
+        /** Below this share of thread-time, runnable samples the probe could not ask about are not worth a line. */
+        const val UNPROBED_CAREFUL = 0.01
     }
 }
 

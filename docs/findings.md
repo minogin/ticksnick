@@ -1222,6 +1222,48 @@ only on a state *transition*. A compute-bound worker never transitions, so there
 read to contend with. A worker parking and unparking thousands of times a second does transition,
 and that is the configuration where a cost would show up if there is one.
 
+### Telling a runnable thread's state apart, per sample, on Windows
+
+**Java's `RUNNABLE` can be split into on a CPU, waiting for a core, and blocked in a system call, at
+every tick, on Windows.** Measured 2026-10-22/23 with the two programs in
+[probe-trial/](probe-trial/), on this laptop (16 logical CPUs), against Windows' own per-thread state
+from `NtQuerySystemInformation` as the referee.
+
+**On a CPU: does the thread's cycle counter move over a microsecond?** `QueryThreadCycleTime` is
+read for the thread twice, 1 µs apart (`CycleTime.java`). Against a worker alternating busy and
+asleep phases, the probe read *running* **98-99%** of the time while it was busy and **0.3-0.5%**
+while it was asleep. The cycle counter is not quantized the way `getThreadCpuTime` is (15.625 ms,
+above): it moves within the microsecond.
+
+**Not on a CPU: is it inside a system call?** `NtQueryInformationThread(ThreadLastSystemCall)`
+succeeds only while the thread is blocked in the kernel, so a failure on a thread that is off the CPU
+means it is ready and waiting for a core. Four workers with a known truth (`Probe.java`), Java state
+read first, so a parked thread is never asked:
+
+| worker | machine idle | machine full (16 spinning threads beside) | Windows' own state, full |
+|---|---|---|---|
+| spinning | within 1% of Windows' state | **25% CPU / 75% core** | 26% / 74% |
+| `select()` on a socket | within 1% | **99.8% I/O** | |
+| blocking socket read | within 1% | **99.3% I/O** | |
+| `park` | Java says WAITING | of its samples off the CPU, **63%** failed the query: woken, waiting for a core | 68% |
+
+**What it costs, per call, from the sampling thread:** the cycle read about **1 µs**, the
+system-call query **0.37-0.83 µs**. Two alternatives were measured and dropped:
+`QueryIdleProcessorCycleTime` (is any core idle?) at **30-170 µs**, and wrong on a full machine;
+`NtQuerySystemInformation`, the referee itself, at **1.9-8.9 ms**. `GetThreadIOPendingFlag` was
+also tried: **0.2-1 µs**, and it misses `select()`.
+
+**Through the sampler, 2026-10-23** (`ThreadStatesTest`, `gradlew probeTest`, Java 26, 500 ms, 501
+samples per label): a spinning thread **99% CPU / 1% core / 0% I/O / 0% wait**, a blocking socket read
+**0 / 0 / 100 / 0**, a parked thread **0 / 0 / 0 / 100**. Twice as many spinning threads as cores
+waited for a core over 30% of the time, as the test asserts. The cost inside the sampler's walk has
+not been measured yet.
+
+**The limits.** `ThreadLastSystemCall` is not documented. A virtual thread cannot be probed: its
+operating-system thread is its carrier's. On Linux the same split should come from
+`/proc/self/task/<tid>/syscall` and `schedstat`, untested; macOS can tell runnable from waiting and
+not on a CPU from waiting for a core.
+
 ## Statistics
 
 **Percentage points cannot separate noise from bias.** Divergence falls as `1/√N` whether the

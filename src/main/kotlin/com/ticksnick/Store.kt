@@ -156,6 +156,8 @@ object ProfileStore {
             line(k + "pausedNanos", n.pausedNanos)
             line(k + "instanceTicks", n.instanceTicks)
             line(k + "coveredTicks", n.coveredTicks)
+            if (n.ownFine.isNotEmpty()) sparse(k + "ownFine", n.ownFine)
+            if (n.ownFineCovered.isNotEmpty()) sparse(k + "ownFineCovered", n.ownFineCovered)
             // Only where there are any, so a file from before keys existed reads the same.
             if (n.slowest.isNotEmpty()) {
                 line(k + "slowest", n.slowest.size)
@@ -258,6 +260,9 @@ object ProfileStore {
                 // Added after the format: an older file has neither, and reads as never sampled - every
                 // row at a parallelism of 1, so its Wall is its Total, as the report used to print.
                 instanceTicks = m[k + "instanceTicks"]?.toLong() ?: 0L, coveredTicks = m[k + "coveredTicks"]?.toLong() ?: 0L,
+                // Absent before 2026-10-23: such a file draws a leaf's fine rows the old way.
+                ownFine = if (k + "ownFine" in m) sparse(k + "ownFine", MAX_OPERATIONS + 1) else LongArray(0),
+                ownFineCovered = if (k + "ownFineCovered" in m) sparse(k + "ownFineCovered", MAX_OPERATIONS + 1) else LongArray(0),
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
                 slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
                     SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))

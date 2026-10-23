@@ -18,6 +18,9 @@ const val SPLIT_MARK = "-"
  */
 const val PARALLEL_SHOWN = 1.1
 
+/** Below this share of its row, a fine row under a coarse one is counted in "and N more" rather than drawn. */
+const val OWN_ROW_MIN = 0.005
+
 /** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
@@ -383,6 +386,13 @@ class CoarseNode internal constructor(
     val instanceTicks: Long = 0,
     /** Ticks with a parent execution holding at least one execution on this path open, one per parent per tick. */
     val coveredTicks: Long = 0,
+    /**
+     * This path's own time by fine label, last entry no label: samples whose innermost context was an
+     * execution here, and of those, one per execution per tick. Empty in a profile saved before
+     * 2026-10-23, which draws a leaf's fine rows the old way. See [Profile.ownRowsOf].
+     */
+    internal val ownFine: LongArray = LongArray(0),
+    internal val ownFineCovered: LongArray = LongArray(0),
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -1190,9 +1200,6 @@ class Profile internal constructor(
         return ceiling.isFinite() && c.working.isFinite() && c.working > ceiling * WORKING_CEILING_SLACK
     }
 
-    private fun moreThan(v: Double, parentV: Double?): Boolean =
-        v.isFinite() && v >= PARALLEL_SHOWN && (parentV == null || !parentV.isFinite() || v / parentV >= PARALLEL_SHOWN)
-
     /** What a row's executions are divided by: its parallelism, or 1 where it is under [PARALLEL_SHOWN] or unknown. */
     private fun factorOf(n: CoarseNode): Double = n.parallel.let { if (it.isFinite() && it >= PARALLEL_SHOWN) it else 1.0 }
 
@@ -1209,15 +1216,50 @@ class Profile internal constructor(
      * ten at a time. A row whose executions never overlap under one parent, nor above it, gets its
      * summed durations exactly; only a parallelism makes it an estimate, and only through that figure.
      */
-    fun wallsOf(): Map<CoarseNode, Double> {
+    fun wallsOf(): Map<CoarseNode, Double> = divisors.mapValues { (n, d) -> n.spanSumNanos / d }
+
+    /** Each node's divisor: its own parallelism times every one above it. See [wallsOf]. */
+    private val divisors: Map<CoarseNode, Double> by lazy {
         val out = HashMap<CoarseNode, Double>()
         fun walk(n: CoarseNode, divisor: Double) {
             val d = divisor * factorOf(n)
-            out[n] = n.spanSumNanos / d
+            out[n] = d
             for (c in n.children) walk(c, d)
         }
         for (r in coarseTree) walk(r, 1.0)
-        return out
+        out
+    }
+
+    /** One fine label in a coarse row's own time: its wall, how many threads ran it at a time in one execution, its share of the row. */
+    class OwnRow internal constructor(val name: String, val wallNanos: Double, val parallel: Double, val share: Double)
+
+    /**
+     * **The fine labels in a coarse row's own time,** outside its coarse children, heaviest first - or
+     * null for a profile saved before they were counted.
+     *
+     * Each is treated as a coarse child would be: its wall is the ticks an execution of the row had it
+     * running, one per execution per tick, times the step, divided by the row's divisor - so a label
+     * run on four threads at once inside one execution counts its time once, and a row whose
+     * executions ran side by side is divided as the row is. Its parallel is how many threads ran it
+     * at a time in one execution. A thread waiting with no label while others work under the same
+     * execution - a caller parked on a join - is not counted: that time is theirs.
+     *
+     * Until 2026-10-23 a leaf's fine rows were its samples split by label, applied to its wall, which
+     * holds only while every part of the leaf runs at the same parallelism. `Branching.kt` broke it: a
+     * leaf half `compute` on its own thread and half `assist` on two helpers read compute 25%, the
+     * parked wait 26%, assist 49%. Still own time only: a fine label inside another shows its own part.
+     */
+    fun ownRowsOf(n: CoarseNode): List<OwnRow>? {
+        if (n.ownFineCovered.isEmpty()) return null
+        val d = divisors[n] ?: return null
+        val wall = n.spanSumNanos / d
+        return (0..MAX_OPERATIONS).filter { n.ownFineCovered[it] > 0 }.map { f ->
+            val w = n.ownFineCovered[f] * stepNanos / d
+            OwnRow(
+                if (f == NO_OP_INDEX) "unlabelled" else operations.firstOrNull { it.id == f }?.name ?: "#$f",
+                w, n.ownFine[f].toDouble() / n.ownFineCovered[f], if (wall > 0) w / wall else Double.NaN,
+            )
+        }.sortedByDescending { it.wallNanos }
     }
 
     /** How much of the observed thread-time happened anywhere under [c]. */
@@ -1395,7 +1437,8 @@ class Profile internal constructor(
             appendLine("    parent's wall, and the rest of 100% is the parent's own time outside this child")
             appendLine("  parallel is how many of a row's executions ran at a time under the same parent execution,")
             appendLine("    blank at 1. Read it beside x parent: x4.0 with 2.0 is four started, two at a time")
-            appendLine("  'parallelism: its work on N more threads' under a row: work it forked with no coarse label")
+            appendLine("  '- name  own' under a row: a fine label in its own time, outside its coarse children, with")
+            appendLine("    its own Parallel when one execution ran it on several threads at a time")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
             appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
             appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
@@ -1473,6 +1516,34 @@ class Profile internal constructor(
             if (factorOf(n) > 1.0) String.format(Locale.ROOT, "%.1f", n.parallel) else ""
 
         var anySplit = false
+        var anyOwn = false
+
+        // A profile saved before own time was counted: a leaf's samples split by label and applied to
+        // its wall, as the report drew it until 2026-10-23. See ownRowsOf for why it was replaced.
+        fun StringBuilder.legacySplit(n: CoarseNode, indent: String, timed: Boolean) {
+            if (n.children.isNotEmpty() || n.inclusiveHits <= 0) return
+            val parts = operations
+                .map { it.name to n.fine[it.id] }
+                .plus("unlabelled" to n.fine[NO_OP_INDEX])
+                .filter { it.second > 0 }
+                .sortedByDescending { it.second }
+            if (parts.isNotEmpty()) anySplit = true
+            for ((name, hits) in parts.take(FINE_ROWS_SHOWN)) {
+                val share = hits.toDouble() / n.inclusiveHits
+                appendLine(
+                    String.format(
+                        Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
+                        "$indent  $SPLIT_MARK $name", "own", "", "",
+                        if (timed) duration(wall(n) * share) else "-",
+                        shareText(share * 100), "", "", "", "", "", "", ""
+                    ).trimEnd()
+                )
+            }
+            val rest = parts.drop(FINE_ROWS_SHOWN)
+            if (rest.isNotEmpty()) appendLine(
+                "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.second } * 100.0 / n.inclusiveHits) + " between them"
+            )
+        }
 
         fun StringBuilder.node(n: CoarseNode, depth: Int, parent: CoarseNode?) {
             val indent = "  ".repeat(depth)
@@ -1502,50 +1573,38 @@ class Profile internal constructor(
                             String.format(Locale.ROOT, "%9s  %s", duration(slow.nanos.toDouble()), slow.key)
                 )
             }
-            // The leaf's time split by the innermost label, on the leaves only: a parent's would be
-            // its children's over again. **A split, not children** - each sample inside the leaf has
-            // one innermost label, so the rows are own time and add up to 100%. That stays true when
-            // fine labels nest, and drawing them as children would not: a fine label with labels
-            // inside it would read as containing them, at a share that is only its own part. The
-            // nesting cannot be seen for free - the outer label lives only in the hook's `prev`, on
-            // the thread's stack - so the rows say `own` and carry a `-`, and do not look like one
-            // more level of the tree. For a hierarchy, the outer label is made coarse and pays
-            // for it. plan.md, "Fine rows in the coarse table are a split", 2026-10-16.
-            //
-            // The wall is the share of the leaf's samples applied to the leaf's wall, so it agrees
-            // with `% parent`. It was one `made of:` line until 2026-10-16.
-            if (n.children.isEmpty() && n.inclusiveHits > 0) {
-                val parts = operations
-                    .map { it.name to n.fine[it.id] }
-                    .plus("unlabelled" to n.fine[NO_OP_INDEX])
-                    .filter { it.second > 0 }
-                    .sortedByDescending { it.second }
-                if (parts.isNotEmpty()) anySplit = true
-                for ((name, hits) in parts.take(FINE_ROWS_SHOWN)) {
-                    val share = hits.toDouble() / n.inclusiveHits
-                    appendLine(
-                        String.format(
-                            Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
-                            "$indent  $SPLIT_MARK $name", "own", "", "",
-                            if (timed) duration(wall(n) * share) else "-",
-                            shareText(share * 100), "", "", "", "", "", "", ""
-                        ).trimEnd()
-                    )
+            // The row's own time by fine label, beside its coarse children and sorted with them, so
+            // the rows under a row are what it was made of: `request` is its branches and its merge.
+            // A fine label counts as a coarse child would - its wall once per execution however many
+            // threads ran it, its Parallel how many did - since fine and coarse rows answer the same
+            // question here. Rows under half a percent are counted, not drawn. See ownRowsOf.
+            val own = ownRowsOf(n)
+            if (own == null) {
+                legacySplit(n, indent, timed)
+                for (child in n.children.sortedWith(heaviest)) node(child, depth + 1, n)
+            } else {
+                val drawn = own.filter { !(it.share < OWN_ROW_MIN) }.take(FINE_ROWS_SHOWN)
+                if (drawn.isNotEmpty()) anyOwn = true
+                val items: List<Pair<Double, Any>> = n.children.map { wall(it) to it as Any } + drawn.map { it.wallNanos to it as Any }
+                for ((_, item) in items.sortedWith(compareByDescending<Pair<Double, Any>> { it.first })) {
+                    if (item is CoarseNode) node(item, depth + 1, n)
+                    else {
+                        val r = item as OwnRow
+                        appendLine(
+                            String.format(
+                                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
+                                "$indent  $SPLIT_MARK ${r.name}", "own", "",
+                                if (r.parallel >= PARALLEL_SHOWN) String.format(Locale.ROOT, "%.1f", r.parallel) else "",
+                                if (timed) duration(r.wallNanos) else "-",
+                                if (r.share.isNaN()) "" else shareText(r.share * 100), "", "", "", "", "", "", ""
+                            ).trimEnd()
+                        )
+                    }
                 }
-                val rest = parts.drop(FINE_ROWS_SHOWN)
+                val rest = own.filter { it !in drawn }
                 if (rest.isNotEmpty()) appendLine(
-                    "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.second } * 100.0 / n.inclusiveHits) + " between them"
+                    "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.share.takeIf { s -> !s.isNaN() } ?: 0.0 } * 100) + " between them"
                 )
-            }
-            // The fork the Parallel column cannot show: work handed to a pool with no coarse label of
-            // its own, so there is no child row to carry the figure, and the parent's executions each
-            // spread over more threads than its parent's did. Only on a run with more than one thread.
-            val c = byType[n.type]
-            if (threads > 1 && c != null && n.children.none { factorOf(it) > 1.0 } &&
-                moreThan(c.inside, parent?.let { byType[it.type] }?.inside)
-            ) appendLine(String.format(Locale.ROOT, "$indent  parallelism: its work on %.1f more threads, on average", c.inside - 1))
-            for (child in n.children.sortedWith(heaviest)) {
-                node(child, depth + 1, n)
             }
         }
         for (root in coarseTree.sortedWith(heaviest)) {
@@ -1556,6 +1615,10 @@ class Profile internal constructor(
         if (anySplit) appendLine(
             "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
                     " a fine label with labels inside it shows only its own part"
+        )
+        if (anyOwn) appendLine(
+            "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; Parallel on one is how many" +
+                    " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
         // An operation with more than one caller is a row under each, and those rows are its
         // figures under that caller alone. Its percentiles over everything are a different

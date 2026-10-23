@@ -247,6 +247,14 @@ internal class CoarsePath(
     /** Inclusive hits by the fine operation they caught, last entry no fine label. Allocated on the first hit. */
     @JvmField var fine: LongArray? = null
     /**
+     * Samples whose innermost context was an execution on this path, by fine label, last entry no
+     * label: this path's own time, outside its coarse children. Unlabelled samples of a thread parked
+     * while other threads work under the same execution - a join - are left out. See `CoarseNode.ownRows`.
+     */
+    @JvmField var ownFine: LongArray? = null
+    /** Of those, one per execution per tick: the executions on this path with that label running. */
+    @JvmField var ownFineCovered: LongArray? = null
+    /**
      * Pause time charged to this node: every pause the sampler saw, charged once to every node
      * open at the tick that followed it. See `Sampler`, "the pause, charged".
      */
@@ -325,6 +333,16 @@ internal class CoarsePath(
             val f = fine ?: LongArray(MAX_OPERATIONS + 1).also { fine = it }
             for (i in f.indices) f[i] += of[i]
         }
+        val oo = o.ownFine
+        if (oo != null) {
+            val f = ownFine ?: LongArray(MAX_OPERATIONS + 1).also { ownFine = it }
+            for (i in f.indices) f[i] += oo[i]
+        }
+        val oc = o.ownFineCovered
+        if (oc != null) {
+            val f = ownFineCovered ?: LongArray(MAX_OPERATIONS + 1).also { ownFineCovered = it }
+            for (i in f.indices) f[i] += oc[i]
+        }
         for (i in 0 until o.slowCount) recordSlow(o.slowNanos!![i], o.slowKeys!![i]!!)
         o.children?.let { ocs -> for (t in ocs.indices) ocs[t]?.let { child(t).mergeFrom(it) } }
         o.overflow?.let { oos -> for (t in oos.indices) oos[t]?.let { deeper(t).mergeFrom(it) } }
@@ -342,6 +360,8 @@ internal class CoarsePath(
         instanceTicks = 0
         coveredTicks = 0
         fine?.fill(0L)
+        ownFine?.fill(0L)
+        ownFineCovered?.fill(0L)
         pausedNanos = 0
         pauseStamp = -1
         slowNanos?.fill(0L)

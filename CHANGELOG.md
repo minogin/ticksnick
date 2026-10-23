@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### The coarse table explains each row by what it was made of
+
+Each row's `Wall` is the part of its parent's time it took, and `% parent` adds up: a request is
+its branches and its own merge, a branch its leaves and its prepare. A `Parallel` column beside
+`x parent` says how many ran at a time under the same parent - `x4.0  2.0` is four started, two at
+a time. Fine labels appear under every coarse row, not only leaves, each counted as a coarse child,
+so a fine label run on several threads counts its time once. `Total` - the summed durations, which
+read 988% of the parent under a fork - is gone; it is `Mean x Executions`.
+
+### Threads that exit without `Profiler.release()` no longer distort the report
+
+The sampler stops sampling a thread once it has exited and frees its slot within a second; the
+warning about them is gone, and `release()` is optional.
+
+### The Careful line about Runnable says what to do
+
+*"Thread-time% may be off by up to N pp as a share of CPU time ... Likely causes: too many threads
+for the cores (use fewer), or blocking I/O or native calls (label them ...)"*, broken into lines.
+
 ### The CPU clock, in the report and the diff
 
 The profiler reads the CPU clock once a second - per core, weighted by how busy each core was - and

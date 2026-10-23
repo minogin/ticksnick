@@ -40,10 +40,20 @@ enum class WaitStrategy {
 const val STUCK_BUCKETS = 24
 
 /**
- * Slots in the table of (parent execution, type) pairs seen in one tick - see `Sampler.firstUnder`.
- * A power of two, and far more than a tick holds: one entry per open coarse execution.
+ * Slots in the table of (execution, key) pairs counted in one tick - see `Sampler.bump`. A power of
+ * two, and far more than a tick holds: an entry per open coarse execution, per (execution, fine
+ * label) running, and per execution with a thread under it.
  */
-private const val PAIR_TABLE = 4096
+private const val PAIR_TABLE = 8192
+
+/** How far one lookup probes before it gives up and answers "first": a full table reads parallelism low, never wrong-way. */
+private const val PAIR_PROBES = 64
+
+/** The key of "a thread is under this execution" in that table. Coarse types are 0 and up. */
+private const val OCCUPIED = -1
+
+/** Where fine labels start among the table's keys: a fine label `f` is `FINE_KEY + f`. */
+private const val FINE_KEY = MAX_COARSE_TYPES
 
 /** The parent key of a root execution in that table: roots share it, so they count against each other. */
 private val ROOT = Any()
@@ -273,12 +283,65 @@ internal class Sampler(
     internal val pairHits = LongArray(MAX_COARSE_TYPES * (MAX_OPERATIONS + 1))
 
     /**
-     * The (parent execution, type) pairs seen this tick, open-addressed and stamped with the tick, so
-     * nothing is cleared between ticks. See [firstUnder].
+     * The (execution, key) pairs counted this tick, open-addressed and stamped with the tick, so
+     * nothing is cleared between ticks. See [bump].
      */
     private val pairParent = arrayOfNulls<Any>(PAIR_TABLE)
     private val pairType = IntArray(PAIR_TABLE)
     private val pairStamp = LongArray(PAIR_TABLE) { -1L }
+    private val pairCount = IntArray(PAIR_TABLE)
+
+    /**
+     * Counts one more (execution, key) this tick and returns the count, 1 the first time. Keys are a
+     * coarse child's type, [FINE_KEY] plus a fine label, or [OCCUPIED].
+     */
+    private fun bump(parent: Any, key: Int): Int {
+        var i = slotOf(parent, key)
+        repeat(PAIR_PROBES) {
+            if (pairStamp[i] != ticks) {
+                pairStamp[i] = ticks
+                pairParent[i] = parent
+                pairType[i] = key
+                pairCount[i] = 1
+                return 1
+            }
+            if (pairParent[i] === parent && pairType[i] == key) return ++pairCount[i]
+            i = (i + 1) and (PAIR_TABLE - 1)
+        }
+        return 1
+    }
+
+    /** This tick's count for (execution, key), 0 if none. */
+    private fun countOf(parent: Any, key: Int): Int {
+        var i = slotOf(parent, key)
+        repeat(PAIR_PROBES) {
+            if (pairStamp[i] != ticks) return 0
+            if (pairParent[i] === parent && pairType[i] == key) return pairCount[i]
+            i = (i + 1) and (PAIR_TABLE - 1)
+        }
+        return 0
+    }
+
+    private fun slotOf(parent: Any, key: Int): Int =
+        (((System.identityHashCode(parent) * 31 + key) * -0x61c88647) ushr 16) and (PAIR_TABLE - 1)
+
+    /**
+     * Unlabelled samples of a thread waiting inside an execution, held until the walk is over: whether
+     * another thread was under the same execution this tick - a join - is known only then.
+     */
+    private val pendingCtx = arrayOfNulls<CoarseContext>(MAX_SLOTS)
+    private val pendingNode = arrayOfNulls<CoarsePath>(MAX_SLOTS)
+    private var pending = 0
+
+    /** One sample of fine label [f] in [ctx]'s own time, on its path [node]. See `CoarsePath.ownFine`. */
+    private fun countOwn(ctx: CoarseContext, node: CoarsePath, f: Int) {
+        val own = node.ownFine ?: LongArray(MAX_OPERATIONS + 1).also { node.ownFine = it }
+        own[f]++
+        if (bump(ctx, FINE_KEY + f) == 1) {
+            val covered = node.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1).also { node.ownFineCovered = it }
+            covered[f]++
+        }
+    }
 
     /**
      * Whether this tick has not yet seen an execution of [type] under [parent]: true the first time,
@@ -287,21 +350,7 @@ internal class Sampler(
      * and one path - under one parent execution, a type is one path. One probe in the usual case; a full table - more open executions in one tick than
      * it has slots - answers true, which overcounts the parents and reads the parallelism low.
      */
-    private fun firstUnder(parent: Any, type: Int): Boolean {
-        val h = (System.identityHashCode(parent) * 31 + type) * -0x61c88647
-        var i = (h ushr 16) and (PAIR_TABLE - 1)
-        repeat(PAIR_TABLE) {
-            if (pairStamp[i] != ticks) {
-                pairStamp[i] = ticks
-                pairParent[i] = parent
-                pairType[i] = type
-                return true
-            }
-            if (pairParent[i] === parent && pairType[i] == type) return false
-            i = (i + 1) and (PAIR_TABLE - 1)
-        }
-        return true
-    }
+    private fun firstUnder(parent: Any, type: Int): Boolean = bump(parent, type) == 1
 
     /** Types already credited while walking one parent chain. Reused; never escapes the tick loop. */
     private val chain = IntArray(MAX_COARSE_DEPTH)
@@ -589,6 +638,17 @@ internal class Sampler(
                     if (stillMounted != 1) {
                         coarseHits[t]++
                         if (!waiting) coarseRunningHits[t]++
+                        // This execution's own time, by fine label. An unlabelled thread waiting here
+                        // may be its owner parked on work it handed to others; held to the end of the
+                        // walk, when the table says whether anyone else was under it.
+                        val own = ctx.path
+                        if (own != null) {
+                            if (c < 0 && waiting) {
+                                pendingCtx[pending] = ctx
+                                pendingNode[pending] = own
+                                pending++
+                            } else countOwn(ctx, own, if (c < 0) NO_OP_INDEX else c)
+                        }
                         // No fine label open, so this sample is the span's own work rather than
                         // something nested in it. Counted here, where the innermost context and the
                         // fine label are both already in hand.
@@ -625,6 +685,7 @@ internal class Sampler(
                         if (node != null && !(p.isClosed() && (if (stillMounted < 0) s.contextOpaque() === ctx else stillMounted == 1))) {
                             node.inclusiveHits++
                             if (!waiting) node.runningInclusiveHits++
+                            bump(p, OCCUPIED)
                             // Once per execution per tick, and once per parent execution per tick:
                             // the two counts whose ratio is how many ran at a time under the same
                             // parent - CoarseNode.parallel.
@@ -738,6 +799,15 @@ internal class Sampler(
                 prevOp[idx] = c
                 prevCount[idx] = n
             }
+            // A waiting thread with somebody else under the same execution is waiting for them, and
+            // that time is theirs, already counted under their labels; alone, it is its own.
+            for (k in 0 until pending) {
+                val x = pendingCtx[k]!!
+                if (countOf(x, OCCUPIED) <= 1) countOwn(x, pendingNode[k]!!, NO_OP_INDEX)
+                pendingCtx[k] = null
+                pendingNode[k] = null
+            }
+            pending = 0
             walkNanos += System.nanoTime() - walkStart
             walkVisits += live
             if (live > maxSlots) maxSlots = live

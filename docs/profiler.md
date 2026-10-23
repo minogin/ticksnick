@@ -178,6 +178,14 @@ shows a leaf's time *split* by innermost label rather than as a tree. A hierarch
 tier is for; make the outer label coarse and pay its cost. The same goes for work handed to other
 threads: a fine label stays on its thread, a coarse context travels.
 
+**In the coarse table a fine label is counted as a coarse child would be.** That much can be had
+without the hook knowing anything: the sampler sees every thread's (context, fine label) pair at one
+instant, so per tick it can say how many threads ran `assist` inside one execution of `leaf`, and
+count the execution once. A fine label run on two helpers that carry the context is then 50% of the
+leaf, with a `Parallel` of 2, and not twice its share. What a fine label still cannot do is travel:
+on a thread that does not carry the context it is under no coarse row, and nesting stays invisible.
+Settled 2026-10-23; see plan.md, "Fine labels counted as coarse children".
+
 **Which to start with: coarse.** Coarse is strictly more, so the default is to register an
 operation coarse unless it is certainly tiny, and to let the report say which ones to demote. The
 floor check is exact on the coarse tier - it compares durations it measured - so the advice is

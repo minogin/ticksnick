@@ -449,14 +449,17 @@ class RegistryTest {
      */
     @Test
     fun `the registry reuses indexes instead of growing`() {
-        val first = roundOfIndexes(4)
-        val ceiling = first.max()
+        // The high-water mark itself, and not the largest index a round was handed: with many freed
+        // indexes queued - OwnTimeTest's pools leave a dozen - a later round can draw higher ones from
+        // the queue while the registry does not grow at all, and the test failed on exactly that.
+        roundOfIndexes(4)
+        val ceiling = Profiler.slotCeiling()
         repeat(3) { round ->
             val again = roundOfIndexes(4)
             assertEquals(4, again.toSet().size, "live threads shared a slot index in round $round")
             assertTrue(
-                again.max() <= ceiling,
-                "the registry grew in round $round: ${again.max()} against a ceiling of $ceiling"
+                Profiler.slotCeiling() <= ceiling,
+                "the registry grew in round $round: ${Profiler.slotCeiling()} against a ceiling of $ceiling"
             )
         }
     }

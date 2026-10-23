@@ -20,6 +20,9 @@ const val BRANCHES = 4
 /** Leaves each branch works through, one after the other on its own thread. */
 const val LEAVES = 3
 
+/** Helpers each leaf hands its `assist` to, then waits for: a fine label run on several threads at once. */
+const val ASSISTS = 2
+
 /** Iterations of busy arithmetic per unit of work: sets how long everything takes. */
 const val WORK = 2_000_000
 
@@ -27,7 +30,9 @@ const val WORK = 2_000_000
  * A small branching program to read parallel reports on: `gradlew :sandbox:branching`.
  *
  * Each request runs on the main thread and forks [BRANCHES] branches onto a pool of [THREADS]; each
- * branch prepares - the n-th for n units of work - then works through [LEAVES] leaves; the request waits for all of them and merges.
+ * branch prepares - the n-th for n units of work - then works through [LEAVES] leaves; the request
+ * waits for all of them and merges. Each leaf computes on its own thread, then hands `assist` to
+ * [ASSISTS] helper threads and waits: one unit of work each, so a leaf is half compute, half assist.
  * Coarse labels are the tree, fine labels are the work inside it.
  */
 fun main() {
@@ -37,9 +42,12 @@ fun main() {
     val prepare = Profiler.registerFine("prepare")
     val compute = Profiler.registerFine("compute")
     val merge = Profiler.registerFine("merge")
+    val assist = Profiler.registerFine("assist")
 
     // propagating(): the request's context goes with each task, so a branch is under its request.
     val pool = Executors.newFixedThreadPool(THREADS).propagating()
+    // A pool of its own, so a leaf waiting for its helpers never waits for a thread its own branch holds.
+    val helpers = Executors.newFixedThreadPool(THREADS * ASSISTS).propagating()
     var sink = 0L
 
     Profiler.start()
@@ -51,7 +59,13 @@ fun main() {
                         // Each branch prepares for a different time, so the branches of one request
                         // are out of step, as real ones are: their leaves do not line up.
                         var s = op(prepare) { burn(WORK * b) }
-                        repeat(LEAVES) { s += op(leaf) { op(compute) { burn(2 * WORK) } } }
+                        repeat(LEAVES) {
+                            s += op(leaf) {
+                                var l = op(compute) { burn(WORK) }
+                                val assists = (1..ASSISTS).map { helpers.submit(Callable { op(assist) { burn(WORK) } }) }
+                                l + assists.sumOf { it.get() }
+                            }
+                        }
                         s
                     }
                 })
@@ -62,6 +76,7 @@ fun main() {
     }
     val profile = Profiler.stop()
     pool.shutdown()
+    helpers.shutdown()
 
     println(profile.render())
     println("(sink: $sink)")

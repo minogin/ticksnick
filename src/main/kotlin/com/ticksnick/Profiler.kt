@@ -1017,6 +1017,7 @@ object Profiler {
             spanMinNanos = if (n.count == 0L) 0L else n.minNanos, spanMaxNanos = n.maxNanos,
             hist = n.hist, inclusiveHits = n.inclusiveHits, runningInclusiveHits = n.runningInclusiveHits,
             instanceTicks = n.instanceTicks, coveredTicks = n.coveredTicks,
+            ownFine = n.ownFine ?: LongArray(0), ownFineCovered = n.ownFineCovered ?: LongArray(0),
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),

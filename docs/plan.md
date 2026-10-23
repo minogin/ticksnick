@@ -2143,7 +2143,10 @@ same: the block's `this` is that receiver either way.
 registry, and this change pushed it to 65; the new tests reuse names instead. The next coarse test
 will hit it again - a fork per test class, or a registry reset for tests, is the lasting fix.
 
-## Fine rows in the coarse table are a split, not children · 2026-10-16
+## Fine rows in the coarse table are a split, not children · 2026-10-16 · replaced 2026-10-23
+
+*Replaced by "Fine labels counted as coarse children", below the probe section: the split was wrong
+once parts of a leaf ran at different parallelism. The nesting reasoning here still holds.*
 
 **The problem.** The fine rows under a coarse leaf (just introduced, see below) looked like children:
 indented, with a Total and a `% parent` like the coarse rows. Andrey's maven-graph code nested fine
@@ -2347,6 +2350,32 @@ time, maybe more threads. Settled:
   branch where they are 70%.
 - **`Total` is gone as a column:** it is `Mean × Executions`, both on the row. An old profile has
   no per-path counts and renders with its summed durations, as before.
+
+## Fine labels counted as coarse children · 2026-10-23
+
+The coarse table showed fine labels only under leaves, as the leaf's samples split by label. Andrey
+asked why `merge` - the request's own work after its branches - was not in the table, and suspected
+the leaf split failed the same way `Total` had once fine labels ran in parallel. It did: in
+`Branching.kt`, a leaf half `compute` on its own thread and half `assist` handed to two helpers read
+compute 25%, unlabelled 26% (the leaf's thread parked on its helpers) and assist 49%. Settled with
+him, after rereading the tier rules (profiler.md, "Two tiers"), to break the one that said
+cross-thread structure is the coarse tier's alone:
+
+- **Under every coarse row, its own time by fine label,** sorted in with its coarse children: the
+  rows under `request` are its branches and its `merge`. Not only leaves.
+- **Each fine row counted as a coarse child:** per tick, the sampler counts the samples of each
+  (execution, fine label) and how many executions had it running, in the same stamped table as
+  `Parallel`. Its wall is the latter times the step, divided by the row's divisor; its `Parallel` is
+  the former over the latter. Nothing changes in the hook.
+- **A waiting unlabelled sample is dropped when another thread is under the same execution** this
+  tick - a caller parked on a join, whose time is the workers'. Known only after the walk, so such
+  samples are held until it ends. A waiting sample inside a label is kept: that is the label's time.
+- **The `parallelism: its work on N more threads` line is gone:** forked work with no coarse label is
+  now a fine row with its own `Parallel`, or `unlabelled` with one.
+- **Tests with real threads and timed spins,** `OwnTimeTest`: a fine label forked onto helpers, on
+  two drivers at once; a fine label beside forked coarse children; requests side by side; and a
+  plain `Thread` that does not carry the context. Each checks the rows against the known shares.
+- **An old profile** has none of these counts and draws a leaf's fine rows the old way.
 
 ## The thread-state probe · 2026-10-23 · shelved on branch `probe`
 

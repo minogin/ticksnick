@@ -154,6 +154,8 @@ object ProfileStore {
             line(k + "runningInclusiveHits", n.runningInclusiveHits)
             sparse(k + "fine", n.fine)
             line(k + "pausedNanos", n.pausedNanos)
+            line(k + "instanceTicks", n.instanceTicks)
+            line(k + "coveredTicks", n.coveredTicks)
             // Only where there are any, so a file from before keys existed reads the same.
             if (n.slowest.isNotEmpty()) {
                 line(k + "slowest", n.slowest.size)
@@ -253,6 +255,9 @@ object ProfileStore {
                 spanMaxNanos = long(k + "spanMaxNanos"), hist = sparse(k + "hist", SpanHistogram.BUCKETS),
                 inclusiveHits = long(k + "inclusiveHits"), runningInclusiveHits = long(k + "runningInclusiveHits"),
                 fine = sparse(k + "fine", MAX_OPERATIONS + 1), pausedNanos = long(k + "pausedNanos"),
+                // Added after the format: an older file has neither, and reads as never sampled - every
+                // row at a parallelism of 1, so its Wall is its Total, as the report used to print.
+                instanceTicks = m[k + "instanceTicks"]?.toLong() ?: 0L, coveredTicks = m[k + "coveredTicks"]?.toLong() ?: 0L,
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
                 slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
                     SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))

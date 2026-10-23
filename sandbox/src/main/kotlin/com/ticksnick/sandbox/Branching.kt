@@ -9,7 +9,7 @@ import java.util.concurrent.Executors
 // The knobs. Try THREADS below BRANCHES, or above it, and watch the parallelism lines move.
 
 /** Pool size: how many branches can run at once. */
-const val THREADS = 4
+const val THREADS = 2
 
 /** Requests, one after the other on the main thread. */
 const val REQUESTS = 200
@@ -27,7 +27,7 @@ const val WORK = 2_000_000
  * A small branching program to read parallel reports on: `gradlew :sandbox:branching`.
  *
  * Each request runs on the main thread and forks [BRANCHES] branches onto a pool of [THREADS]; each
- * branch prepares, then works through [LEAVES] leaves; the request waits for all of them and merges.
+ * branch prepares - the n-th for n units of work - then works through [LEAVES] leaves; the request waits for all of them and merges.
  * Coarse labels are the tree, fine labels are the work inside it.
  */
 fun main() {
@@ -45,10 +45,12 @@ fun main() {
     Profiler.start()
     repeat(REQUESTS) {
         op(request) {
-            val branches = (1..BRANCHES).map {
+            val branches = (1..BRANCHES).map { b ->
                 pool.submit(Callable {
                     op(branch) {
-                        var s = op(prepare) { burn(WORK) }
+                        // Each branch prepares for a different time, so the branches of one request
+                        // are out of step, as real ones are: their leaves do not line up.
+                        var s = op(prepare) { burn(WORK * b) }
                         repeat(LEAVES) { s += op(leaf) { op(compute) { burn(2 * WORK) } } }
                         s
                     }

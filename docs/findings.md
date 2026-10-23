@@ -1568,6 +1568,16 @@ renamed, invisible because the documented launch is `java -cp`.
 
 ## Crossing threads
 
+### Counting parallelism per parent costs the sampler about 50 ns per thread per tick
+
+2026-10-23, `gradlew :run --args="--coarse --seconds=15"`, the commit before against the one that
+adds `CoarseNode.parallel` (a stamped table of (parent context, type) pairs, one lookup per open
+execution per tick), alternated, clock 193-225% of base: the slot walk was **377, 392, 406 ns** per
+slot before and **479, 414, 425 ns** after - about +50 ns, **0.4 µs a tick at eight threads**. One
+run of the new code failed the bench's calibration and was rerun, outside the clock trace. The logs are not kept, and
+the series is three runs per arm, enough for a cost this far
+under a microsecond and not for anything finer.
+
 **The bench can now fan a request out, and with propagation absent the profiler cannot see any of
 it.** Phase 5a: seven drivers and eight helpers, `--coarse --fanout=8 --threads=7 --seconds=60`, run
 2026-08-30. Clock across the run window: mean **175.5%** of nominal, range 90.1–233.1, 120 samples,

@@ -24,6 +24,10 @@ class ProfileDiff(
     val beforeName: String = "before",
     val afterName: String = "after",
 ) {
+    /** Each run's coarse rows by wall time, as the report prints them. See [Profile.wallsOf]. */
+    private val wallBefore = before.wallsOf()
+    private val wallAfter = after.wallsOf()
+
     /** One operation on both sides; either side may be absent. */
     private class Pair(val label: String, val a: Profile.OperationRow?, val b: Profile.OperationRow?)
 
@@ -46,11 +50,11 @@ class ProfileDiff(
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.coarseTree.isNotEmpty() || after.coarseTree.isNotEmpty()) {
             appendLine()
-            appendLine("COARSE OPERATIONS - measured durations, inclusive, matched by path")
+            appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path")
             appendLine(
                 String.format(
                     Locale.ROOT, COARSE_DIFF_ROW,
-                    "Coarse operation", "Total", "change", "Paused", "Executions"
+                    "Coarse operation", "Wall", "change", "Paused", "Executions"
                 )
             )
             appendLine("-".repeat(DIFF_WIDTH))
@@ -98,7 +102,7 @@ class ProfileDiff(
     private fun StringBuilder.tree(afterNodes: List<CoarseNode>, beforeNodes: List<CoarseNode>, depth: Int) {
         val indent = "  ".repeat(depth)
         val seen = HashSet<String>()
-        for (b in afterNodes.sortedByDescending { it.spanSumNanos }) {
+        for (b in afterNodes.sortedByDescending { wallAfter[it] ?: 0.0 }) {
             val a = beforeNodes.firstOrNull { it.name == b.name }
             seen += b.name
             node(indent, b.name, a, b)
@@ -106,15 +110,15 @@ class ProfileDiff(
         }
         // Paths that the earlier run had and this one does not: printed under their parent, with
         // nothing on the right, so that a label that was removed is not silently gone.
-        for (a in beforeNodes.filter { it.name !in seen }.sortedByDescending { it.spanSumNanos }) {
+        for (a in beforeNodes.filter { it.name !in seen }.sortedByDescending { wallBefore[it] ?: 0.0 }) {
             node(indent, a.name, a, null)
             tree(emptyList(), a.children, depth + 1)
         }
     }
 
     private fun StringBuilder.node(indent: String, name: String, a: CoarseNode?, b: CoarseNode?) {
-        val ta = a?.spanSumNanos?.toDouble() ?: Double.NaN
-        val tb = b?.spanSumNanos?.toDouble() ?: Double.NaN
+        val ta = a?.let { wallBefore[it] } ?: Double.NaN
+        val tb = b?.let { wallAfter[it] } ?: Double.NaN
         appendLine(
             String.format(
                 Locale.ROOT, COARSE_DIFF_ROW,

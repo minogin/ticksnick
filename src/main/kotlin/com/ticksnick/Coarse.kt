@@ -70,6 +70,13 @@ class CoarseContext @PublishedApi internal constructor(
     internal var tickStamp: Long = -1L
 
     /**
+     * As [tickStamp], for the count per path rather than per type: [tickStamp] is set only for the
+     * first context of a type in a chain, so a type nested in itself would be counted once.
+     */
+    @JvmField
+    internal var nodeStamp: Long = -1L
+
+    /**
      * Whether the thread that opened this execution has closed it.
      *
      * **The one thing a borrowed context cannot tell you by looking at it.** A context that has been
@@ -233,6 +240,10 @@ internal class CoarsePath(
     // The sampled half: written by the sampling thread.
     @JvmField var inclusiveHits: Long = 0
     @JvmField var runningInclusiveHits: Long = 0
+    /** Ticks with an execution on this path open, one per execution per tick. See `CoarseNode.parallel`. */
+    @JvmField var instanceTicks: Long = 0
+    /** Ticks with a parent execution holding at least one execution on this path open, one per parent per tick. */
+    @JvmField var coveredTicks: Long = 0
     /** Inclusive hits by the fine operation they caught, last entry no fine label. Allocated on the first hit. */
     @JvmField var fine: LongArray? = null
     /**
@@ -306,6 +317,8 @@ internal class CoarsePath(
         for (i in hist.indices) hist[i] += o.hist[i]
         inclusiveHits += o.inclusiveHits
         runningInclusiveHits += o.runningInclusiveHits
+        instanceTicks += o.instanceTicks
+        coveredTicks += o.coveredTicks
         pausedNanos += o.pausedNanos
         val of = o.fine
         if (of != null) {
@@ -326,6 +339,8 @@ internal class CoarsePath(
         hist.fill(0L)
         inclusiveHits = 0
         runningInclusiveHits = 0
+        instanceTicks = 0
+        coveredTicks = 0
         fine?.fill(0L)
         pausedNanos = 0
         pauseStamp = -1

@@ -379,8 +379,23 @@ class CoarseNode internal constructor(
     val children: List<CoarseNode>,
     /** For an operation opened with a key: its slowest executions on this path, longest first. Measured. */
     val slowest: List<SlowExecution> = emptyList(),
+    /** Ticks with an execution on this path open, one per execution per tick. See [parallel]. */
+    val instanceTicks: Long = 0,
+    /** Ticks with a parent execution holding at least one execution on this path open, one per parent per tick. */
+    val coveredTicks: Long = 0,
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
+
+    /**
+     * **How many executions on this path ran at a time under the same parent execution,** on average
+     * over the ticks when the parent had at least one open. 4 branches of one request on a pool of 2
+     * read 2.0; leaves worked through one after another in each branch read 1.0, however many
+     * branches run beside each other. Per parent and not overall, because overall is the wrong
+     * divisor: `select` inside maven-graph's `resolve` is open 5.5 at a time across ten threads, and
+     * never two at a time in one `resolve`. A root's parent is the run, so for a root it is how many
+     * ran at a time at all. Sampled; NaN for a path never caught open.
+     */
+    val parallel: Double get() = if (coveredTicks == 0L) Double.NaN else instanceTicks.toDouble() / coveredTicks
 
     /** As [CoarseStat.percentileNanos]: at the top of its bucket, never above the exact maximum. */
     fun percentileNanos(p: Double): Double {
@@ -1175,23 +1190,35 @@ class Profile internal constructor(
         return ceiling.isFinite() && c.working.isFinite() && c.working > ceiling * WORKING_CEILING_SLACK
     }
 
-    /**
-     * Whether [c]'s executions ran side by side more than its parent's did: at least [PARALLEL_SHOWN]
-     * at once, and that many times its parent's. Above the parent's, not merely different: `select`
-     * inside `resolve` runs 5.5 at once only because it is part of `resolve`'s time.
-     */
-    private fun sideBySide(c: CoarseStat, parent: CoarseStat?): Boolean = moreThan(c.inFlight, parent?.inFlight)
-
-    /**
-     * Whether [c]'s executions each spread over more threads than its parent's, with no child row under
-     * [n] running side by side to say so - forked work with no coarse label of its own.
-     */
-    private fun forksUnlabelled(c: CoarseStat, parent: CoarseStat?, n: CoarseNode): Boolean =
-        moreThan(c.inside, parent?.inside) &&
-                n.children.none { child -> coarse.firstOrNull { it.type == child.type }?.let { sideBySide(it, c) } == true }
-
     private fun moreThan(v: Double, parentV: Double?): Boolean =
         v.isFinite() && v >= PARALLEL_SHOWN && (parentV == null || !parentV.isFinite() || v / parentV >= PARALLEL_SHOWN)
+
+    /** What a row's executions are divided by: its parallelism, or 1 where it is under [PARALLEL_SHOWN] or unknown. */
+    private fun factorOf(n: CoarseNode): Double = n.parallel.let { if (it.isFinite() && it >= PARALLEL_SHOWN) it else 1.0 }
+
+    /**
+     * **Each row's wall time: the part of its root's wall time the row accounts for.** Its measured
+     * durations summed, divided by its own parallelism and by every parallelism above it. 800
+     * branches summing to 12.3 s, 3.4 at a time under each request, are 3.65 s of the requests' 4.06
+     * s; the leaves inside them, one at a time in each branch, are 8.60 s divided by the same 3.4,
+     * 2.55 s, which is 70% of the branches - the share each branch spends in leaves.
+     *
+     * Not the time a row was open anywhere: that would put `select` at 98% of maven-graph's `resolve`
+     * when it is 54% of each, because across ten threads some `select` is nearly always open. And not
+     * the summed durations, `Total` until 2026-10-23, which read 988% of the parent once a fork ran
+     * ten at a time. A row whose executions never overlap under one parent, nor above it, gets its
+     * summed durations exactly; only a parallelism makes it an estimate, and only through that figure.
+     */
+    fun wallsOf(): Map<CoarseNode, Double> {
+        val out = HashMap<CoarseNode, Double>()
+        fun walk(n: CoarseNode, divisor: Double) {
+            val d = divisor * factorOf(n)
+            out[n] = n.spanSumNanos / d
+            for (c in n.children) walk(c, d)
+        }
+        for (r in coarseTree) walk(r, 1.0)
+        return out
+    }
 
     /** How much of the observed thread-time happened anywhere under [c]. */
     fun shareOf(c: CoarseStat): Double =
@@ -1363,10 +1390,11 @@ class Profile internal constructor(
             appendLine("  executions, mean and the percentiles are MEASURED, two timestamps per execution - the")
             appendLine("    only numbers here that are not sampled. Percentiles round UP to their bucket, at most")
             appendLine("    12.5% high and never low, and never above max, which is exact")
-            appendLine("  Total sums the executions' durations, so executions side by side sum past the parent's:")
-            appendLine("    % parent over 100% is how many ran at once")
-            appendLine("  'parallelism: N executions at a time' under a row: its executions ran N side by side on")
-            appendLine("    average, more than its parent's did. Under the rows forked into, not the row that forks")
+            appendLine("  wall is the part of its root's wall time a row took: its durations summed, divided by")
+            appendLine("    how many ran at a time under each parent, at its level and above. % parent is of the")
+            appendLine("    parent's wall, and the rest of 100% is the parent's own time outside this child")
+            appendLine("  parallel is how many of a row's executions ran at a time under the same parent execution,")
+            appendLine("    blank at 1. Read it beside x parent: x4.0 with 2.0 is four started, two at a time")
             appendLine("  'parallelism: its work on N more threads' under a row: work it forked with no coarse label")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
             appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
@@ -1393,21 +1421,26 @@ class Profile internal constructor(
         // the heaviest operation anywhere is at the end of the first branch - the ranking holds.
         val pausedInSpan = pause.confirmedPausedIn(samplingSpanNanos)
         appendLine(
-            // Durations, not wall time: each execution is timed by the clock, but `Total` adds them up,
-            // and executions that ran side by side sum past the wall time they shared - 31.5 s of
-            // resolveRoot inside a 3.19 s batch. Andrey, 2026-10-23.
-            "COARSE OPERATIONS - measured durations, inclusive, nested as it ran" +
+            // Wall time, so each row says what part of its parent it took: `branch` 88% of the request,
+            // and the rest the request's own merge. It was the summed durations, which read 988% of
+            // the parent once a fork ran ten at a time. Andrey, 2026-10-23: "we don't need numbers per
+            // se, we need to find where the leak is". See wallsOf.
+            "COARSE OPERATIONS - wall time, inclusive, nested as it ran" +
                     if (pausedInSpan > 0) "; a pause is charged to every operation it interrupted" else ""
         )
         appendLine(
             String.format(
-                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Total v", "% parent", "Paused", "Mean",
+                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
                 "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
         )
         appendLine("-".repeat(COARSE_WIDTH))
         val byType = coarse.associateBy { it.type }
         val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
+        val walls = wallsOf()
+        fun wall(n: CoarseNode): Double = walls[n] ?: n.spanSumNanos.toDouble()
+        // The tree's order: heaviest wall first, so the row to read next is the top one.
+        val heaviest = compareByDescending<CoarseNode> { wall(it) }.thenByDescending { it.inclusiveHits }
 
         fun waitSplit(inclusive: Long, running: Long): String =
             runnableSplit(if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive)
@@ -1415,10 +1448,10 @@ class Profile internal constructor(
         fun shareText(share: Double): String = if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
 
         // Against the row above: how many executions per execution of the parent - the loop count -
-        // and what part of the parent's total this row is. Left blank where there is nothing to
-        // read: a root has no parent, and a child run exactly once per parent execution is x1. The
-        // share is not capped at 100%: children forked onto other threads sum past their parent's
-        // wall time, and the excess is the parallelism. Andrey, 2026-10-16.
+        // and what part of the parent's wall time this row is. Left blank where there is nothing to
+        // read: a root has no parent, and a child run exactly once per parent execution is x1. Under
+        // 100%, with the rest the parent's own time outside this child. Andrey, 2026-10-16; wall and
+        // not summed durations since 2026-10-23.
         fun perParent(n: CoarseNode, parent: CoarseNode?): String = when {
             parent == null || parent.count == 0L || n.count == parent.count -> ""
             else -> {
@@ -1429,10 +1462,15 @@ class Profile internal constructor(
 
         fun shareOfParent(n: CoarseNode, parent: CoarseNode?): String = when {
             parent == null || parent.spanSumNanos == 0L || n.count == 0L -> ""
-            else -> {
-                shareText(n.spanSumNanos * 100.0 / parent.spanSumNanos)
-            }
+            else -> shareText(wall(n) * 100.0 / wall(parent))
         }
+
+        // Beside `x parent`, so the two read as one sentence: 4 per request, 2.0 at a time - more
+        // threads would help. Blank at 1, which is most rows. One decimal: the second of a sampled
+        // average is noise. A column since 2026-10-23, when it was a line under the row, and the
+        // line before that sat under the forking row, which is not itself parallel.
+        fun parallelText(n: CoarseNode): String =
+            if (factorOf(n) > 1.0) String.format(Locale.ROOT, "%.1f", n.parallel) else ""
 
         var anySplit = false
 
@@ -1444,8 +1482,8 @@ class Profile internal constructor(
             appendLine(
                 String.format(
                     Locale.ROOT, COARSE_ROW,
-                    indent + n.name, n.count, perParent(n, parent),
-                    if (timed) duration(n.spanSumNanos.toDouble()) else "-",
+                    indent + n.name, n.count, perParent(n, parent), parallelText(n),
+                    if (timed) duration(wall(n)) else "-",
                     shareOfParent(n, parent),
                     if (n.pausedNanos > 0) duration(n.pausedNanos.toDouble()) else "-",
                     if (timed) duration(n.meanSpanNanos) else "-",
@@ -1474,8 +1512,8 @@ class Profile internal constructor(
             // more level of the tree. For a hierarchy, the outer label is made coarse and pays
             // for it. plan.md, "Fine rows in the coarse table are a split", 2026-10-16.
             //
-            // The total is the share of the leaf's samples applied to the leaf's measured total, so
-            // it agrees with `% parent`. It was one `made of:` line until 2026-10-16.
+            // The wall is the share of the leaf's samples applied to the leaf's wall, so it agrees
+            // with `% parent`. It was one `made of:` line until 2026-10-16.
             if (n.children.isEmpty() && n.inclusiveHits > 0) {
                 val parts = operations
                     .map { it.name to n.fine[it.id] }
@@ -1488,8 +1526,8 @@ class Profile internal constructor(
                     appendLine(
                         String.format(
                             Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
-                            "$indent  $SPLIT_MARK $name", "own", "",
-                            if (timed) duration(n.spanSumNanos * share) else "-",
+                            "$indent  $SPLIT_MARK $name", "own", "", "",
+                            if (timed) duration(wall(n) * share) else "-",
                             shareText(share * 100), "", "", "", "", "", "", ""
                         ).trimEnd()
                     )
@@ -1499,34 +1537,18 @@ class Profile internal constructor(
                     "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.second } * 100.0 / n.inclusiveHits) + " between them"
                 )
             }
-            // How many ran side by side, under the rows that did: `branch` 3.90 at once, which is the
-            // `% parent` over 100% read out. The row that forks gets nothing - a request that waits on
-            // its branches is not itself parallel, and "4.36 threads per execution" there counted the
-            // parked caller with the branches. Andrey, 2026-10-23, on `:sandbox:branching`, after a
-            // version that printed both. The one exception is forked work with no coarse label of its
-            // own, where no child row exists to carry the line: then the fork is said on the parent.
-            // Only on a run with more than one thread, where these numbers can be anything but 1.
+            // The fork the Parallel column cannot show: work handed to a pool with no coarse label of
+            // its own, so there is no child row to carry the figure, and the parent's executions each
+            // spread over more threads than its parent's did. Only on a run with more than one thread.
             val c = byType[n.type]
-            if (threads > 1 && c != null) {
-                val above = parent?.let { byType[it.type] }
-                val line = when {
-                    // Executions, the table's own word: a row's execution can run on several threads.
-                    // One decimal: the second of a sampled average is noise. No "on a CPU" beside it -
-                    // that was Java's RUNNABLE under a stronger name, and the row's Runnable / Waiting
-                    // already gives the split. Andrey, 2026-10-23.
-                    sideBySide(c, above) ->
-                        String.format(Locale.ROOT, "%.1f executions at a time, on average", c.inFlight)
-                    forksUnlabelled(c, above, n) ->
-                        String.format(Locale.ROOT, "its work on %.1f more threads, on average", c.inside - 1)
-                    else -> null
-                }
-                if (line != null) appendLine("$indent  parallelism: $line")
-            }
-            for (child in n.children.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
+            if (threads > 1 && c != null && n.children.none { factorOf(it) > 1.0 } &&
+                moreThan(c.inside, parent?.let { byType[it.type] }?.inside)
+            ) appendLine(String.format(Locale.ROOT, "$indent  parallelism: its work on %.1f more threads, on average", c.inside - 1))
+            for (child in n.children.sortedWith(heaviest)) {
                 node(child, depth + 1, n)
             }
         }
-        for (root in coarseTree.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
+        for (root in coarseTree.sortedWith(heaviest)) {
             node(root, 0, null)
         }
         appendLine("-".repeat(COARSE_WIDTH))
@@ -1539,7 +1561,8 @@ class Profile internal constructor(
         // figures under that caller alone. Its percentiles over everything are a different
         // question - "how long does a parse take" - and they are answered here, once, only when
         // the question exists.
-        val shared = seen.filter { (nodesOf[it.type]?.size ?: 0) > 1 }.sortedByDescending { it.spanSumNanos }
+        fun wallOf(c: CoarseStat): Double = nodesOf[c.type]!!.sumOf { wall(it) }
+        val shared = seen.filter { (nodesOf[it.type]?.size ?: 0) > 1 }.sortedByDescending { wallOf(it) }
         if (shared.isNotEmpty()) {
             appendLine("  Under more than one caller - all callers together:")
             for (c in shared) {
@@ -1547,8 +1570,8 @@ class Profile internal constructor(
                 appendLine(
                     String.format(
                         Locale.ROOT, COARSE_ROW,
-                        "  " + c.name, c.count, "",
-                        duration(c.spanSumNanos.toDouble()), "",
+                        "  " + c.name, c.count, "", "",
+                        duration(wallOf(c)), "",
                         if (paused > 0) duration(paused.toDouble()) else "-",
                         duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
                         duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
@@ -2263,10 +2286,10 @@ class Profile internal constructor(
          * which is true and is in the friction log. Then the parallelism columns left and took
          * more than `Total` had added.
          */
-        const val COARSE_WIDTH = 156
+        const val COARSE_WIDTH = 165
 
-        /** One row of the coarse table: name, executions and per parent, total and its share of the parent, paused, five durations, the split. */
-        const val COARSE_ROW = "%-30s %,11d %8s %10s %8s %10s %10s %10s %10s %10s %10s %18s"
+        /** One row of the coarse table: name, executions, per parent and parallel, wall and its share of the parent, paused, five durations, the split. */
+        const val COARSE_ROW = "%-30s %,11d %8s %8s %10s %8s %10s %10s %10s %10s %10s %10s %18s"
 
         /**
          * The fine table, likewise drawn to itself.

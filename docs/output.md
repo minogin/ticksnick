@@ -57,7 +57,7 @@ table heading uses it.
 
 | word | what it is | why it matters |
 |---|---|---|
-| **% parent** | this row's total over its parent's total. Blank on a root | the share without dividing by hand. Siblings that sum to well under 100% leave the rest in the parent's own work, outside any child. **Not capped at 100%**: children forked onto other threads sum past their parent's wall time, and the excess is the parallelism |
+| **% parent** | this row's wall over its parent's wall. Blank on a root | the share without dividing by hand. Siblings that sum to well under 100% leave the rest in the parent's own work, outside any child |
 | **paused** | the JVM stopped every thread | how much the collector costs. Tuning it or cutting allocation attacks this directly |
 | **active** | the rest of wall time; the only time samples exist in | the time the code is responsible for. 30% in the table means 30% of this |
 | **waiting** | the thread sat on a lock, a sleep or a park, by JVM state | locks and parked I/O. Removing a wait costs no CPU, only a design change |
@@ -176,7 +176,7 @@ thread inside no label; it has hits and a share, which is what it is for.
 left column.
 
 **Both tables are sorted, and a `v` on the column head says which one by** — `Occupancy% v` in the
-fine table, `Total v` in the coarse one. On the column rather than in a heading sentence, because a
+fine table, `Wall v` in the coarse one. On the column rather than in a heading sentence, because a
 sorted table and an unsorted one look identical when there are two rows, and because the answer is
 not the obvious one: a fine operation called a million times but always brief sits *below* one called
 twice that occupied real time.
@@ -357,31 +357,31 @@ cannot: **how long did one execution take.** It is drawn as a tree: an operation
 it ran inside, and its figures are the executions on that path alone.
 
 ```
-COARSE OPERATIONS - measured durations, inclusive, nested as it ran; a pause is charged to every operation it interrupted
-Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
-------------------------------------------------------------------------------------------------------------------------------------------------------------
-run                                      1              16.2 s              768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
-  runBatch                               1              16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
-    query                                1              16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
-      level[4]                           1              11.2 s      69%     421 ms     11.2 s     11.2 s     11.2 s     11.2 s     11.2 s          100% / 0%
-        - visitedAdd                   own              9.02 s      80%
-        - node                         own              1.21 s      11%
-        - id                           own              669 ms       6%
-        - nextAdd                      own              311 ms       3%
-      level[5]                           1              3.92 s      24%     177 ms     3.92 s     3.92 s     3.92 s     3.92 s     3.92 s          100% / 0%
-        - node                         own              3.54 s      90%
-        - id                           own              378 ms      10%
-      level[3]                           1              1.02 s       6%     169 ms     1.02 s     1.02 s     1.02 s     1.02 s     1.02 s          100% / 0%
-        - visitedAdd                   own              745 ms      73%
-        - node                         own              136 ms      13%
-        - nextAdd                      own             84.3 ms       8%
-        - id                           own             55.4 ms       5%
-      level[2]                           1             29.4 ms      <1%          -    29.4 ms    29.4 ms    29.4 ms    29.4 ms    29.4 ms          100% / 0%
-        - visitedAdd                   own             15.2 ms      52%
-        - node                         own             11.1 ms      38%
-        - id                           own             2.03 ms       7%
-        - nextAdd                      own             1.01 ms       3%
-------------------------------------------------------------------------------------------------------------------------------------------------------------
+COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
+Coarse operation                Executions x parent Parallel     Wall v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+run                                      1                       16.2 s              768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+  runBatch                               1                       16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+    query                                1                       16.2 s     100%     768 ms     16.2 s     16.2 s     16.2 s     16.2 s     16.2 s          100% / 0%
+      level[4]                           1                       11.2 s      69%     421 ms     11.2 s     11.2 s     11.2 s     11.2 s     11.2 s          100% / 0%
+        - visitedAdd                   own                       9.02 s      80%
+        - node                         own                       1.21 s      11%
+        - id                           own                       669 ms       6%
+        - nextAdd                      own                       311 ms       3%
+      level[5]                           1                       3.92 s      24%     177 ms     3.92 s     3.92 s     3.92 s     3.92 s     3.92 s          100% / 0%
+        - node                         own                       3.54 s      90%
+        - id                           own                       378 ms      10%
+      level[3]                           1                       1.02 s       6%     169 ms     1.02 s     1.02 s     1.02 s     1.02 s     1.02 s          100% / 0%
+        - visitedAdd                   own                       745 ms      73%
+        - node                         own                       136 ms      13%
+        - nextAdd                      own                      84.3 ms       8%
+        - id                           own                      55.4 ms       5%
+      level[2]                           1                      29.4 ms      <1%          -    29.4 ms    29.4 ms    29.4 ms    29.4 ms    29.4 ms          100% / 0%
+        - visitedAdd                   own                      15.2 ms      52%
+        - node                         own                      11.1 ms      38%
+        - id                           own                      2.03 ms       7%
+        - nextAdd                      own                      1.01 ms       3%
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ```
 
 The graph benchmark: `run` around the measured batches, `runBatch` around each, `query` around
@@ -394,42 +394,50 @@ percentiles repeat the total; on a request served a million times they are the p
 | **the nesting** | an operation under the one it ran inside; siblings by total | the figures on a row are the executions on **that path**. An operation with two callers is a row under each, and once more under the table as *all callers together* |
 | **executions** | completed executions on that path, counted exactly | not sampled. If this disagrees with what you think ran, a label is leaking |
 | **x parent** | executions per execution of the parent: the loop count. Blank on a root, and where it is once per parent | `x12.0` under `resolve` means each resolve ran it twelve times. A fraction means it ran on only some of the parent's executions |
-| **total** | the measured durations summed. **Not wall time** once executions overlap: 5,262 `resolveRoot`s ten at a time sum to 31.5 s inside a 3.19 s batch, and `% parent` reads 988% - which is how many ran at once | the ranking for *what do I fix first*: exact, not sampled. **Inclusive** - a parent contains its children. Inclusive time is monotone up a path, so the heaviest operation anywhere is at the end of the first branch. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
+| **parallel** | how many of the row's executions ran at a time under the same parent execution. Blank at 1 | read beside `x parent`: four started and two at a time is a pool too small. See below |
+| **wall** | the part of its root's wall time the row took: summed durations divided by the `Parallel` on its path | the ranking for *what do I fix first*: exact where nothing on the path ran side by side, otherwise estimated through `Parallel`. **Inclusive** - a parent contains its children. Inclusive time is monotone up a path, so the heaviest operation anywhere is at the end of the first branch. Self time would be the honest key once spans nest ([ideas.md](ideas.md) item 28) |
 | **paused** | of the total, time every thread was stopped - usually GC - charged to every span open when the pause lifted | the span the pause **interrupted**, not the one that caused it: a young collection lands in whoever allocated last. A `-` is none. Rows sum to at most the header's paused figure |
 | **mean, p50, p90, p99, max** | **measured**, two timestamps per execution | the only numbers in the whole report that are not sampled. Percentiles come from a log-bucket histogram: **at most 12.5% high, never low** |
 | **runnable / waiting** | the same split as the fine table, over the samples caught anywhere inside the span on that path | `0%` waiting here because the benchmark never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
 | **slowest:, under a row** | for an operation opened with `op(x, key = { ... })`: its five longest executions on that path, longest first, with the key each was opened with. **Measured** | which cases to run again. Wall time, so a GC pause in one can be all that put it there; `paused` on the row says whether there were any |
-| **the `- ... own` rows, under a leaf** | the leaf's time **split by the innermost label**, sampled: each sample inside the leaf counted once, under the fine label that was innermost, or `unlabelled`. They add up to 100%. Total is the share of the leaf's samples applied to the leaf's measured total, so it agrees with `% parent` | **a split, not children.** A fine label with fine labels inside it shows only its own part - the inner ones are their own rows, not inside it. The report cannot see fine nesting; for a hierarchy, make the outer label coarse. On the leaves only: a parent's would be its children's over again |
-| **`parallelism: N executions at a time`, under a row** | its executions ran `N` side by side on average, more than its parent's did | see below. The row that forks has no line; the rows it forks into do |
+| **the `- ... own` rows, under a leaf** | the leaf's time **split by the innermost label**, sampled: each sample inside the leaf counted once, under the fine label that was innermost, or `unlabelled`. They add up to 100%. Wall is the share of the leaf's samples applied to the leaf's wall, so it agrees with `% parent` | **a split, not children.** A fine label with fine labels inside it shows only its own part - the inner ones are their own rows, not inside it. The report cannot see fine nesting; for a hierarchy, make the outer label coarse. On the leaves only: a parent's would be its children's over again |
+| **`parallelism: its work on N more threads`, under a row** | work the row forked with no coarse label of its own, so no child row can carry `Parallel` | label the forked work coarse, and its row gets the figure |
 
-### How many ran at a time, under the rows that did
+### `Parallel` and `Wall`: how many ran at a time, and what part of the parent they took
 
-A row whose executions ran side by side gets a `parallelism:` line under it. maven-graph's batch
-hands each root to a pool of ten:
+A coarse table answers *why does this take so long*, row by row: what part of the parent each child
+took, and whether the children ran one after another or side by side. `Branching.kt` in the sandbox,
+where each request forks 4 branches onto a pool of 4 and each branch works through 3 leaves:
 
 ```
-runBatch                                 1              3.19 s  ...
-  resolveRoot                        5,262   x5,262     31.5 s     988%  ...
-    parallelism: 9.9 executions at a time, on average
-    resolve                         15,786     x3.0     31.5 s     100%  ...
+Coarse operation                Executions x parent Parallel     Wall v % parent  ...
+request                                200                       3.95 s           ...
+  branch                               800     x4.0      3.4     3.58 s      90%  ...
+    leaf                             2,400     x3.0              2.50 s      70%  ...
 ```
 
-**`N executions at a time, on average`** is how many of the row's executions were open at the same
-moment, averaged over the ticks when at least one was. Executions and not threads: an execution can
-itself run on several threads. It is close to `% parent` over 100% but not the same - that averages
-over all of the parent's time, gaps included. **A property of your load** as much as your code: add
-threads or clients and it moves. Whether those threads were working is the row's `Runnable /
-Waiting`; the line used to add *"M on a CPU"*, which was that same split under a stronger name.
+Read it as: a request takes 3.95 s; 90% of that is its branches, 4 per request, 3.4 at a time, and
+the rest its own merge; a branch spends 70% of its time in 3 leaves, one after another.
 
-**The row that forks gets nothing.** `runBatch` waits on its roots and is not itself parallel; a
-line under it used to say *"10.87 threads per execution"*, counting the parked caller with the
-workers. The one exception is work forked with no coarse label of its own: no child row exists to
-carry the line, so the parent says **`parallelism: its work on N more threads, on average`**.
+- **`Parallel`** — how many of a row's executions ran at a time **under the same parent
+  execution**, on average over the ticks when the parent had one open. Blank at 1, which is most
+  rows. Read beside `x parent`: `x4.0  2.0` is four started per request and two at a time - more
+  threads would help. Per parent and not overall: `select` inside maven-graph's `resolve` is open 5.5
+  at a time across ten threads, and never two at a time in one `resolve`, so it reads blank. For a
+  root, whose parent is the run, it is how many ran at a time at all. Sampled.
+- **`Wall`** — the part of its root's wall time the row took: its measured durations summed, divided
+  by its `Parallel` and by every `Parallel` above it. A row with no `Parallel` on its path gets its
+  summed durations exactly; only a `Parallel` makes it an estimate, and only through that figure.
+  `% parent` is of the parent's `Wall`, so it never passes 100%, and what is missing from 100% is
+  the parent's own time outside that child.
 
-The line is left off when `N` is under 1.1, or not at least 1.1 times the parent's: `resolve` runs
-ten at a time only because it is inside `resolveRoot`, and `select` inside `resolve` 5.5 only because
-it is half of `resolve`'s time. One decimal: the second of a sampled average is noise. Settled
-2026-10-23, after three versions the same day.
+**What it replaced, the same day.** The column was `Total`, the summed durations, which ran past the
+parent once a fork ran side by side: 5,262 `resolveRoot`s ten at a time summed to 31.5 s inside a
+3.19 s batch, 988%. Dividing by how many were open *anywhere* fixed the fork and broke everything
+under it - `select` came out at 98% of `resolve` instead of 54%, since across ten threads some
+`select` is nearly always open. And the parallelism was a line under the rows, first under the row
+that forks, which is not itself parallel. The one line left is for work forked with no coarse label
+of its own, which no child row can carry: **`parallelism: its work on N more threads, on average`**.
 
 They were three columns named `inside`, `working` and `in flight` until 2026-08-31, when a reader
 looked for parallelism, could not find it, and turned out to have been staring at all three. The word

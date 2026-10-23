@@ -350,10 +350,36 @@ class CoarseTest {
         c: CoarseStat, paused: Long = 0, fine: LongArray = LongArray(MAX_OPERATIONS + 1),
         children: List<CoarseNode> = emptyList(),
         count: Long = c.count, sumNanos: Long = c.spanSumNanos, inclusive: Long = c.inclusiveHits,
+        instanceTicks: Long = 0, coveredTicks: Long = 0,
     ) = CoarseNode(
         c.type, c.name, count, sumNanos, c.spanMinNanos, c.spanMaxNanos, LongArray(SpanHistogram.BUCKETS),
         inclusive, inclusive, fine, paused, children,
+        instanceTicks = instanceTicks, coveredTicks = coveredTicks,
     )
+
+    /**
+     * The sandbox's shape, `:sandbox:branching`: 200 requests, each forking 4 branches that run 3.4
+     * at a time, each branch working through 3 leaves one after another. A leaf's wall is divided by
+     * the branches' 3.4 as well as by its own 1, so it is 70% of a branch - what a branch spends in
+     * leaves - and not the 90% that dividing by how many leaves were open anywhere gave.
+     */
+    @Test
+    fun `wall divides by how many ran at a time under the same parent, at the row and above`() {
+        val req = stat(count = 200, sumNanos = 4_000_000_000, hits = 1, running = 1, name = "request", id = 0)
+        val br = stat(count = 800, sumNanos = 12_000_000_000, hits = 1, running = 1, name = "branch", id = 1)
+        val lf = stat(count = 2_400, sumNanos = 8_400_000_000, hits = 1, running = 1, name = "leaf", id = 2)
+        val leaf = node(lf, instanceTicks = 1_000, coveredTicks = 1_000)
+        val branch = node(br, children = listOf(leaf), instanceTicks = 3_400, coveredTicks = 1_000)
+        val request = node(req, children = listOf(branch), instanceTicks = 1_000, coveredTicks = 1_000)
+        val r = report(listOf(req, br, lf), tree = listOf(request))
+        val walls = r.wallsOf()
+        assertEquals(4.0e9, walls.getValue(request), 1.0)
+        assertEquals(12e9 / 3.4, walls.getValue(branch), 1.0)
+        assertEquals(8.4e9 / 3.4, walls.getValue(leaf), 1.0)
+        val text = r.render()
+        assertTrue(Regex("""branch\s+800\s+x4\.0\s+3\.4\s+3\.53 s\s+88%""").containsMatchIn(text), text)
+        assertTrue(Regex("""leaf\s+2,400\s+x3\.0\s+2\.47 s\s+70%""").containsMatchIn(text), text)
+    }
 
     /**
      * A report with a 1 ms step, so that a hit is a millisecond and the arithmetic in these tests

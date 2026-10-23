@@ -2328,6 +2328,26 @@ read `31.5 s`, `988%` of a 3.19 s batch, while the one `parallelism:` line, unde
   `N` at 1.1 or over and at least 1.1 times its parent's (`PARALLEL_SHOWN`), so a child repeating
   its parent's figure, or holding part of the parent's time, gets nothing. Per type, as before.
 
+### Then `Parallel` and `Wall` instead of `Total` · 2026-10-23
+
+The lines above lasted an afternoon. Andrey: he did not want `Total` but the time a row took of its
+parent - "we don't need numbers per se, we need to find where the leak is: why does request take
+2.91 s? Because it runs 3.9 branches which take 2.55 s, and also does some merge". And the
+parallelism as a column beside `x parent`, read as one sentence: 4 branches per request, 2 at a
+time, maybe more threads. Settled:
+
+- **`Parallel`, per parent:** executions on a path at a time under the same parent execution. The
+  sampler counts, per tick, executions open on each path and parent executions with at least one
+  open, keyed by (parent context, type) in a stamped table - by type, since each thread's path tree
+  is its own until the end. Nothing changes on the hot path. Measured: the walk goes from 377-406 to
+  414-479 ns per slot on the bench with coarse labels, about 0.4 µs a tick at eight threads.
+- **`Wall` = summed durations ÷ every `Parallel` on the path.** Exact where nothing on the path ran
+  side by side. Not `Total ÷ executions at a time overall`, which was tried first and is wrong
+  under a fork: reproduced in `Branching.kt` with branches out of step, leaves came out 90% of a
+  branch where they are 70%.
+- **`Total` is gone as a column:** it is `Mean × Executions`, both on the row. An old profile has
+  no per-path counts and renders with its summed durations, as before.
+
 ## The thread-state probe · 2026-10-23 · shelved on branch `probe`
 
 **Shelved 2026-10-23: built and measured, then put on branch `probe`; master has none of it.** Andrey's call: a big task of its own - Windows only, an undocumented call, Java 22+ through a multi-release jar and a JVM flag, 5-7.5 µs per thread per tick on the sampler and 2.3% off the workers, only 0.2% of which is explained - against easier ways to say the same thing first. On a CPU-bound program with no I/O inside its labels, such as maven-graph, the gap the duty cycle measures between `Runnable` and CPU can only be threads waiting for a core, probe or not. What follows is the design as it is on the branch.

@@ -39,6 +39,15 @@ enum class WaitStrategy {
  */
 const val STUCK_BUCKETS = 24
 
+/**
+ * Slots in the table of (parent execution, type) pairs seen in one tick - see `Sampler.firstUnder`.
+ * A power of two, and far more than a tick holds: one entry per open coarse execution.
+ */
+private const val PAIR_TABLE = 4096
+
+/** The parent key of a root execution in that table: roots share it, so they count against each other. */
+private val ROOT = Any()
+
 internal class Sampler(
     private val stepNanos: Long,
     private val wait: WaitStrategy = WaitStrategy.SPIN,
@@ -262,6 +271,37 @@ internal class Sampler(
      * not why. 131 KB, flat and indexed rather than nested so the tick loop does one bounds check.
      */
     internal val pairHits = LongArray(MAX_COARSE_TYPES * (MAX_OPERATIONS + 1))
+
+    /**
+     * The (parent execution, type) pairs seen this tick, open-addressed and stamped with the tick, so
+     * nothing is cleared between ticks. See [firstUnder].
+     */
+    private val pairParent = arrayOfNulls<Any>(PAIR_TABLE)
+    private val pairType = IntArray(PAIR_TABLE)
+    private val pairStamp = LongArray(PAIR_TABLE) { -1L }
+
+    /**
+     * Whether this tick has not yet seen an execution of [type] under [parent]: true the first time,
+     * false after. Keyed by the type and not by the path node, because each thread keeps a tree of
+     * its own until the end: the four branches of one request on four pool threads are four nodes,
+     * and one path - under one parent execution, a type is one path. One probe in the usual case; a full table - more open executions in one tick than
+     * it has slots - answers true, which overcounts the parents and reads the parallelism low.
+     */
+    private fun firstUnder(parent: Any, type: Int): Boolean {
+        val h = (System.identityHashCode(parent) * 31 + type) * -0x61c88647
+        var i = (h ushr 16) and (PAIR_TABLE - 1)
+        repeat(PAIR_TABLE) {
+            if (pairStamp[i] != ticks) {
+                pairStamp[i] = ticks
+                pairParent[i] = parent
+                pairType[i] = type
+                return true
+            }
+            if (pairParent[i] === parent && pairType[i] == type) return false
+            i = (i + 1) and (PAIR_TABLE - 1)
+        }
+        return true
+    }
 
     /** Types already credited while walking one parent chain. Reused; never escapes the tick loop. */
     private val chain = IntArray(MAX_COARSE_DEPTH)
@@ -585,6 +625,14 @@ internal class Sampler(
                         if (node != null && !(p.isClosed() && (if (stillMounted < 0) s.contextOpaque() === ctx else stillMounted == 1))) {
                             node.inclusiveHits++
                             if (!waiting) node.runningInclusiveHits++
+                            // Once per execution per tick, and once per parent execution per tick:
+                            // the two counts whose ratio is how many ran at a time under the same
+                            // parent - CoarseNode.parallel.
+                            if (p.nodeStamp != ticks) {
+                                p.nodeStamp = ticks
+                                node.instanceTicks++
+                                if (firstUnder(p.parent ?: ROOT, pt)) node.coveredTicks++
+                            }
                             val f = node.fine ?: LongArray(MAX_OPERATIONS + 1).also { node.fine = it }
                             f[fine]++
                             if (lateNanos > 0 && node.pauseStamp != ticks) {
@@ -728,6 +776,8 @@ internal class Sampler(
         // Settled here whether or not the duty cycle takes a last window, so that the confirmed
         // total covers the whole session even where there is no CPU clock to correct.
         duty.finish(System.nanoTime(), pause.settle(GcPauseClock.pauseNanos()))
+        // The table holds contexts; let them go with the session.
+        pairParent.fill(null)
     }
 
     /**

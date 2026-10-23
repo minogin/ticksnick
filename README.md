@@ -316,26 +316,26 @@ labels on the steps and a coarse label per depth:
 ```
 Wall time     12.5 s = 11.8 s active + 680 ms paused (5.45%) in 7 pauses, longest 259 ms
 
-COARSE OPERATIONS - measured durations, inclusive, nested as it ran; a pause is charged to every operation it interrupted
-Coarse operation                Executions x parent    Total v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
-query                                    1              12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
-  level[4]                               1              8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
-    - visitedAdd                       own              7.32 s      82%
-    - node                             own              1.02 s      11%
-    - id                               own              417 ms       5%
-    - nextAdd                          own              160 ms       2%
-  level[5]                               1              2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
-    - node                             own              2.40 s      94%
-    - id                               own              145 ms       6%
+COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
+Coarse operation                Executions x parent Parallel     Wall v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+query                                    1                       12.1 s              674 ms     12.1 s     12.1 s     12.1 s     12.1 s     12.1 s          100% / 0%
+  level[4]                               1                       8.92 s      74%     477 ms     8.92 s     8.92 s     8.92 s     8.92 s     8.92 s          100% / 0%
+    - visitedAdd                       own                       7.32 s      82%
+    - node                             own                       1.02 s      11%
+    - id                               own                       417 ms       5%
+    - nextAdd                          own                       160 ms       2%
+  level[5]                               1                       2.54 s      21%     197 ms     2.54 s     2.54 s     2.54 s     2.54 s     2.54 s          100% / 0%
+    - node                             own                       2.40 s      94%
+    - id                               own                       145 ms       6%
 
-COARSE AND FINE OPERATIONS - own time, out of 11.8 s active time
-                           |                                       Load                                       |           Long            |               Spread                |      Trust
-Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call |   Execs     Time  Longest | Wall-time Concurrency Workers  Pool |     Hits  Noise
----------------------------+----------------------------------------------------------------------------------+---------------------------+-------------------------------------+----------------
-visitedAdd                 |          64.0%      7.55 s          100% / 0%    32,374,539               233 ns |      10   809 ms   334 ms |    7.55 s        1.00       1     - |     7517  1.15%
-node                       |          29.8%      3.51 s          100% / 0%    16,038,234               219 ns |       -        -        - |    3.51 s        1.00       1     - |     3498  1.69%
-id                         |          4.53%      534 ms          100% / 0%    16,038,234              33.3 ns |       -        -        - |    534 ms        1.00       1     - |      532  4.34%
-nextAdd                    |          1.67%      197 ms          100% / 0%    16,038,134              12.3 ns |       9  48.2 ms  13.1 ms |    197 ms        1.00       1     - |      196  7.14%
+COARSE AND FINE OPERATIONS - own time, out of 11.8          s active time
+                           |                                                Load                                       |           Long            |               Spread                |      Trust
+Operation                  | Thread-time% v Thread-         time Runnable / Waiting         Calls Thread-time per call |   Execs     Time  Longest | Wall-time Concurrency Workers  Pool |     Hits  Noise
+---------------------------+-----------------------         -----------------------------------------------------------+---------------------------+-------------------------------------+----------------
+visitedAdd                 |          64.0%      7.         55 s          100% / 0%    32,374,539               233 ns |      10   809 ms   334 ms |    7.55 s        1.00       1     - |     7517  1.15%
+node                       |          29.8%      3.         51 s          100% / 0%    16,038,234               219 ns |       -        -        - |    3.51 s        1.00       1     - |     3498  1.69%
+id                         |          4.53%      53         4 ms          100% / 0%    16,038,234              33.3 ns |       -        -        - |    534 ms        1.00       1     - |      532  4.34%
+nextAdd                    |          1.67%      19         7 ms          100% / 0%    16,038,134              12.3 ns |       9  48.2 ms  13.1 ms |    197 ms        1.00       1     - |      196  7.14%
 ```
 
 Three things that table says which a flame graph would not:

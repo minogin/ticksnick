@@ -1175,6 +1175,32 @@ class Profile internal constructor(
         return ceiling.isFinite() && c.working.isFinite() && c.working > ceiling * WORKING_CEILING_SLACK
     }
 
+    /**
+     * Whether [c]'s executions ran side by side more than its parent's did: at least [PARALLEL_SHOWN]
+     * at once, and that many times its parent's. Above the parent's, not merely different: `select`
+     * inside `resolve` runs 5.5 at once only because it is part of `resolve`'s time.
+     */
+    private fun sideBySide(c: CoarseStat, parent: CoarseStat?): Boolean = moreThan(c.inFlight, parent?.inFlight)
+
+    /**
+     * Whether [c]'s executions each spread over more threads than its parent's, with no child row under
+     * [n] running side by side to say so - forked work with no coarse label of its own.
+     */
+    private fun forksUnlabelled(c: CoarseStat, parent: CoarseStat?, n: CoarseNode): Boolean =
+        moreThan(c.inside, parent?.inside) &&
+                n.children.none { child -> coarse.firstOrNull { it.type == child.type }?.let { sideBySide(it, c) } == true }
+
+    private fun moreThan(v: Double, parentV: Double?): Boolean =
+        v.isFinite() && v >= PARALLEL_SHOWN && (parentV == null || !parentV.isFinite() || v / parentV >= PARALLEL_SHOWN)
+
+    /** Of [c]'s executions at once, the threads in them a sample caught running. */
+    private fun onCpuAtOnce(c: CoarseStat): Double =
+        if (c.activeTicks == 0L) Double.NaN else c.runningInclusiveHits.toDouble() / c.activeTicks
+
+    /** What the measured time on CPU supports of [onCpuAtOnce]. See [workingCeilingOf]. */
+    private fun onCpuAtOnceCeiling(c: CoarseStat): Double =
+        if (!duty.available || c.activeTicks == 0L) Double.NaN else c.inclusiveHits.toDouble() / c.activeTicks * duty.labelledDuty
+
     /** How much of the observed thread-time happened anywhere under [c]. */
     fun shareOf(c: CoarseStat): Double =
         if (observedNanos <= 0.0) 0.0 else c.inclusiveHits * stepNanos / observedNanos
@@ -1350,13 +1376,10 @@ class Profile internal constructor(
             appendLine("    12.5% high and never low, and never above max, which is exact")
             appendLine("  Total sums the executions' durations, so executions side by side sum past the parent's:")
             appendLine("    % parent over 100% is how many ran at once")
-            appendLine("  'parallelism:' is under a row whose figure is above 1 and not just its parent's. Threads")
-            appendLine("    per execution is your CODE - one execution split across threads, under the row that")
-            appendLine("    forks. Executions at once is your LOAD - how many ran side by side, under the rows forked")
-            appendLine("  'of them on a CPU' is the share of those threads a sample caught running: what splitting")
-            appendLine("    the work bought you, the T1/T8 of the work-span model. It is inside x (1 - waiting),")
-            appendLine("    so a caller parked on its own join is the gap. A saturated pool reads it low, and it")
-            appendLine("    is an upper bound on the speedup rather than the speedup itself")
+            appendLine("  'N at once, M on a CPU' under a row: its executions ran N side by side, more than its")
+            appendLine("    parent's did, with M threads in them running. A saturated pool reads it low, and M is an")
+            appendLine("    upper bound on the speedup rather than the speedup itself")
+            appendLine("  'its work on N more threads' under a row: work it forked with no coarse label of its own")
             appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
             appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
@@ -1490,32 +1513,28 @@ class Profile internal constructor(
                     "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.second } * 100.0 / n.inclusiveHits) + " between them"
                 )
             }
-            // The two parallelism questions, each under the row where it first changes: threads per
-            // execution under the operation that forks, executions at once under the ones it forks
-            // into - which is what a `% parent` over 100% is, read out. A half at 1 is left off, and
-            // so is one that only repeats the row above: `resolve` inside a `resolveRoot` runs as
-            // many at once as `resolveRoot` does, because it is inside it. It was one line under
-            // each root, with both halves, until Andrey read a maven-graph run on 2026-10-23: the
-            // root said "1.00 executions at once" while 988% sat two rows down unexplained. Only on
-            // a run with more than one thread, where these numbers can be anything but 1.
+            // How many ran side by side, under the rows that did: `branch` 3.90 at once, which is the
+            // `% parent` over 100% read out. The row that forks gets nothing - a request that waits on
+            // its branches is not itself parallel, and "4.36 threads per execution" there counted the
+            // parked caller with the branches. Andrey, 2026-10-23, on `:sandbox:branching`, after a
+            // version that printed both. The one exception is forked work with no coarse label of its
+            // own, where no child row exists to carry the line: then the fork is said on the parent.
+            // Only on a run with more than one thread, where these numbers can be anything but 1.
             val c = byType[n.type]
-            val above = parent?.let { byType[it.type] }
-            // Above the parent's, not merely different: `select` and `via` inside `resolve` run 5.5 and
-            // 3.3 at once only because each is part of `resolve`'s time, which `% parent` already says.
-            fun ownFigure(v: Double, parentV: Double?): Boolean =
-                v.isFinite() && v >= PARALLEL_SHOWN &&
-                        (parentV == null || !parentV.isFinite() || v / parentV >= PARALLEL_SHOWN)
             if (threads > 1 && c != null) {
-                val parts = ArrayList<String>()
-                if (ownFigure(c.inside, above?.inside)) parts += String.format(
-                    Locale.ROOT, "%.2f threads per execution%s", c.inside,
-                    if (c.working.isNaN()) ""
-                    else if (workingIsContradicted(c))
-                        String.format(Locale.ROOT, ", %.2f of them on a CPU (at most %.2f)", c.working, workingCeilingOf(c))
-                    else String.format(Locale.ROOT, ", %.2f of them on a CPU", c.working)
-                )
-                if (ownFigure(c.inFlight, above?.inFlight)) parts += String.format(Locale.ROOT, "%.2f executions at once", c.inFlight)
-                if (parts.isNotEmpty()) appendLine("$indent  parallelism: " + parts.joinToString("; "))
+                val above = parent?.let { byType[it.type] }
+                val line = when {
+                    sideBySide(c, above) -> String.format(
+                        Locale.ROOT, "%.2f at once, %.2f on a CPU%s", c.inFlight, onCpuAtOnce(c),
+                        if (workingIsContradicted(c)) String.format(Locale.ROOT, " (at most %.2f)", onCpuAtOnceCeiling(c)) else ""
+                    )
+                    forksUnlabelled(c, above, n) -> String.format(
+                        Locale.ROOT, "its work on %.2f more threads, %.2f threads on a CPU%s", c.inside - 1, c.working,
+                        if (workingIsContradicted(c)) String.format(Locale.ROOT, " (at most %.2f)", workingCeilingOf(c)) else ""
+                    )
+                    else -> null
+                }
+                if (line != null) appendLine("$indent  $line")
             }
             for (child in n.children.sortedWith(compareByDescending<CoarseNode> { it.spanSumNanos }.thenByDescending { it.inclusiveHits })) {
                 node(child, depth + 1, n)

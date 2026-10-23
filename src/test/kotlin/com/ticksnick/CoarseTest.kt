@@ -275,7 +275,7 @@ class CoarseTest {
         assertTrue("query" in text, "the warning did not name the operation")
         // The parallelism line carries both readings, so a reader who skips the block still sees it.
         assertTrue(
-            Regex("""3\.00 of them on a CPU \(at most 0\.0\d\)""").containsMatchIn(text),
+            Regex("""3\.00 threads on a CPU \(at most 0\.0\d\)""").containsMatchIn(text),
             "the parallelism line did not print value over ceiling"
         )
     }

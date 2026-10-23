@@ -2317,11 +2317,13 @@ read `31.5 s`, `988%` of a 3.19 s batch, while the one `parallelism:` line, unde
   `Total` adds them, and executions side by side sum past the wall time they shared. *Durations* is
   the tracing tools' word for it, and `Total` stays: their column is "total duration", and *Sum*
   would read as a statistic beside `Mean`.
-- **A `parallelism:` line under every row whose own figure is above 1:** threads per execution
-  under the row that forks, executions at once under the rows it forks into. A half is printed only
-  at 1.1 or over and at least 1.1 times its parent's (`PARALLEL_SHOWN`), so a child repeating its
-  parent's figure, or holding part of the parent's time, gets nothing. Per type, as before: a type
-  under two parents shows its figures under both.
+- **`N at once, M on a CPU` under the rows that ran side by side, and nothing under the row
+  that forks.** A first version put *"threads per execution"* under the forking row as well; Andrey,
+  on `:sandbox:branching`: the request is not a parallel operation, and 4.36 threads per execution
+  - the branches plus the caller parked on them - is a strange metric. The parent says the fork only
+  when the forked work has no coarse label of its own: *"its work on N more threads"*. A line needs
+  `N` at 1.1 or over and at least 1.1 times its parent's (`PARALLEL_SHOWN`), so a child repeating
+  its parent's figure, or holding part of the parent's time, gets nothing. Per type, as before.
 
 ## The thread-state probe · 2026-10-23 · shelved on branch `probe`
 

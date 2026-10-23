@@ -346,7 +346,7 @@ of what it had.
 **One more thing it is not:** one execution split across threads. A fine operation is an integer in a
 thread's slot and never leaves the thread that entered it, so three threads inside the label means
 three separate calls, not one call going three times faster. Only a coarse context can be split, and
-that is what the `parallelism:` line under the coarse table reports.
+that is what the *at once* lines under the coarse table report.
 
 ---
 
@@ -386,8 +386,8 @@ run                                      1              16.2 s              768 
 
 The graph benchmark: `run` around the measured batches, `runBatch` around each, `query` around
 each query and a family `level[0..5]` around each depth. With one execution per row the
-percentiles repeat the total; on a request served a million times they are the point. A
-`parallelism:` line appears only on a run with more than one thread - see below.
+percentiles repeat the total; on a request served a million times they are the point. The
+*at once* lines appear only on a run with more than one thread - see below.
 
 | column | what it is | what to watch for |
 |---|---|---|
@@ -400,37 +400,36 @@ percentiles repeat the total; on a request served a million times they are the p
 | **runnable / waiting** | the same split as the fine table, over the samples caught anywhere inside the span on that path | `0%` waiting here because the benchmark never blocks. On anything with I/O or a lock the right half is the finding. `runnable` is an upper bound on work, not work |
 | **slowest:, under a row** | for an operation opened with `op(x, key = { ... })`: its five longest executions on that path, longest first, with the key each was opened with. **Measured** | which cases to run again. Wall time, so a GC pause in one can be all that put it there; `paused` on the row says whether there were any |
 | **the `- ... own` rows, under a leaf** | the leaf's time **split by the innermost label**, sampled: each sample inside the leaf counted once, under the fine label that was innermost, or `unlabelled`. They add up to 100%. Total is the share of the leaf's samples applied to the leaf's measured total, so it agrees with `% parent` | **a split, not children.** A fine label with fine labels inside it shows only its own part - the inner ones are their own rows, not inside it. The report cannot see fine nesting; for a hierarchy, make the outer label coarse. On the leaves only: a parent's would be its children's over again |
-| **`parallelism:` line** | under a row whose threads per execution or executions at once is above 1 and above its parent's | see below - they are different questions, and each is printed under the row where it starts |
+| **`N at once, M on a CPU`, under a row** | its executions ran `N` side by side, more than its parent's did | see below. The row that forks has no line; the rows it forks into do |
 
-### The two parallelisms, which are not the same question
+### How many ran at once, under the rows that did
 
-A fork shows in two rows, and the `parallelism:` line goes under each, saying the half that is
-that row's own. maven-graph's batch hands each root to a pool of ten:
+A row whose executions ran side by side gets a line under it. maven-graph's batch hands each root to a
+pool of ten:
 
 ```
 runBatch                                 1              3.19 s  ...
-  parallelism: 10.87 threads per execution, 9.88 of them on a CPU
   resolveRoot                        5,262   x5,262     31.5 s     988%  ...
-    parallelism: 9.88 executions at once
+    9.88 at once, 9.88 on a CPU
     resolve                         15,786     x3.0     31.5 s     100%  ...
 ```
 
-- **`n threads per execution`** — **a property of your code,** under the row that forks. Does one
-  execution of this operation use more than one thread? This only moves above 1 when work is handed
-  to a pool wrapped with `.propagating()`.
-- **`n of them on a CPU`** — of those threads, the ones a sample caught running. `working = inside ×
-  (1 − waiting)`, so it is what splitting the work actually *bought*: a caller parked on a join
-  contributes nothing here, correctly. Printed as `0.08 (at most 0.31)` when the measured
-  time on CPU says the machine cannot have supported the figure.
-- **`n executions at once`** — **a property of your load,** not your code, under the rows forked
-  into: how many of these ran side by side. It is the `% parent` over 100% read out. Add threads or
-  clients and it moves; change the code and it may not.
+- **`N at once`** — how many of these executions ran side by side, while any did. It is the
+  `% parent` over 100% read out. **A property of your load** as much as your code: add threads or
+  clients and it moves.
+- **`M on a CPU`** — the threads in them a sample caught running. Lower than `N` when the executions
+  wait - on a lock, a join, or for a core. Printed as `0.08 (at most 0.31)` when the measured time
+  on CPU says the machine cannot have supported the figure.
 
-A half is left off when it is under 1.1, or when it is not at least 1.1 times its parent's:
-`resolve` runs ten at once only because it is inside `resolveRoot`, and `select` inside `resolve`
-runs 5.5 at once only because it is half of `resolve`'s time. Until 2026-10-23 the line was under
-each root with all three numbers, which put "1.00 executions at once" under the batch and nothing
-beside the 988% two rows down.
+**The row that forks gets nothing.** `runBatch` waits on its roots and is not itself parallel; a
+line under it used to say *"10.87 threads per execution"*, counting the parked caller with the
+workers, and read as if the batch were the parallel thing. The one exception is work forked with
+no coarse label of its own: no child row exists to carry the line, so the parent says
+**`its work on N more threads, M threads on a CPU`**.
+
+The line is left off when `N` is under 1.1, or not at least 1.1 times the parent's: `resolve` runs
+ten at once only because it is inside `resolveRoot`, and `select` inside `resolve` runs 5.5 at once
+only because it is half of `resolve`'s time. Settled 2026-10-23, after two versions the same day.
 
 They were three columns named `inside`, `working` and `in flight` until 2026-08-31, when a reader
 looked for parallelism, could not find it, and turned out to have been staring at all three. The word

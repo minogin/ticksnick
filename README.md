@@ -277,9 +277,8 @@ operations it caught.
 `d ≥ max(800 ns, 4 µs × share)`, and the report tells you when a label breaks it — exactly, because
 unlike the fine floor it is comparing a duration it measured rather than one it inferred.
 
-Call `Profiler.release()` when a thread exits. There is a safety net — the sampler reclaims the
-slots of threads that have died — but it waits on a garbage collection, and until then a dead
-thread reads as an idle one and inflates the denominator every share is taken over.
+`Profiler.release()` frees a thread's slot the moment the thread finishes. It is not required: the
+sampler stops sampling a thread once it has exited and frees its slot within a second.
 
 ### How to use it: label everything, let the report prune
 

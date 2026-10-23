@@ -676,14 +676,6 @@ so.
 `enter`/`exit`, call `Profiler.expectBalanced()` at a point the thread should be quiescent. Under
 `strict` (the default) the first leak stops the session outright.
 
-### `! N threads exited without Profiler.release() and were reclaimed`
-
-A slot left behind by a dead thread reads as an *idle* thread forever and inflates the denominator
-every share is taken over. The sampler reclaims those once a second — but only after a garbage
-collection has cleared the thread, so in a process that does not collect they accumulate.
-
-**What to do:** call `Profiler.release()` when a thread finishes.
-
 ### `! N threads arrived past the 1024-slot ceiling and were NOT SAMPLED`
 
 Their occupancy is missing from every number above, including the denominators. The sampler watches

@@ -407,6 +407,24 @@ class RegistryTest {
         assertTrue(reclaimed >= 1, "a dead thread's slot was never reclaimed")
     }
 
+    /**
+     * Exited is enough, with no collection: the thread is held strongly here, so its weak reference
+     * cannot clear, and the slot still goes at the first reclaim - with its calls folded in.
+     */
+    @Test
+    fun `a thread that has exited is reclaimed without waiting for a collection`() {
+        val id = Profiler.registerFine("registry.exited")
+        val callsBefore = Profiler.callsOf(id.id)
+        val before = Profiler.reclaimedSlots()
+        val t = Thread({ repeat(3) { op(id) { } } }, "exits-without-release")
+        t.start()
+        t.join()
+        Profiler.reclaimDeadSlots()
+        assertTrue(Profiler.reclaimedSlots() - before >= 1, "an exited thread's slot was kept until a collection")
+        assertEquals(callsBefore + 3, Profiler.callsOf(id.id), "the exited thread's calls were lost on reclaim")
+        assertTrue(t.name.isNotEmpty())   // keeps the thread strongly reachable to here
+    }
+
     /** Two live threads never share an index, which is what makes the per-thread arrays meaningful. */
     @Test
     fun `live threads get different indexes`() {

@@ -857,8 +857,8 @@ object Profiler {
      * every share is taken over. That is the silent-misattribution failure the accuracy principle
      * says to spend effort on, arriving through an API contract rather than through a label.
      *
-     * The slot already holds its thread weakly, so a cleared reference means the thread is gone and
-     * has been collected — no handshake, no thread scan, and it cannot resurrect. Reclaiming is then
+     * A thread that is no longer alive is gone - no handshake, no thread scan, and it cannot come
+     * back - and a cleared weak reference is one already collected. Reclaiming is then
      * the same three steps as [release] in the same order: leave the walk first, fold the counts
      * second, hand the index back last, so a concurrent [callsOf] undercounts for two instructions
      * rather than double-counting.
@@ -866,14 +866,20 @@ object Profiler {
      * Called once a second from the sampler, never per tick — this walks the whole ceiling and
      * touches a weak reference per slot, which is not something to spend on a 1 ms budget.
      *
-     * It is a safety net and not a substitute: reclamation waits on a garbage collection, so a
-     * process that never collects never reclaims. The report says how many it caught, because a
-     * user who is silently rescued learns nothing.
+     * It used to wait for a garbage collection to clear the reference, and until then the sampler
+     * counted the dead thread as idle: maven-graph's per-batch pools put 20-32 such threads into
+     * every report and a warning on top. Since 2026-10-23 the sampler skips a thread that has exited
+     * and this reclaims it within a second, so nothing is distorted and nothing is reported; the
+     * count stays only for the duty cycle's explanation of a run with no CPU window.
+     * `release()` is now the prompt way rather than the required one.
      */
     internal fun reclaimDeadSlots() {
         for (i in 0 until slotCeiling()) {
             val s = slotByIndex.get(i) ?: continue
-            if (s.thread.get() != null) continue
+            // Exited is enough: a thread that is not alive cannot write to its slot again, and Java
+            // makes everything it wrote visible to whoever sees isAlive() return false.
+            val owner = s.thread.get()
+            if (owner != null && owner.isAlive) continue
             if (!slotByIndex.compareAndSet(i, s, null)) continue
             synchronized(retiredCounts) {
                 for (id in 0 until MAX_OPERATIONS) {

@@ -47,6 +47,16 @@ something to do, it graduates into [ideas.md](ideas.md) and is marked here as ha
 
 ---
 
+### A warning about threads nobody had asked to release · 2026-10-23
+
+Andrey, on a maven-graph run: *"20 threads exited without Profiler.release() and were reclaimed -
+... inflates the denominator every share above is taken over"*. The resolver makes a pool per batch
+and never thought of `release()`; asked why a dead thread was a problem at all, and why TERMINATED
+counted as waiting - by accident: "not RUNNABLE is waiting" was written for live threads. **Fixed
+the same day: the sampler skips a thread that has exited, the slot is reclaimed within a second
+without waiting for a collection, and the warning is gone.** Nothing is lost by the skip: a sample
+describes only its instant, and the thread's own counts are folded in on reclaim.
+
 ### The Careful line about Runnable did not say what to do · 2026-10-23
 
 Andrey, on a parallel maven-graph run printing *"Runnable overstates CPU work by up to 29.8 pp of

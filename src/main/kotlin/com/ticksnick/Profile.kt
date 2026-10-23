@@ -1728,11 +1728,10 @@ class Profile internal constructor(
                 "$untrackedSlots threads arrived past the $MAX_SLOTS-slot ceiling and were NOT SAMPLED -\n" +
                         "their thread-time is missing from every number above, including the denominators"
             )
-            if (reclaimedSlots > 0) add(
-                "$reclaimedSlots threads exited without Profiler.release() and were reclaimed -\n" +
-                        "call it when a thread finishes; until a slot is reclaimed it reads as an idle\n" +
-                        "thread and inflates the denominator every share above is taken over"
-            )
+            // No warning for threads that exited without Profiler.release(): the sampler skips a
+            // thread that has exited and the slot is reclaimed within a second, so nothing above is
+            // distorted. It was a warning until 2026-10-23, when a dead thread read as idle until a
+            // garbage collection let it go.
             if (openContextsAtEnd > 0) add(
                 "$openContextsAtEnd coarse executions were still open when sampling stopped: their spans\n" +
                         "are missing above, and every sample taken inside them was billed to them"

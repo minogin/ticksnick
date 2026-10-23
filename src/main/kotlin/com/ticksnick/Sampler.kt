@@ -481,6 +481,13 @@ internal class Sampler(
             val ceiling = Profiler.slotCeiling()
             for (i in 0 until ceiling) {
                 val s = Profiler.slotAt(i) ?: continue
+                // A thread that has exited is not sampled: there is no thread for the sample to be
+                // of, and counting it under no operation would shrink every share until the slot is
+                // reclaimed. A null reference is a thread already collected. Nothing is lost - a
+                // sample describes only the instant of its tick, and what the thread counted itself
+                // stays in the slot until the reclaim folds it in.
+                val owner = s.thread.get()
+                if (owner == null || !owner.isAlive) continue
                 live++
                 val c = s.getOpaque()
                 counters[if (c < 0) NO_OP_INDEX else c]++
@@ -491,13 +498,8 @@ internal class Sampler(
                 // Asked for every slot, labelled or not. What a thread does *outside* every label is
                 // the larger half of some runs — 85.5% of thread-time on the Netty trial — and
                 // "waiting or working" is exactly as worth knowing there. A field read on the Thread
-                // object: no handshake, no safepoint. The weak reference is null only if the thread
-                // died and the slot outlived it, in which case there is nothing to ask.
-                var waiting = false
-                if (sampleState) {
-                    val t = s.thread.get()
-                    if (t != null && t.state != State.RUNNABLE) waiting = true
-                }
+                // object: no handshake, no safepoint.
+                val waiting = sampleState && owner.state != State.RUNNABLE
                 if (c >= 0) {
                     // Once per operation per tick, not once per slot: this counts the operation's
                     // wall-clock footprint, which is the same whether one thread was inside it or

@@ -273,10 +273,10 @@ class CoarseTest {
         val text = report(listOf(bad), labelledDuty = 0.01).render()
         assertTrue("READS HIGHER THAN THE MEASURED TIME ON CPU" in text, "the warning did not appear")
         assertTrue("query" in text, "the warning did not name the operation")
-        // The parallelism line carries both readings, so a reader who skips the block still sees it.
+        // The block carries both readings: the figure, and what the measured time on CPU allows.
         assertTrue(
-            Regex("""3\.00 threads on a CPU \(at most 0\.0\d\)""").containsMatchIn(text),
-            "the parallelism line did not print value over ceiling"
+            Regex("""on a CPU 3\.00, but the measured time on CPU bounds it at 0\.0\d""").containsMatchIn(text),
+            "the warning did not print value over ceiling"
         )
     }
 

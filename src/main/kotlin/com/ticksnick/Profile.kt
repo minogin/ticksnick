@@ -1193,14 +1193,6 @@ class Profile internal constructor(
     private fun moreThan(v: Double, parentV: Double?): Boolean =
         v.isFinite() && v >= PARALLEL_SHOWN && (parentV == null || !parentV.isFinite() || v / parentV >= PARALLEL_SHOWN)
 
-    /** Of [c]'s executions at once, the threads in them a sample caught running. */
-    private fun onCpuAtOnce(c: CoarseStat): Double =
-        if (c.activeTicks == 0L) Double.NaN else c.runningInclusiveHits.toDouble() / c.activeTicks
-
-    /** What the measured time on CPU supports of [onCpuAtOnce]. See [workingCeilingOf]. */
-    private fun onCpuAtOnceCeiling(c: CoarseStat): Double =
-        if (!duty.available || c.activeTicks == 0L) Double.NaN else c.inclusiveHits.toDouble() / c.activeTicks * duty.labelledDuty
-
     /** How much of the observed thread-time happened anywhere under [c]. */
     fun shareOf(c: CoarseStat): Double =
         if (observedNanos <= 0.0) 0.0 else c.inclusiveHits * stepNanos / observedNanos
@@ -1320,9 +1312,6 @@ class Profile internal constructor(
         appendLine("  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working")
         appendLine("  concurrency is threads INSIDE at once, running or parked - not a speedup")
         appendLine("  a share is where time went, NOT what removing the operation would save")
-        if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
-            appendLine("  'on a CPU' is an upper bound on the speedup, not the speedup")
-        }
         if (!full) {
             appendLine("  full notes: docs/output.md, or render(legend = true)")
             return
@@ -1376,12 +1365,9 @@ class Profile internal constructor(
             appendLine("    12.5% high and never low, and never above max, which is exact")
             appendLine("  Total sums the executions' durations, so executions side by side sum past the parent's:")
             appendLine("    % parent over 100% is how many ran at once")
-            appendLine("  'parallelism: N at once, M on a CPU' under a row: its executions ran N side by side, more than its")
-            appendLine("    parent's did, with M threads in them running. A saturated pool reads it low, and M is an")
-            appendLine("    upper bound on the speedup rather than the speedup itself")
-            appendLine("  'parallelism: its work on N more threads' under a row: work it forked with no coarse label of its own")
-            appendLine("  'at most b' beside it means the measured time on CPU only supports b - the threads are")
-            appendLine("    stopped in NATIVE calls, which Java thread state reports as RUNNABLE")
+            appendLine("  'parallelism: N executions at a time' under a row: its executions ran N side by side on")
+            appendLine("    average, more than its parent's did. Under the rows forked into, not the row that forks")
+            appendLine("  'parallelism: its work on N more threads' under a row: work it forked with no coarse label")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
             appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
             appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
@@ -1524,14 +1510,14 @@ class Profile internal constructor(
             if (threads > 1 && c != null) {
                 val above = parent?.let { byType[it.type] }
                 val line = when {
-                    sideBySide(c, above) -> String.format(
-                        Locale.ROOT, "%.2f at once, %.2f on a CPU%s", c.inFlight, onCpuAtOnce(c),
-                        if (workingIsContradicted(c)) String.format(Locale.ROOT, " (at most %.2f)", onCpuAtOnceCeiling(c)) else ""
-                    )
-                    forksUnlabelled(c, above, n) -> String.format(
-                        Locale.ROOT, "its work on %.2f more threads, %.2f threads on a CPU%s", c.inside - 1, c.working,
-                        if (workingIsContradicted(c)) String.format(Locale.ROOT, " (at most %.2f)", workingCeilingOf(c)) else ""
-                    )
+                    // Executions, the table's own word: a row's execution can run on several threads.
+                    // One decimal: the second of a sampled average is noise. No "on a CPU" beside it -
+                    // that was Java's RUNNABLE under a stronger name, and the row's Runnable / Waiting
+                    // already gives the split. Andrey, 2026-10-23.
+                    sideBySide(c, above) ->
+                        String.format(Locale.ROOT, "%.1f executions at a time, on average", c.inFlight)
+                    forksUnlabelled(c, above, n) ->
+                        String.format(Locale.ROOT, "its work on %.1f more threads, on average", c.inside - 1)
                     else -> null
                 }
                 if (line != null) appendLine("$indent  parallelism: $line")

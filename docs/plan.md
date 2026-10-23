@@ -2317,8 +2317,11 @@ read `31.5 s`, `988%` of a 3.19 s batch, while the one `parallelism:` line, unde
   `Total` adds them, and executions side by side sum past the wall time they shared. *Durations* is
   the tracing tools' word for it, and `Total` stays: their column is "total duration", and *Sum*
   would read as a statistic beside `Mean`.
-- **`N at once, M on a CPU` under the rows that ran side by side, and nothing under the row
-  that forks.** A first version put *"threads per execution"* under the forking row as well; Andrey,
+- **`parallelism: N executions at a time, on average` under the rows that ran side by side, and
+  nothing under the row that forks.** Executions, the table's word, since one can run on several
+  threads; one decimal; no *"M on a CPU"* beside it - Java's RUNNABLE under a stronger name, and
+  the row's `Runnable / Waiting` already says it. The prefix stays: a bare *"3.9 at once"* says
+  nothing about what it counts. A first version put *"threads per execution"* under the forking row as well; Andrey,
   on `:sandbox:branching`: the request is not a parallel operation, and 4.36 threads per execution
   - the branches plus the caller parked on them - is a strange metric. The parent says the fork only
   when the forked work has no coarse label of its own: *"its work on N more threads"*. A line needs

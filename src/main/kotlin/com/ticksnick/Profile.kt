@@ -1817,7 +1817,12 @@ class Profile internal constructor(
         appendLine(pause.headerLine(samplingSpanNanos))
         // The clock only when it moved or could not be read: a steady clock is the healthy case, and
         // its level alone says nothing about this run. Two runs' levels are compared in the diff.
-        for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful()) appendLine(row("Careful", c))
+        // A line with breaks in it continues under its own text, as a warning does.
+        for (c in pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful()) {
+            val lines = c.lines()
+            appendLine(row("Careful", lines.first()))
+            for (line in lines.drop(1)) appendLine(row("", line))
+        }
         // The warnings here, before the tables, for the same reason `Careful` is: a warning is read
         // before the numbers it is about, not found thirty lines after them. They used to close the
         // report, and Andrey met one - a coarse label on a 40 ns lookup - under the second table.

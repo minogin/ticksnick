@@ -574,15 +574,16 @@ class DutyReport internal constructor(
         // I/O, native calls or a busy machine", and Andrey, 2026-10-23, reading it on a maven-graph
         // run: "can we make the message more self-explanatory and also add some advices there?" -
         // "shares" was a word the report used nowhere else, and the causes came with no remedy.
+        // Broken into lines as a warning is, since it is four times the width of the others.
         else if (boundPp > CAREFUL_PP) out += String.format(
             Locale.ROOT,
-            "Thread-time%% may be off by up to %s pp as a share of CPU time: only %s of the time inside labels " +
-                    "is sure to have been on a CPU, the rest may have been waiting. Likely causes: too many threads " +
-                    "for the cores (use fewer), or blocking I/O or native calls (label them, so their waiting is a " +
-                    "row of its own)",
+            "Thread-time%% may be off by up to %s pp as a share of CPU time:%n" +
+                    "only %s of the time inside labels is sure to have been on a CPU, the rest may have been waiting.%n" +
+                    "Likely causes: too many threads for the cores (use fewer),%n" +
+                    "or blocking I/O or native calls (label them, so their waiting is a row of its own)",
             threeDigits(boundPp), percent(shareDuty * 100)
         ) + (if (shareDuty < OCCUPANCY_ONLY)
-            ". Read a share as where threads SIT, not where cycles GO, and do not add two up" else "")
+            "\nRead a share as where threads SIT, not where cycles GO, and do not add two up" else "")
         if (anomalies > 0) out += "$anomalies thread CPU readings went backwards and were dropped"
         return out
     }

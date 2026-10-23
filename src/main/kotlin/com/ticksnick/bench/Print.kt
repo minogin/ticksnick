@@ -414,7 +414,7 @@ private fun printDuty(
     // The bench keeps its threads for the whole run, so it never hits the reclaimed-thread case
     // that the sandbox found - passing 0 says so rather than guessing.
     println("  " + d.summary())
-    for (l in d.careful(runNanos, 0)) println("  Careful    $l")
+    for (l in d.careful(runNanos, 0)) println("  Careful    " + l.lines().joinToString("\n             "))
     if (!d.available) return
 
     val s = bench.stalls()

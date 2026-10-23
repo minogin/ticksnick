@@ -19,7 +19,10 @@ a mistake on purpose.
 
 ```
 Wall time     12.0 s = 12.0 s active + 3.00 ms paused (0.025%)
-Careful       Thread-time% may be off by up to 2.53 pp as a share of CPU time: only 97.5% of the time inside labels is sure to have been on a CPU, the rest may have been waiting. Likely causes: too many threads for the cores (use fewer), or blocking I/O or native calls (label them, so their waiting is a row of its own)
+Careful       Thread-time% may be off by up to 2.53 pp as a share of CPU time:
+              only 97.5% of the time inside labels is sure to have been on a CPU, the rest may have been waiting.
+              Likely causes: too many threads for the cores (use fewer),
+              or blocking I/O or native calls (label them, so their waiting is a row of its own)
 ```
 
 **Two criteria decide what the report prints**, Andrey's, 2026-10-11: it matters for optimising

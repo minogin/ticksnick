@@ -2498,6 +2498,39 @@ id is wrong by construction, and the limit says so at registration.
 against about 40 ns for a coarse context and 2 to 3 ns for a fine hook, which is an argument; the
 bench with the CPU clock beside it is the measurement, and it has not been run with an indexed op.
 
+## Next session · written 2026-10-24
+
+Where to pick up after 2026-10-23, a long session driven by reading maven-graph's first parallel
+run and `:sandbox:branching`. What changed, all on `main` and pushed, each with its own entry above:
+
+- **The coarse table explains each row by what it was made of** - "Then `Parallel` and `Wall`
+  instead of `Total`" and "Fine labels counted as coarse children". `Wall`, `% parent` of the
+  parent's wall, a `Parallel` column (per parent execution), and fine labels under every coarse row
+  counted as children, with the join wait dropped. `OwnTimeTest` checks it on real threads.
+- **The Careful line about Runnable** in plain words with a remedy per cause, broken into lines
+  like a warning.
+- **Exited threads** are not sampled and are reclaimed within a second; the warning is gone.
+- **The thread-state probe** (CPU / Core / I/O / Wait per sample, Windows, Java 22+) was built,
+  measured and shelved on branch `probe` - see its entry.
+- **`sandbox/Branching.kt`**, `gradlew :sandbox:branching`: requests forking branches, branches
+  out of step, leaves handing `assist` to helpers. The place to check any change to the coarse table.
+
+**Open, in the order they matter:**
+
+1. **The sampler cost of the own-time rows is not measured.** `Parallel` was (about +50 ns per
+   slot per tick, findings.md); the own rows add a few table lookups per sample on top. Same
+   method: `gradlew :run --args="--coarse --seconds=15"`, the commit before against after,
+   alternated, clock traced.
+2. **maven-graph has not been profiled with the new table.** Its next run is the first real
+   reading of `Wall`, `Parallel` and the fine rows under every row; old profiles render the old way.
+3. **The Careful line blames threads and I/O for a join it can see** - sandbox.md, 2026-10-23. It
+   should name visible waiting inside labels first when that is most of the gap.
+4. **The "`on a CPU` READS HIGHER THAN THE MEASURED TIME ON CPU" block** still prints, about a
+   figure (`working`) the table no longer shows. Decide: drop it, or reword it about Runnable.
+5. **Release 0.4.0**: the CHANGELOG's *Unreleased* holds the clock record and everything above.
+6. The probe, if it comes back: probe a few threads per tick in turn, and find the 2.3% the workers
+   lose of which the interruption explains 0.2% (findings.md). ideas.md 48 for Linux and macOS.
+
 ## Next session · written 2026-10-13
 
 Where to pick up, after the entries dated 2026-10-11 to 13 above and v0.2.0.

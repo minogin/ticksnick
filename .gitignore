@@ -1,0 +1,16 @@
+.gradle/
+.kotlin/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+.idea/
+*.iml
+out/
+
+.DS_Store
+
+# Profiles saved while trying the library out
+profiles/
+
+# Local notes, not part of the project
+CLAUDE.md

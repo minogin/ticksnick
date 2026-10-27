@@ -1,0 +1,554 @@
+package com.ticksnick
+
+import java.util.concurrent.CountDownLatch
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
+
+/**
+ * The slot, the span stack, and what happens when a label is left open.
+ *
+ * The only tests here that touch threads, and they touch them because the things being checked are
+ * about threads: a slot belongs to one, an index is released when one dies, and a leak is per
+ * thread. Nothing here waits on a clock or measures a duration — a test that did would be measuring
+ * the machine.
+ *
+ * `Profiler` is a process-wide object, so these run against shared state; each test cleans up after
+ * itself and none of them may assume a fresh registry.
+ */
+class RegistryTest {
+
+    @AfterTest
+    fun stopSampling() {
+        // A test that failed mid-session must not leave a sampler running for the next one.
+        try {
+            Profiler.stop()
+        } catch (_: IllegalStateException) {
+            // Not sampling, which is the normal case.
+        }
+    }
+
+    /** Runs [body] on a thread of its own and waits, so one test's slot cannot pollute another's. */
+    private fun onOwnThread(name: String = "test-worker", body: () -> Unit) {
+        var thrown: Throwable? = null
+        val t = Thread({
+            try {
+                body()
+            } catch (e: Throwable) {
+                thrown = e
+            }
+        }, name)
+        t.start()
+        t.join()
+        thrown?.let { throw it }
+    }
+
+    // ---------------------------------------------------------------- the slot
+
+    /** Registration is idempotent, so a `val` in an object is a safe place to keep an id. */
+    @Test
+    fun `registering the same name twice gives the same id`() {
+        val a = Profiler.registerFine("test:idempotent")
+        val b = Profiler.registerFine("test:idempotent")
+        assertEquals(a, b)
+        assertEquals("test:idempotent", Profiler.nameOf(a))
+    }
+
+    /** `level[depth]` is `base + depth`: consecutive ids, each with its own row name. */
+    @Test
+    fun `a family reserves consecutive ids and names each member`() {
+        val level = Profiler.registerFine("test:level", arity = 3)
+        val next = Profiler.registerFine("test:after-level")
+        for (i in 0 until 3) {
+            assertEquals(level.base + i, level[i].id)
+            assertEquals("test:level[$i]", Profiler.nameOf(level[i]))
+        }
+        assertEquals(level.base + 3, next.id, "the family's ids are not consecutive")
+        assertEquals(level.base, Profiler.registerFine("test:level", arity = 3).base, "not idempotent")
+        assertFailsWith<IndexOutOfBoundsException> { level[3] }
+        assertFailsWith<IndexOutOfBoundsException> { level[-1] }
+        assertFailsWith<IllegalStateException> { Profiler.registerFine("test:level", arity = 4) }
+        assertFailsWith<IllegalStateException> { Profiler.registerFine("test:level") }
+        assertFailsWith<IllegalArgumentException> { Profiler.registerFine("test:empty", arity = 0) }
+    }
+
+    @Test
+    fun `a coarse family works the same way`() {
+        val stage = Profiler.registerCoarse("test:stage", arity = 2)
+        assertEquals(stage.base + 1, stage[1].id)
+        assertEquals("test:stage[1]", Profiler.nameOf(stage[1]))
+        assertFailsWith<IndexOutOfBoundsException> { stage[2] }
+    }
+
+    private enum class Kind { COMPILE, RUNTIME, TEST }
+    private enum class Only { ONE }
+
+    /** An enum family is the integer family with the constants as the index and their names on the rows. */
+    @Test
+    fun `an enum family is indexed and named by its constants`() {
+        val fine = Profiler.registerFine<Kind>("test:byKind")
+        for (k in Kind.entries) {
+            assertEquals(fine.base + k.ordinal, fine[k].id)
+            assertEquals("test:byKind[${k.name}]", Profiler.nameOf(fine[k]))
+        }
+        assertEquals(fine.base, Profiler.registerFine<Kind>("test:byKind").base, "not idempotent")
+        assertFailsWith<IllegalStateException> { Profiler.registerFine("test:byKind") }
+
+        val coarse = Profiler.registerCoarse<Kind>("test:resolve")
+        assertEquals("test:resolve[RUNTIME]", Profiler.nameOf(coarse[Kind.RUNTIME]))
+        assertEquals(coarse.base + 2, coarse[Kind.TEST].id)
+        // One constant is still a family: the row says which.
+        assertEquals("test:single[ONE]", Profiler.nameOf(Profiler.registerFine<Only>("test:single")[Only.ONE]))
+    }
+
+    /** One slot per thread, and it is the same object every time that thread asks. */
+    @Test
+    fun `a thread gets one slot and keeps it`() {
+        onOwnThread {
+            assertSame(Profiler.slot(), Profiler.slot())
+        }
+    }
+
+    /**
+     * The padding is why `OpSlot` is 15 longs wide, and it is not decoration: four slots sharing a
+     * 64-byte line would make every worker's write invalidate its neighbours' copies, tens of
+     * nanoseconds against operations that last twenty.
+     *
+     * The layout cannot be asserted from Kotlin, but the field count that produces it can — if
+     * somebody deletes the padding to tidy up, this says so.
+     */
+    @Test
+    fun `the slot is still padded`() {
+        val padding = OpSlot::class.java.declaredFields.count { it.name.matches(Regex("p\\d+")) }
+        assertTrue(padding >= 15, "only $padding padding fields left; false sharing is back")
+    }
+
+    // ---------------------------------------------------------------- enter and exit
+
+    /** `enter`/`exit` nest, and coming back out restores what was underneath rather than clearing. */
+    @Test
+    fun `labels nest and unwind to what was underneath`() {
+        val outer = Profiler.registerFine("test:outer")
+        val inner = Profiler.registerFine("test:inner")
+        onOwnThread {
+            val s = Profiler.slot()
+            assertEquals(NO_OP, s.getOpaque())
+            Profiler.enter(outer)
+            assertEquals(outer.id, s.getOpaque())
+            Profiler.enter(inner)
+            assertEquals(inner.id, s.getOpaque())
+            Profiler.exit(inner)
+            assertEquals(outer.id, s.getOpaque(), "unwinding lost the enclosing label")
+            Profiler.exit(outer)
+            assertEquals(NO_OP, s.getOpaque())
+            assertEquals(0, Profiler.depth())
+        }
+    }
+
+    /** `op { }` and the explicit form nest with each other in either order. */
+    @Test
+    fun `the block form and the explicit form interleave`() {
+        val a = Profiler.registerFine("test:block")
+        val b = Profiler.registerFine("test:explicit")
+        onOwnThread {
+            val s = Profiler.slot()
+            op(a) {
+                assertEquals(a.id, s.getOpaque())
+                Profiler.enter(b)
+                assertEquals(b.id, s.getOpaque())
+                Profiler.exit(b)
+                assertEquals(a.id, s.getOpaque())
+            }
+            assertEquals(NO_OP, s.getOpaque())
+        }
+    }
+
+    /** `op { }` has a `finally`; that is the whole reason it is the form documented first. */
+    @Test
+    fun `the block form closes its label when the body throws`() {
+        val id = Profiler.registerFine("test:throwing")
+        onOwnThread {
+            val s = Profiler.slot()
+            runCatching { op<Unit>(id) { throw IllegalStateException("boom") } }
+            assertEquals(NO_OP, s.getOpaque(), "a throwing body left the label set")
+            assertEquals(0, Profiler.depth())
+        }
+    }
+
+    // ---------------------------------------------------------------- the balance check
+
+    /** A thread that closed everything it opened reports balanced and is not counted as a leak. */
+    @Test
+    fun `a balanced thread reports balanced`() {
+        val id = Profiler.registerFine("test:balanced")
+        onOwnThread {
+            op(id) { }
+            assertTrue(Profiler.expectBalanced())
+        }
+    }
+
+    /**
+     * A leak is reported once and the stack is reset, so the next check is about the next interval
+     * rather than about the same leak again.
+     */
+    @Test
+    fun `a leak is reported once and then the slot is clean`() {
+        val id = Profiler.registerFine("test:leaky")
+        onOwnThread {
+            Profiler.enter(id)
+            assertFalse(Profiler.expectBalanced(), "a leaked label reported itself balanced")
+            assertEquals(NO_OP, Profiler.slot().getOpaque(), "the leak was not reset")
+            assertTrue(Profiler.expectBalanced(), "the same leak was reported twice")
+        }
+    }
+
+    /**
+     * The one fatal condition, and the check that it is fatal *only* under strict.
+     *
+     * Asserting only that a leak stops the session would still pass if `strict` were wired to
+     * nothing, which is why both directions are here.
+     */
+    @Test
+    fun `a leak stops the session under strict and only under strict`() {
+        val id = Profiler.registerFine("test:fatal")
+
+        Profiler.start(stepMillis = 1.0, strict = true)
+        onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
+        val strict = Profiler.stop()
+        assertTrue(strict.failure != null, "a leak did not stop a strict session")
+        assertTrue(
+            strict.failure!!.contains("test:fatal"),
+            "the failure did not name the operation that leaked: ${strict.failure}"
+        )
+        assertFalse(strict.ok)
+
+        Profiler.start(stepMillis = 1.0, strict = false)
+        onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
+        val lenient = Profiler.stop()
+        assertNull(lenient.failure, "a leak stopped a non-strict session")
+        assertTrue(lenient.ok)
+        assertEquals(1, lenient.imbalances, "the second session inherited the first session's leak")
+    }
+
+    /**
+     * A session reports its own leaks and nobody else's.
+     *
+     * Every other number in a `Profile` is per session, and deliberately so: `callsAtStart` exists
+     * because call counts that span a warm-up inflate implied durations by a tenth, which shows as
+     * an upper bound coming out *below* the truth, an arithmetic impossibility. An imbalance count
+     * kept for the process has no such tell. It fails quietly, in the direction of over-reporting,
+     * and only in a process that profiles twice — an A/B comparison in one JVM, say, which would
+     * print leaks inherited from earlier sessions.
+     */
+    @Test
+    fun `a clean session does not inherit an earlier session's leaks`() {
+        val id = Profiler.registerFine("test:inherited")
+
+        Profiler.start(stepMillis = 1.0, strict = false)
+        onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
+        assertEquals(1, Profiler.stop().imbalances, "the leak was not counted at all")
+
+        Profiler.start(stepMillis = 1.0, strict = false)
+        onOwnThread { op(id) { } }
+        val clean = Profiler.stop()
+        assertEquals(0, clean.imbalances, "a session with no leak reported ${clean.imbalances}")
+        assertFalse(clean.render().contains("still open at a point"), "a clean report warned about a leak")
+    }
+
+    /**
+     * Why `exit` names what it closes.
+     *
+     * Without the name, `enter(a); enter(b); exit(); exit()` unwinds `b` then `a` whether or not that is what the code
+     * meant — a crossed pair is indistinguishable from a correct one, and the share that comes out
+     * covers work that was never inside the label. Naming what you are closing makes it visible.
+     */
+    @Test
+    fun `closing the wrong operation is counted and named`() {
+        val a = Profiler.registerFine("test:crossed-a")
+        val b = Profiler.registerFine("test:crossed-b")
+        Profiler.start(stepMillis = 1.0, strict = false)
+        onOwnThread {
+            Profiler.enter(a)
+            Profiler.exit(b)
+            // Unwound anyway: one bad label, not every label after it.
+            assertEquals(NO_OP, Profiler.slot().getOpaque(), "the thread was not unwound")
+            Profiler.release()
+        }
+        val report = Profiler.stop()
+        assertEquals(1, report.imbalances, "a crossed exit was not counted")
+    }
+
+    @Test
+    fun `a crossed exit stops the session under strict and names both operations`() {
+        val a = Profiler.registerFine("test:strict-open")
+        val b = Profiler.registerFine("test:strict-closed")
+        Profiler.start(stepMillis = 1.0, strict = true)
+        onOwnThread {
+            Profiler.enter(a)
+            Profiler.exit(b)
+            Profiler.release()
+        }
+        val report = Profiler.stop()
+        val failure = assertNotNull(report.failure, "a crossed exit did not stop a strict session")
+        assertTrue("test:strict-closed" in failure, "the message did not name what was closed")
+        assertTrue("test:strict-open" in failure, "the message did not name what was open")
+    }
+
+    @Test
+    fun `closing a coarse execution that is not the one open is caught too`() {
+        val a = Profiler.registerCoarse("test:coarse-open")
+        val b = Profiler.registerCoarse("test:coarse-closed")
+        Profiler.start(stepMillis = 1.0, strict = false)
+        onOwnThread {
+            Profiler.enter(a)
+            Profiler.exit(b)
+            assertNull(Profiler.slot().contextOpaque(), "the context was not closed")
+            Profiler.release()
+        }
+        val report = Profiler.stop()
+        assertEquals(1, report.imbalances, "a crossed coarse exit was not counted")
+    }
+
+    /** An `exit` with no `enter` names nothing rather than reading off the end of the name table. */
+    @Test
+    fun `an unmatched exit does not crash the leak message`() {
+        val ghost = Profiler.registerFine("test:neverEntered")
+        onOwnThread {
+            Profiler.exit(ghost)
+            // Depth is already zero, so this is balanced; what is checked is that getting here at
+            // all — and formatting a message from a slot holding NO_OP — is safe.
+            assertTrue(Profiler.expectBalanced())
+        }
+        assertTrue(leakMessage("an unnamed label", "t").contains("an unnamed label"))
+    }
+
+    // ---------------------------------------------------------------- the slot registry
+
+    /**
+     * A dead thread's slot must leave the walk list. One that does not reads empty forever, which
+     * inflates the sampler's denominator and — worse for occupancy work — counts a dead thread as
+     * an idle one.
+     */
+    @Test
+    fun `releasing a slot removes it from the walk`() {
+        val before = Profiler.slots().size
+        onOwnThread {
+            Profiler.slot()
+            assertEquals(before + 1, Profiler.slots().size, "a new thread did not register a slot")
+            Profiler.release()
+        }
+        assertEquals(before, Profiler.slots().size, "a released slot stayed in the walk list")
+    }
+
+    /**
+     * Runs [n] threads that all hold a slot at once, then all release, and returns their indexes.
+     *
+     * Latches rather than a spin on a captured `var`. A Kotlin `var` captured by a lambda compiles
+     * to a `Ref.IntRef` whose field is plain and non-volatile, and `onSpinWait` is not a fence and
+     * forces no reload — so a spin on one is a loop the JIT may hoist the load out of, and a test
+     * that hangs the build with no timeout.
+     */
+    private fun roundOfIndexes(n: Int): List<Int> {
+        val indexes = java.util.concurrent.ConcurrentLinkedQueue<Int>()
+        val acquired = java.util.concurrent.CountDownLatch(n)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val threads = List(n) {
+            Thread({
+                indexes += Profiler.slot().index
+                acquired.countDown()
+                release.await()
+                Profiler.release()
+            }, "registry-round-$it")
+        }
+        threads.forEach { it.start() }
+        assertTrue(
+            acquired.await(10, java.util.concurrent.TimeUnit.SECONDS),
+            "threads did not register a slot within ten seconds"
+        )
+        val seen = indexes.toList()
+        release.countDown()
+        threads.forEach { it.join() }
+        return seen
+    }
+
+    /**
+     * A thread that exits without calling `release()` is reclaimed anyway, and reported.
+     *
+     * The safety net for the one API contract a user cannot see themselves breaking: a slot left
+     * behind reads `NO_OP` for the rest of the process, so a *dead* thread is counted as an *idle*
+     * one and quietly inflates the denominator every share is taken over. The slot holds its thread
+     * weakly, so a cleared reference is proof the thread is gone.
+     *
+     * The `System.gc()` is the honest part of this test: reclamation waits on a collection, so this
+     * is a safety net and not a substitute for `release()`. A hint is all `gc()` is, so the loop
+     * gives it several chances before giving up rather than depending on one call.
+     */
+    @Test
+    fun `a thread that forgets to release is reclaimed and reported`() {
+        val before = Profiler.reclaimedSlots()
+        val t = Thread({ Profiler.slot() }, "forgets-to-release")
+        t.start()
+        t.join()
+
+        var reclaimed = 0
+        repeat(20) {
+            if (reclaimed > 0) return@repeat
+            System.gc()
+            Profiler.reclaimDeadSlots()
+            reclaimed = Profiler.reclaimedSlots() - before
+        }
+        assertTrue(reclaimed >= 1, "a dead thread's slot was never reclaimed")
+    }
+
+    /**
+     * Exited is enough, with no collection: the thread is held strongly here, so its weak reference
+     * cannot clear, and the slot still goes at the first reclaim - with its calls folded in.
+     */
+    @Test
+    fun `a thread that has exited is reclaimed without waiting for a collection`() {
+        val id = Profiler.registerFine("registry.exited")
+        val callsBefore = Profiler.callsOf(id.id)
+        val before = Profiler.reclaimedSlots()
+        val t = Thread({ repeat(3) { op(id) { } } }, "exits-without-release")
+        t.start()
+        t.join()
+        Profiler.reclaimDeadSlots()
+        assertTrue(Profiler.reclaimedSlots() - before >= 1, "an exited thread's slot was kept until a collection")
+        assertEquals(callsBefore + 3, Profiler.callsOf(id.id), "the exited thread's calls were lost on reclaim")
+        assertTrue(t.name.isNotEmpty())   // keeps the thread strongly reachable to here
+    }
+
+    /** Two live threads never share an index, which is what makes the per-thread arrays meaningful. */
+    @Test
+    fun `live threads get different indexes`() {
+        val seen = roundOfIndexes(4)
+        assertEquals(4, seen.toSet().size, "live threads shared a slot index: $seen")
+        assertTrue(seen.all { it >= 0 }, "the registry was full: $seen")
+    }
+
+    /**
+     * A registry that only ever grows is a leak, and freed indexes are what stop it growing.
+     *
+     * Asserted as *no growth across rounds* rather than as "the next thread gets the index the last
+     * one freed". The obvious version of that is order-dependent and passes by luck: `freeIndexes`
+     * is a FIFO queue shared by the whole JVM, so with two entries already in it, one thread polls
+     * the head and returns its own index to the tail, the next thread polls the second entry, and
+     * the equality fails — pointing at the registry when the fault is in the test. What survives
+     * whatever else is queued is that the high-water mark does not move.
+     *
+     * The reuse itself is worth knowing about for a second reason: the duty cycle's per-thread
+     * arrays are indexed by this, so a reused index blends two threads' figures. Known, accepted,
+     * and written down here rather than left as a surprise to whoever reads those arrays next.
+     */
+    @Test
+    fun `the registry reuses indexes instead of growing`() {
+        // The high-water mark itself, and not the largest index a round was handed: with many freed
+        // indexes queued - OwnTimeTest's pools leave a dozen - a later round can draw higher ones from
+        // the queue while the registry does not grow at all.
+        roundOfIndexes(4)
+        val ceiling = Profiler.slotCeiling()
+        repeat(3) { round ->
+            val again = roundOfIndexes(4)
+            assertEquals(4, again.toSet().size, "live threads shared a slot index in round $round")
+            assertTrue(
+                Profiler.slotCeiling() <= ceiling,
+                "the registry grew in round $round: ${Profiler.slotCeiling()} against a ceiling of $ceiling"
+            )
+        }
+    }
+
+    // ------------------------------------------------- threads per operation
+
+    /**
+     * The denominator of `Concurrency / Threads`.
+     *
+     * Not the run's slot high-water mark, printed identically on every row: that would measure an
+     * operation that only ever runs on `main` against a pool it cannot enter. What the column has
+     * to be able to say is *this operation is serial by construction*, and that is
+     * a statement about one operation, not about the run.
+     */
+    @Test
+    fun `the thread count is per operation and not per run`() {
+        val serial = Profiler.registerFine("test:threads-serial")
+        val spread = Profiler.registerFine("test:threads-spread")
+
+        // All four threads are held alive across stop(), which is the live half of the count -
+        // every other test here lets its threads exit, and that goes through the retired half.
+        val called = CountDownLatch(4)
+        val until = CountDownLatch(1)
+        val workers = listOf(serial, spread, spread, spread).mapIndexed { i, id ->
+            Thread({
+                op(id) { }
+                called.countDown()
+                until.await()
+                Profiler.release()
+            }, "threads-worker-$i")
+        }
+
+        Profiler.start(stepMillis = 1.0, strict = false)
+        workers.forEach { it.start() }
+        called.await()
+        val r = Profiler.stop()
+        until.countDown()
+        workers.forEach { it.join() }
+
+        assertEquals(1, r.threadsOf("test:threads-serial"), "an operation on one thread did not say so")
+        assertEquals(3, r.threadsOf("test:threads-spread"), "an operation on three threads was miscounted")
+    }
+
+    /**
+     * The path where the number can silently vanish.
+     *
+     * A slot's per-operation counters are the only record of which operations its thread touched,
+     * and `release` folds them into the retired totals and loses the identity one instruction
+     * later. So the count has to be taken inside that fold; a test that only ever asked about live
+     * threads would pass against a version that never counted a departed one.
+     */
+    @Test
+    fun `threads that have exited are still counted`() {
+        val id = Profiler.registerFine("test:threads-retired")
+
+        Profiler.start(stepMillis = 1.0, strict = false)
+        repeat(3) { i ->
+            onOwnThread("retired-worker-$i") {
+                repeat(5) { op(id) { } }
+                Profiler.release()
+            }
+        }
+        val r = Profiler.stop()
+
+        assertEquals(3, r.threadsOf("test:threads-retired"), "threads that exited were lost")
+        assertEquals(15, r.operations.first { it.name == "test:threads-retired" }.calls)
+    }
+
+    /**
+     * Per session, for the reason `callsAtStart` exists.
+     *
+     * A program may warm up on a separate set of workers that exit before the measured run.
+     * Counting them would report threads for work no sample could have covered - the same mismatch
+     * that, in call counts, has the floor check accusing a 20 ns operation of being under 7.9 ns,
+     * and the reason every count in a report is session-scoped rather than lifetime-scoped.
+     */
+    @Test
+    fun `a session does not count threads that ran before it`() {
+        val id = Profiler.registerFine("test:threads-warmup")
+
+        repeat(3) { i -> onOwnThread("warmup-worker-$i") { op(id) { }; Profiler.release() } }
+
+        Profiler.start(stepMillis = 1.0, strict = false)
+        onOwnThread("measured-worker") { op(id) { }; Profiler.release() }
+        val r = Profiler.stop()
+
+        assertEquals(1, r.threadsOf("test:threads-warmup"), "the session counted the warm-up's threads")
+    }
+
+    /** The row for one operation by name, since ids are shared with every other test in the JVM. */
+    private fun Profile.threadsOf(name: String): Int =
+        operations.first { it.name == name }.threads
+}

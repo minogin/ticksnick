@@ -1,0 +1,1007 @@
+package com.ticksnick
+
+import java.util.Locale
+import java.util.concurrent.locks.LockSupport
+
+/**
+ * How the sampler waits for its next tick.
+ *
+ * At a 1 ms request with half the cores busy, PARK and SLEEP overshoot by more than half a step
+ * and fall behind on a large share of ticks, while SPIN holds the step to about a microsecond.
+ * With every core loaded PARK can stretch the step tenfold: the sampler cannot get scheduled.
+ *
+ * SPIN is the default; the others are kept for comparison, worth re-running on different
+ * hardware. PARK also bunches: after falling behind it fires several ticks in quick succession,
+ * and bunched samples are correlated samples, which more samples will not fix.
+ */
+enum class WaitStrategy {
+    /** LockSupport.parkNanos — free, but only as punctual as the scheduler is willing to be. */
+    PARK,
+
+    /** Thread.sleep(1) in a loop. A short sleep might be expected to make HotSpot ask Windows
+     *  for a finer timer; it is no more punctual for it. */
+    SLEEP,
+
+    /** Busy-spin on nanoTime — microsecond accuracy, at the price of a whole core. */
+    SPIN,
+}
+
+/**
+ * Log-2 buckets for the length of a long execution in ticks: 24 of them reach 16 million ticks,
+ * which is four and a half hours at a 1 ms step.
+ */
+internal const val STUCK_BUCKETS = 24
+
+/**
+ * Slots in the table of (execution, key) pairs counted in one tick - see `Sampler.bump`. A power of
+ * two, and far more than a tick holds: an entry per open coarse execution, per (execution, fine
+ * label) running, and per execution with a thread under it.
+ */
+private const val PAIR_TABLE = 8192
+
+/** How far one lookup probes before it gives up and answers "first": a full table reads parallelism low, never wrong-way. */
+private const val PAIR_PROBES = 64
+
+/** The key of "a thread is under this execution" in that table. Coarse types are 0 and up. */
+private const val OCCUPIED = -1
+
+/** Where fine labels start among the table's keys: a fine label `f` is `FINE_KEY + f`. */
+private const val FINE_KEY = MAX_COARSE_TYPES
+
+/** The parent key of a root execution in that table: roots share it, so they count against each other. */
+private val ROOT = Any()
+
+/**
+ * The sampling thread. Wakes on a fixed step, reads every slot, increments the counter for
+ * whatever id it found. Reads other threads' slots with opaque reads and no further
+ * synchronisation, deliberately: a sample is one instant's reading and needs no ordering with
+ * anything else.
+ *
+ * Counters are plain longs: this thread is their only writer.
+ */
+internal class Sampler(
+    private val stepNanos: Long,
+    private val wait: WaitStrategy = WaitStrategy.SPIN,
+    private val jitterFraction: Double = 0.25,
+    dutyWindowNanos: Long = DutyCycle.DEFAULT_WINDOW_NANOS,
+    /**
+     * Whether a leaked label stops the session.
+     *
+     * A label left open at a point the caller declared quiescent does not make a number imprecise,
+     * it makes it *someone else's*: every sample after the leak is billed to the leaked operation,
+     * and the result looks exactly like a finding. There is no rerun in which that becomes valid,
+     * so under strict the session stops at the first one rather than spending twenty minutes
+     * producing an answer that was never going to be right.
+     *
+     * Off for code you do not own and cannot fix — the leak is then still counted and reported.
+     */
+    val strict: Boolean = true,
+    /**
+     * Whether each hit also records whether the owning thread was runnable.
+     *
+     * A switch and not a constant, because
+     * the cost of this has to be measurable against its own absence, and a thing that is always on
+     * can only be priced by argument.
+     */
+    val sampleState: Boolean = true,
+) : Thread("sampler") {
+
+    /**
+     * Why the session stopped early, or null if it did not. Set the moment the leak is noticed, on
+     * the thread that noticed it, so a run that cannot be right ends there rather than at the end.
+     */
+    @Volatile
+    var failure: String? = null
+        private set
+
+    /**
+     * The duty cycle rides on this thread's tick loop, but at its own far lower rate — it costs one
+     * native call per thread and it is measuring something that moves in scheduler ticks. Carried
+     * here rather than on a thread of its own because this thread already walks the slot list, and
+     * because the two must cover exactly the same span if the bound is to apply to these shares.
+     */
+    private val duty = DutyCycle(dutyWindowNanos)
+
+    /** Time this thread was itself stopped, which is time every thread was. See [PauseTracker]. */
+    private val pause = PauseTracker(stepNanos, GcPauseClock.pauseNanos())
+
+    /** When to next look for slots whose thread died without releasing. See Profiler.reclaimDeadSlots. */
+    private var nextReclaim = Long.MIN_VALUE
+
+    // Ticking on an exact beat can lock onto a workload that has a rhythm of its own near the
+    // same period — the wagon-wheel effect, where more samples do not help because every sample
+    // catches the same phase. Scattering the interval makes that impossible. The jitter is
+    // symmetric, so the mean interval is still the requested step. Seeded, so runs repeat.
+    private val rnd = java.util.Random(20260820L)
+
+    private fun nextInterval(): Long =
+        if (jitterFraction <= 0.0) stepNanos
+        else stepNanos + ((rnd.nextDouble() * 2 - 1) * jitterFraction * stepNanos).toLong()
+
+    /** Hits per operation; the last entry counts slots that held no operation. */
+    internal val counters = LongArray(MAX_OPERATIONS + 1)
+
+    /**
+     * Of those hits, the ones that caught an execution which had already been running at the
+     * previous tick — see [stuckHits] and the arrays below.
+     */
+    internal val stuckHits = LongArray(MAX_OPERATIONS)
+
+    /** How many distinct executions lasted across a tick: one per unbroken run of stuck samples. */
+    internal val stuckInstances = LongArray(MAX_OPERATIONS)
+
+    /**
+     * Of those hits, the ones where the owning thread was **not** runnable — parked, blocked, or
+     * waiting. Zero everywhere when [sampleState] is off.
+     *
+     * `RUNNABLE` is not the same as *on a core*: it also covers a thread the scheduler has
+     * preempted — a sizeable share of wall time on a busy machine, even for code that never blocks — and a
+     * thread sitting in a blocking socket read, which the JVM cannot see into. So this counts
+     * waiting that some *other thread* caused, which is the kind that does not add up across
+     * threads. Separating on-a-core from preempted needs the per-thread duty cycle.
+     */
+    internal val waitingHits = LongArray(MAX_OPERATIONS)
+
+    /**
+     * Hits that were both stuck and waiting — a long execution caught with its thread parked.
+     *
+     * The pairing is the point. An operation that waits *somewhere* is not the same as one whose
+     * *long* executions are where the waiting happens, and it is the second that decides whether a
+     * flagged operation is honest-but-coarse or is occupancy masquerading as CPU. Without it the
+     * verdict would have to charge the whole run's off-CPU budget against every operation
+     * separately and could only ever say "cannot say which".
+     */
+    internal val stuckWaitingHits = LongArray(MAX_OPERATIONS)
+
+    /**
+     * The longest unbroken run of stuck ticks one execution produced, per operation. In ticks: a
+     * run of `n` means the execution was seen open at `n + 1` consecutive ticks, so it lasted at
+     * least `n` intervals. It is what tells two dozen resizes of ten milliseconds from one lock
+     * held for two seconds, which a share cannot.
+     */
+    internal val longestStuckTicks = LongArray(MAX_OPERATIONS)
+
+    /**
+     * Runs of stuck ticks by length, [STUCK_BUCKETS] log-2 buckets per operation, recorded when a
+     * run ends. Kept for a reader who wants the distribution; the report prints the longest.
+     */
+    internal val stuckRunHist = LongArray(MAX_OPERATIONS * STUCK_BUCKETS)
+
+    /**
+     * Of the samples that caught a thread inside no label at all, the ones where it was not
+     * runnable.
+     *
+     * The unlabelled column is the one place a reader has no other instrument for. A large
+     * unlabelled share reads as "the labels miss most of the run", which is alarming, and this says
+     * whether that time was work nobody labelled or a thread doing nothing at all — two findings
+     * with nothing in common.
+     */
+    var idleWaitingHits: Long = 0; private set
+
+    /**
+     * Ticks at which at least one thread was inside the operation — its wall-clock footprint,
+     * counted once however many threads were in it.
+     *
+     * This is the divisor that turns summed occupancy back into elapsed time. Occupancy alone
+     * cannot distinguish a hundred threads waiting one second from one thread waiting a hundred
+     * seconds; both are a hundred thread-seconds and their real costs are a hundredfold apart.
+     * `activeTicks × step` is the first, `hits / activeTicks` is the mean concurrency that
+     * separates them, and on a contended lock that is the difference between *break up the convoy*
+     * and *design the contention out*.
+     */
+    internal val activeTicks = LongArray(MAX_OPERATIONS)
+
+    /**
+     * The most threads ever seen inside an operation at one tick.
+     *
+     * The mean concurrency beside it - `hits / activeTicks` - cannot say whether three threads sat
+     * inside throughout or six were there half the time, and those are different programs. A peak
+     * is a lower bound by construction, since a burst between two ticks is a burst nobody saw, and
+     * it inherits the same noise floor as every other sampled number here.
+     */
+    internal val peakInside = IntArray(MAX_OPERATIONS)
+
+    /** How many threads this tick has found inside each operation so far. See [peakInside]. */
+    private val insideThisTick = IntArray(MAX_OPERATIONS)
+
+    /**
+     * The tick at which each operation was last seen, so [activeTicks] counts ticks and not slots.
+     * A stamp rather than a flag array cleared each tick: one write when an operation first appears
+     * in a tick, and nothing at all for the operations that did not.
+     */
+    private val seenAt = LongArray(MAX_OPERATIONS) { -1L }
+
+    /** Samples that caught a thread inside an execution of this coarse type, innermost only. */
+    internal val coarseHits = LongArray(MAX_COARSE_TYPES)
+
+    /** Of those, the ones whose thread was runnable. `hits - running` is the waiting, sampled. */
+    internal val coarseRunningHits = LongArray(MAX_COARSE_TYPES)
+
+    /**
+     * Samples inside this coarse type, innermost, with **no fine label open**: the span's own work.
+     *
+     * The quantity that lets both tiers share one table. A fine operation's hits are self time by
+     * construction - the hook keeps only the innermost id - so fine hits partition the labelled
+     * samples between fine operations. These are the samples left over inside a span: work the
+     * coarse operation did itself rather than delegated to something also labelled. Fine hits and
+     * these are disjoint and together cover every labelled sample, so one share column can rank
+     * both tiers without double counting a parent and its children.
+     */
+    internal val coarseSelfHits = LongArray(MAX_COARSE_TYPES)
+
+    /** Of [coarseSelfHits], the ones whose thread was runnable. */
+    internal val coarseSelfRunningHits = LongArray(MAX_COARSE_TYPES)
+
+    /** Ticks at which at least one thread was doing this type's own work. */
+    internal val coarseSelfActiveTicks = LongArray(MAX_COARSE_TYPES)
+
+    /** The most threads seen doing this type's own work at one tick. See `Profile.workersOf`. */
+    internal val coarseSelfPeak = IntArray(MAX_COARSE_TYPES)
+
+    /** As `seenAt`, for [coarseSelfActiveTicks]. */
+    private val coarseSelfSeenAt = LongArray(MAX_COARSE_TYPES) { -1L }
+
+    /** How many threads this tick has found doing each type's own work. See [coarseSelfPeak]. */
+    private val coarseSelfInsideThisTick = IntArray(MAX_COARSE_TYPES)
+
+    /**
+     * Samples caught anywhere **under** this coarse type, itself included.
+     *
+     * The self/inclusive distinction the fine tier never needed: a fine operation is atomic, so its
+     * self time is its inclusive time, while a coarse operation exists precisely to contain others.
+     * Counted by walking the parent chain, deduplicated by type so that a type nested inside itself
+     * is credited once for a sample rather than once per level.
+     */
+    internal val coarseInclusiveHits = LongArray(MAX_COARSE_TYPES)
+
+    /** Of [coarseInclusiveHits], the ones whose thread was runnable. `span - this` is the waiting. */
+    internal val coarseRunningInclusiveHits = LongArray(MAX_COARSE_TYPES)
+
+    /**
+     * Distinct executions of this type occupied at each tick, summed over ticks.
+     *
+     * The denominator of the second factor. `inclusiveHits / instanceTicks` is threads per
+     * execution — **parallelism** — and `inclusiveHits / activeTicks` is threads per tick, so the
+     * two divided give executions in flight. Counted by stamping the context object rather than a
+     * table, because the thing being counted is an instance and only the instance can identify
+     * itself; three threads inside one execution stamp it once.
+     */
+    internal val coarseInstanceTicks = LongArray(MAX_COARSE_TYPES)
+
+    /** Ticks at which at least one thread was anywhere under this coarse type. */
+    internal val coarseActiveTicks = LongArray(MAX_COARSE_TYPES)
+
+    /** As [seenAt], for coarse types, so [coarseActiveTicks] counts ticks and not slots. */
+    private val coarseSeenAt = LongArray(MAX_COARSE_TYPES) { -1L }
+
+    /**
+     * The cross-tabulation: `[coarse type][fine operation]`, the last column being *no fine label*.
+     *
+     * Every sample records the pair, which is the one thing neither tier can produce alone — fine
+     * sampling says what is hot but not what it was for, coarse spans say where the time went but
+     * not why. 131 KB, flat and indexed rather than nested so the tick loop does one bounds check.
+     */
+    internal val pairHits = LongArray(MAX_COARSE_TYPES * (MAX_OPERATIONS + 1))
+
+    /**
+     * The (execution, key) pairs counted this tick, open-addressed and stamped with the tick, so
+     * nothing is cleared between ticks. See [bump].
+     */
+    private val pairParent = arrayOfNulls<Any>(PAIR_TABLE)
+    private val pairType = IntArray(PAIR_TABLE)
+    private val pairStamp = LongArray(PAIR_TABLE) { -1L }
+    private val pairCount = IntArray(PAIR_TABLE)
+
+    /**
+     * Counts one more (execution, key) this tick and returns the count, 1 the first time. Keys are a
+     * coarse child's type, [FINE_KEY] plus a fine label, or [OCCUPIED].
+     */
+    private fun bump(parent: Any, key: Int): Int {
+        var i = slotOf(parent, key)
+        repeat(PAIR_PROBES) {
+            if (pairStamp[i] != ticks) {
+                pairStamp[i] = ticks
+                pairParent[i] = parent
+                pairType[i] = key
+                pairCount[i] = 1
+                return 1
+            }
+            if (pairParent[i] === parent && pairType[i] == key) return ++pairCount[i]
+            i = (i + 1) and (PAIR_TABLE - 1)
+        }
+        return 1
+    }
+
+    /** This tick's count for (execution, key), 0 if none. */
+    private fun countOf(parent: Any, key: Int): Int {
+        var i = slotOf(parent, key)
+        repeat(PAIR_PROBES) {
+            if (pairStamp[i] != ticks) return 0
+            if (pairParent[i] === parent && pairType[i] == key) return pairCount[i]
+            i = (i + 1) and (PAIR_TABLE - 1)
+        }
+        return 0
+    }
+
+    private fun slotOf(parent: Any, key: Int): Int =
+        (((System.identityHashCode(parent) * 31 + key) * -0x61c88647) ushr 16) and (PAIR_TABLE - 1)
+
+    /**
+     * Unlabelled samples of a thread waiting inside an execution, held until the walk is over: whether
+     * another thread was under the same execution this tick - a join - is known only then.
+     */
+    private val pendingCtx = arrayOfNulls<CoarseContext>(MAX_SLOTS)
+    private val pendingNode = arrayOfNulls<CoarsePath>(MAX_SLOTS)
+    private var pending = 0
+
+    /** One sample of fine label [f] in [ctx]'s own time, on its path [node]. See `CoarsePath.ownFine`. */
+    private fun countOwn(ctx: CoarseContext, node: CoarsePath, f: Int) {
+        val own = node.ownFine ?: LongArray(MAX_OPERATIONS + 1).also { node.ownFine = it }
+        own[f]++
+        if (bump(ctx, FINE_KEY + f) == 1) {
+            val covered = node.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1).also { node.ownFineCovered = it }
+            covered[f]++
+        }
+    }
+
+    /**
+     * Whether this tick has not yet seen an execution of [type] under [parent]: true the first time,
+     * false after. Keyed by the type and not by the path node, because each thread keeps a tree of
+     * its own until the end: the four branches of one request on four pool threads are four nodes,
+     * but under one parent execution a type is one path. One probe in the usual case; a full table
+     * - more open executions in one tick than it has slots - answers true, which overcounts the
+     * parents and reads the parallelism low.
+     */
+    private fun firstUnder(parent: Any, type: Int): Boolean = bump(parent, type) == 1
+
+    /** Types already credited while walking one parent chain. Reused; never escapes the tick loop. */
+    private val chain = IntArray(MAX_COARSE_DEPTH)
+
+    /**
+     * Samples that caught a thread inside a fine label and inside **no** coarse context.
+     *
+     * The one detector for the failure mode neither the floor check nor the balance check can see:
+     * **work escaping its context onto another thread.** A context lives on the thread that made it,
+     * so when an operation hands work to a pool, the pool threads run the callers' fine labels with
+     * no context at all — and the caller's span reports that time as *waiting*. Silent, and in the
+     * contaminating direction, which is the class of error this project spends its effort on.
+     *
+     * A search that fans across a pool shows it: at one thread the search's own busy time fills its
+     * span, and at eight threads most of the work has gone somewhere the context could not follow.
+     * This counter is where it went.
+     *
+     * **A measurement and not an accusation.** It also reads high for a perfectly good reason: you
+     * bracketed part of your program coarsely and not the rest. The report states the number and
+     * names both readings rather than picking one, because it cannot tell them apart and pretending
+     * otherwise is how a tool spends its credibility.
+     *
+     * One branch, in a loop that has both values in registers already.
+     */
+    internal var labelledOutsideCoarse: Long = 0; private set
+
+    /**
+     * Samples that caught a thread inside a coarse execution the owner had already closed, per type.
+     *
+     * **Attribution invented rather than lost, which is the one direction that cannot be recovered
+     * from.** A context handed to a pool outlives the slot it came from: the thread that opened the
+     * request closes its span and moves on, and anything still mounted on that context goes on being
+     * sampled into an execution that has finished. Nothing else here can see it — the balance check
+     * looks at a thread's own slot, the floor check at sizes, and [labelledOutsideCoarse] at work
+     * with no context at all. This is work with a context that is no longer real.
+     *
+     * These samples are **excluded** from every number the type reports. Crediting them lets
+     * `busy/exec` exceed the mean span it is supposed to sit inside, which is arithmetically
+     * impossible and reads as a finding rather than as a fault. Counted here instead, and named in
+     * the report against the type they would have contaminated.
+     *
+     * It is also the failure mode that context propagation makes possible: a context that never
+     * crosses a thread cannot outlive its owner's span.
+     */
+    internal val coarseStaleHits = LongArray(MAX_COARSE_TYPES)
+
+    /**
+     * Samples that caught a thread under at least one closed execution, counted **once per sample**.
+     *
+     * Deliberately not the sum of [coarseStaleHits], which counts per type: a sample under a closed
+     * request containing a closed sub-operation is two entries there and one thread here. Only the
+     * per-sample count can be divided by anything and give a share; the per-type sum can come out
+     * over 100%.
+     */
+    internal var staleContextHits: Long = 0; private set
+
+    /**
+     * Samples that caught a thread inside a coarse execution at all, open or closed.
+     *
+     * The denominator [staleContextHits] belongs over, and the only one it cannot exceed. Not
+     * *labelled* samples: a thread can be inside a request without being inside a fine label, and
+     * that time is just as much the request's.
+     */
+    internal var coarseSampleHits: Long = 0; private set
+
+    /**
+     * Per thread, every sample taken at its slot and those of them that were inside some operation.
+     *
+     * Paired with the duty cycle's per-thread CPU fractions to bound the error on the shares — see
+     * [labelledDuty]. Indexed by slot index, which is why that index exists: it is
+     * immutable for the life of the slot and it is the only thing the sampler and the duty walk
+     * can both use to mean *the same thread*.
+     */
+    internal val slotHits = LongArray(MAX_SLOTS)
+    internal val slotLabelled = LongArray(MAX_SLOTS)
+
+    /**
+     * Of those, the ones that caught the thread not runnable — all of them, and the labelled ones.
+     *
+     * These are what stop the bound being vacuous on a thread pool. A pool thread parks between
+     * tasks and works inside a label, so its stall fraction and its labelled fraction are both
+     * large and `min` of the two assumes the parking happened inside the label, which can print a
+     * true 98% as under 50%. The state read already says where the waiting was;
+     * these two counters are the only thing needed to use it. Zero when [sampleState] is off, and
+     * the bound falls back to the assumption.
+     */
+    internal val slotWaiting = LongArray(MAX_SLOTS)
+    internal val slotLabelledWaiting = LongArray(MAX_SLOTS)
+
+    /**
+     * What the last tick found in each slot, kept on this side of the fence.
+     *
+     * The test is two words against two words. If a slot holds the same operation as last tick
+     * *and* that thread's entry counter for it has not moved, then nobody entered the operation in
+     * between, so this is not a new execution — it is the same one, still running, and it has now
+     * lasted at least a whole tick. For an operation whose label claims tens of nanoseconds that is
+     * four orders of magnitude out.
+     */
+    private val prevOp = IntArray(MAX_SLOTS) { NO_OP }
+    private val prevCount = LongArray(MAX_SLOTS)
+    private val prevStuck = BooleanArray(MAX_SLOTS)
+
+    /** How many consecutive ticks the execution on this slot has been seen stuck. */
+    private val stuckRun = IntArray(MAX_SLOTS)
+
+    /** Closes the run of stuck ticks on slot [idx], which was inside [op], into the histogram. */
+    private fun endStuckRun(op: Int, idx: Int) {
+        val run = stuckRun[idx]
+        if (op in 0 until MAX_OPERATIONS && run > 0) {
+            val bucket = minOf(STUCK_BUCKETS - 1, 31 - Integer.numberOfLeadingZeros(run))
+            stuckRunHist[op * STUCK_BUCKETS + bucket]++
+        }
+        stuckRun[idx] = 0
+    }
+
+    /**
+     * Which thread each index belonged to last tick, so a recycled one starts clean.
+     *
+     * An index outlives the thread that held it — `release()` hands it to the next arrival — and
+     * the three arrays above would otherwise carry a dead thread's last tick into a live thread's
+     * first. A counter going backwards does not catch that:
+     * the test is inequality, and the new thread's counter for the old operation only has to *pass
+     * through* the old value at a tick boundary to be read as one execution still running. Rare,
+     * and worst on exactly the operations where a single false long execution is most visible —
+     * the ones entered a handful of times per pass.
+     *
+     * One long compare per slot per tick, on a thread that has a core to itself.
+     */
+    private val prevThreadId = LongArray(MAX_SLOTS) { -1L }
+
+    var ticks: Long = 0; private set
+
+    /** The tick whose pause was last charged to each path, by [PathIds] id. See [chargePause]. */
+    private var pauseChargedAt = LongArray(256) { -1L }
+
+    /**
+     * Whether the pause before this tick is still to be charged to path [id], marking it charged.
+     *
+     * **Once per path, not once per thread.** A pause stops every thread, and the row it lands on is
+     * the path's: four workers inside one operation sat through the same pause once, as the row's
+     * wall time does. Charged per thread's node, the merged row would read the pause four times
+     * over, and a child could show more pause than the parent it ran in.
+     */
+    private fun chargePause(id: Int): Boolean {
+        if (id >= pauseChargedAt.size) {
+            val old = pauseChargedAt.size
+            pauseChargedAt = pauseChargedAt.copyOf(maxOf(id + 1, 2 * old)).also { it.fill(-1L, old, it.size) }
+        }
+        if (pauseChargedAt[id] == ticks) return false
+        pauseChargedAt[id] = ticks
+        return true
+    }
+    var lagged: Long = 0; private set
+    var minStep: Long = Long.MAX_VALUE; private set
+    var maxStep: Long = 0; private set
+    var span: Long = 0; private set
+
+    /** Most slots seen at any one tick. Read after the fact, when the threads may already be gone. */
+    var maxSlots: Int = 0; private set
+
+    /**
+     * Time spent in the slot walk itself, and how many slot visits that covers, so the walk can be
+     * priced per slot with state sampling on and off.
+     *
+     * Two `nanoTime` calls per tick on a thread that has a core — about 40 ns against a millisecond,
+     * and it is the only way this feature's cost can be a number rather than an argument.
+     */
+    var walkNanos: Long = 0; private set
+    var walkVisits: Long = 0; private set
+
+    @Volatile private var running = true
+
+    /**
+     * Call counts as they stood when this session began.
+     *
+     * Every number derived from calls — the implied duration, the floor check — divides *this
+     * session's* hits by them, so they have to be this session's calls. The registry's totals are
+     * for the life of the process and include calls made by threads that died before sampling
+     * started, whose counts are folded into the retired totals and stay there.
+     *
+     * A warm-up on worker threads that exit before the measured run would otherwise inflate every
+     * call count, and the floor check would then put an upper bound on an operation's duration
+     * below its true one.
+     */
+    private val callsAtStart = LongArray(MAX_OPERATIONS)
+
+    /** Calls made since this session began. See [callsAtStart]. */
+    internal fun sessionCalls(id: Int): Long = (Profiler.callsOf(id) - callsAtStart[id]).coerceAtLeast(0)
+
+    /**
+     * Threads that had already called each operation when this session started, for the same reason
+     * as [callsAtStart]: a warm-up on workers that exit before the measured run would otherwise
+     * report a thread count for work no sample could cover.
+     */
+    private val threadsAtStart = IntArray(MAX_OPERATIONS)
+
+    /**
+     * Distinct threads that have called an operation since this session began.
+     *
+     * A scalar difference, like [sessionCalls], which costs one failure mode worth naming: a thread
+     * that called the operation *before* sampling started and goes on calling it during the session
+     * is subtracted out and not counted again. Threads created after `start()`, the ordinary case,
+     * are exact.
+     */
+    internal fun sessionThreads(id: Int): Int =
+        (Profiler.threadsOf(id) - threadsAtStart[id]).coerceAtLeast(0)
+
+    init {
+        isDaemon = true
+        priority = MAX_PRIORITY
+        // After the counters exist: they are declared below the duty cycle.
+        if (sampleState) duty.watch(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting)
+    }
+
+    override fun run() {
+        // Before the first tick, so that no call is counted whose sample could not have been taken.
+        for (id in 0 until MAX_OPERATIONS) callsAtStart[id] = Profiler.callsOf(id)
+        for (id in 0 until MAX_OPERATIONS) threadsAtStart[id] = Profiler.threadsOf(id)
+        var next = System.nanoTime() + nextInterval()
+        var prev = 0L
+        var first = 0L
+
+        while (running) {
+            waitUntil(next)
+            if (!running) break
+            val now = System.nanoTime()
+            // The pause, charged: a tick that ran late found every thread stopped for that long,
+            // and the spans open now were open through it - a span can only have ended in the
+            // microseconds between the pause lifting and this read. So the lateness goes to every
+            // node this walk finds open, once per node. It is the span that was interrupted, not
+            // the span that caused the collection; the report says so.
+            val lateNanos = pause.tick(next, now)
+            duty.everyTick(now, lateNanos)
+
+            val walkStart = System.nanoTime()
+            var live = 0
+            // A plain indexed loop and not forEachSlot: this body is large, and inlining it into an
+            // already-large run() costs more than the lambda saves - measured at 2.7x the walk.
+            val ceiling = Profiler.slotCeiling()
+            for (i in 0 until ceiling) {
+                val s = Profiler.slotAt(i) ?: continue
+                // A thread that has exited is not sampled: there is no thread for the sample to be
+                // of, and counting it under no operation would shrink every share until the slot is
+                // reclaimed. A null reference is a thread already collected. Nothing is lost - a
+                // sample describes only the instant of its tick, and what the thread counted itself
+                // stays in the slot until the reclaim folds it in.
+                val owner = s.thread.get()
+                if (owner == null || !owner.isAlive) continue
+                live++
+                val c = s.getOpaque()
+                counters[if (c < 0) NO_OP_INDEX else c]++
+
+                // Carried down to the long-execution test below, so that a hit which is both long
+                // and waiting is counted as such. Knowing an operation waits somewhere is not the
+                // same as knowing its *long* executions are where the waiting is.
+                // Asked for every slot, labelled or not. What a thread does *outside* every label is
+                // the larger half of some runs — most of the thread-time on an event loop — and
+                // "waiting or working" is exactly as worth knowing there. A field read on the Thread
+                // object: no handshake, no safepoint.
+                val waiting = sampleState && owner.state != State.RUNNABLE
+                if (c >= 0) {
+                    // Once per operation per tick, not once per slot: this counts the operation's
+                    // wall-clock footprint, which is the same whether one thread was inside it or
+                    // sixteen.
+                    if (seenAt[c] != ticks) {
+                        seenAt[c] = ticks
+                        activeTicks[c]++
+                        insideThisTick[c] = 1
+                    } else {
+                        insideThisTick[c]++
+                    }
+                    // Two array writes on the sampling thread, inside a walk that is already
+                    // reading every slot. The application's hook is untouched.
+                    if (insideThisTick[c] > peakInside[c]) peakInside[c] = insideThisTick[c]
+                    if (waiting) waitingHits[c]++
+                } else if (waiting) {
+                    idleWaitingHits++
+                }
+
+                // The coarse half of the same photograph. One reference read, and it costs nothing
+                // at all when nobody has placed a coarse label: the field is null and the branch is
+                // perfectly predicted.
+                val ctx = s.contextOpaque()
+                if (ctx != null) {
+                    coarseSampleHits++
+                    val t = ctx.type
+                    // Is the thread *still* in this context, now that we have seen it closed?
+                    //
+                    // The two reads are not atomic: the slot is read at the top of the visit and the
+                    // closed flag some microseconds later, so a thread that legitimately unmounted
+                    // just before its execution ended looks stale though it never was. A clean join
+                    // does exactly that — the helper releases the context, and only then does the
+                    // owner learn it can close — so this benign ordering is the *common* case, not a
+                    // rare one. Without this check it can pass 1% of coarse thread-time on a run
+                    // where nothing has escaped at all, which is over the strict threshold and
+                    // would stop a correct session a second into the run.
+                    //
+                    // Re-reading the slot separates the two. If the thread has moved on, the sample
+                    // was taken while the execution was open and is credited normally. If it is
+                    // still mounted on an execution that has ended, that is the real thing. One
+                    // extra opaque read, and only on the rare visit that sees a closed context.
+                    var stillMounted = -1
+                    if (ctx.isClosed()) stillMounted = if (s.contextOpaque() === ctx) 1 else 0
+                    // A context confirmed stale is excluded from its own self counters as well as
+                    // from the inclusive walk below. Everything about this execution is over; the
+                    // only honest thing left to record is that somebody is still working under it.
+                    if (stillMounted != 1) {
+                        coarseHits[t]++
+                        if (!waiting) coarseRunningHits[t]++
+                        // This execution's own time, by fine label. An unlabelled thread waiting here
+                        // may be its owner parked on work it handed to others; held to the end of the
+                        // walk, when the table says whether anyone else was under it.
+                        val own = ctx.path
+                        if (own != null) {
+                            if (c < 0 && waiting) {
+                                pendingCtx[pending] = ctx
+                                pendingNode[pending] = own
+                                pending++
+                            } else countOwn(ctx, own, if (c < 0) NO_OP_INDEX else c)
+                        }
+                        // No fine label open, so this sample is the span's own work rather than
+                        // something nested in it. Counted here, where the innermost context and the
+                        // fine label are both already in hand.
+                        if (c < 0) {
+                            coarseSelfHits[t]++
+                            if (!waiting) coarseSelfRunningHits[t]++
+                            if (coarseSelfSeenAt[t] != ticks) {
+                                coarseSelfSeenAt[t] = ticks
+                                coarseSelfActiveTicks[t]++
+                                coarseSelfInsideThisTick[t] = 1
+                            } else {
+                                coarseSelfInsideThisTick[t]++
+                            }
+                            if (coarseSelfInsideThisTick[t] > coarseSelfPeak[t]) {
+                                coarseSelfPeak[t] = coarseSelfInsideThisTick[t]
+                            }
+                        }
+                    }
+                    val fine = if (c < 0) NO_OP_INDEX else c
+                    // Everything else is credited up the chain, each type at most once per sample.
+                    // Inclusive and not self, because the question a coarse label is asked is *what
+                    // was this request made of* — and an answer scoped to the operation's own frame
+                    // would leave out everything it delegated, which is most of it.
+                    var p: CoarseContext? = ctx
+                    var d = 0
+                    var n = 0
+                    var anyStale = false
+                    while (p != null && d < MAX_COARSE_DEPTH) {
+                        val pt = p.type
+                        // The node: every context in the chain is its own path, so each is
+                        // credited, with no once-per-type rule to apply. Skipped when stale, for
+                        // the reason the per-type counters skip it.
+                        val node = p.path
+                        if (node != null && !(p.isClosed() && (if (stillMounted < 0) s.contextOpaque() === ctx else stillMounted == 1))) {
+                            node.inclusiveHits++
+                            if (!waiting) node.runningInclusiveHits++
+                            bump(p, OCCUPIED)
+                            // Once per execution per tick, and once per parent execution per tick:
+                            // the two counts whose ratio is how many ran at a time under the same
+                            // parent - CoarseNode.parallel.
+                            if (p.nodeStamp != ticks) {
+                                p.nodeStamp = ticks
+                                node.instanceTicks++
+                                if (firstUnder(p.parent ?: ROOT, pt)) node.coveredTicks++
+                            }
+                            val f = node.fine ?: LongArray(MAX_OPERATIONS + 1).also { node.fine = it }
+                            f[fine]++
+                            if (lateNanos > 0 && chargePause(node.pathId)) node.pausedNanos += lateNanos
+                        }
+                        var seen = false
+                        var j = 0
+                        while (j < n) {
+                            if (chain[j] == pt) { seen = true; break }
+                            j++
+                        }
+                        if (!seen) {
+                            // Recorded in the chain either way, stale or not, so that a type
+                            // appearing twice at different depths is still counted at most once.
+                            chain[n++] = pt
+                            var stale = false
+                            if (p.isClosed()) {
+                                if (stillMounted < 0) {
+                                    stillMounted = if (s.contextOpaque() === ctx) 1 else 0
+                                }
+                                stale = stillMounted == 1
+                            }
+                            if (stale) {
+                                coarseStaleHits[pt]++
+                                anyStale = true
+                            } else {
+                            coarseInclusiveHits[pt]++
+                            if (!waiting) coarseRunningInclusiveHits[pt]++
+                            // The pair, and the whole reason both halves are read in one visit.
+                            pairHits[pt * (MAX_OPERATIONS + 1) + fine]++
+                            if (coarseSeenAt[pt] != ticks) {
+                                coarseSeenAt[pt] = ticks
+                                coarseActiveTicks[pt]++
+                            }
+                            // Stamped on the instance, so an execution occupied by four threads at
+                            // one tick counts once here and four times in the hits above. That
+                            // ratio is the parallelism.
+                            if (p.tickStamp != ticks) {
+                                p.tickStamp = ticks
+                                coarseInstanceTicks[pt]++
+                            }
+                            }
+                        }
+                        p = p.parent
+                        d++
+                    }
+                    if (anyStale) staleContextHits++
+                } else if (c >= 0) {
+                    // Labelled work, under no coarse span at all. See labelledOutsideCoarse.
+                    labelledOutsideCoarse++
+                }
+
+                val idx = s.index
+                if (idx < 0) continue           // cannot happen: only indexed slots are in the walk
+                // A recycled index starts clean. See [prevThreadId].
+                if (prevThreadId[idx] != s.threadId) {
+                    prevThreadId[idx] = s.threadId
+                    prevOp[idx] = NO_OP
+                    prevCount[idx] = 0
+                    prevStuck[idx] = false
+                    stuckRun[idx] = 0
+                }
+                // The other half of the per-thread bound. The duty walk knows how much of thread
+                // i's time was CPU; this is how much of it was inside a label, and the bound is
+                // what the two agree could have been stalling *there*. Two increments on the
+                // sampling thread, nothing on the hot path.
+                slotHits[idx]++
+                if (c >= 0) slotLabelled[idx]++
+                if (waiting) {
+                    slotWaiting[idx]++
+                    if (c >= 0) slotLabelledWaiting[idx]++
+                }
+                if (c < 0) {
+                    if (prevStuck[idx]) endStuckRun(prevOp[idx], idx)
+                    prevOp[idx] = NO_OP
+                    prevStuck[idx] = false
+                    continue
+                }
+                // The second word. One extra cache line per slot per tick, on a thread that has a
+                // core to itself, and nothing at all on the hot path — the counter is already
+                // maintained by the hook for the calls column.
+                val n = s.countOpaque(c)
+                if (prevOp[idx] == c && prevCount[idx] == n) {
+                    stuckHits[c]++
+                    if (waiting) stuckWaitingHits[c]++
+                    // Only the first tick of a run counts as an instance, so a single execution
+                    // spanning ten ticks is one long execution and not ten.
+                    if (!prevStuck[idx]) {
+                        stuckInstances[c]++
+                        prevStuck[idx] = true
+                        stuckRun[idx] = 0
+                    }
+                    // The length of the run, and the longest per operation. One increment and
+                    // one compare, on the sampling thread.
+                    val run = ++stuckRun[idx]
+                    if (run > longestStuckTicks[c]) longestStuckTicks[c] = run.toLong()
+                } else {
+                    if (prevStuck[idx]) endStuckRun(prevOp[idx], idx)
+                    prevStuck[idx] = false
+                }
+                prevOp[idx] = c
+                prevCount[idx] = n
+            }
+            // A waiting thread with somebody else under the same execution is waiting for them, and
+            // that time is theirs, already counted under their labels; alone, it is its own.
+            for (k in 0 until pending) {
+                val x = pendingCtx[k]!!
+                if (countOf(x, OCCUPIED) <= 1) countOwn(x, pendingNode[k]!!, NO_OP_INDEX)
+                pendingCtx[k] = null
+                pendingNode[k] = null
+            }
+            pending = 0
+            walkNanos += System.nanoTime() - walkStart
+            walkVisits += live
+            if (live > maxSlots) maxSlots = live
+            ticks++
+            // Self-throttling: these return immediately on all but one tick in a thousand.
+            if (duty.due(now)) duty.tick(now, pause.settle(GcPauseClock.pauseNanos()))
+            if (now >= nextReclaim) {
+                Profiler.reclaimDeadSlots()
+                nextReclaim = now + RECLAIM_NANOS
+                // Once a second and not per tick: it divides two running totals, and the answer
+                // cannot become interesting in a millisecond. Under strict this is the second thing
+                // that stops a session, and the only one the sampler decides for itself.
+                if (strict) checkStaleContexts()
+            }
+
+            if (prev == 0L) {
+                first = now
+            } else {
+                val d = now - prev
+                if (d < minStep) minStep = d
+                if (d > maxStep) maxStep = d
+            }
+            prev = now
+            span = now - first
+
+            next += nextInterval()
+            // Fell behind by more than a whole step: resync rather than fire a burst of catch-up
+            // ticks, which would bunch samples and distort the shares.
+            if (next <= now) {
+                next = now + nextInterval()
+                lagged++
+            }
+        }
+        // The tail of the run belongs to the measurement as much as the middle does. Taken here
+        // rather than in shutdown() so that it happens on this thread, before the slots go.
+        // Settled here whether or not the duty cycle takes a last window, so that the confirmed
+        // total covers the whole session even where there is no CPU clock to correct.
+        duty.finish(System.nanoTime(), pause.settle(GcPauseClock.pauseNanos()))
+        // The table holds contexts; let them go with the session.
+        pairParent.fill(null)
+    }
+
+    /**
+     * Stops the session if too much work is being billed to executions that have finished.
+     *
+     * **Both halves of the condition matter**, and the share alone would be unusable. A helper that
+     * finishes a few microseconds after the join it was supposed to beat is a harmless race, and
+     * every fan-out has them; stopping a correct run over three samples is the loudest wrong answer
+     * this tool can give. So a minimum count keeps a handful of samples from being evidence of anything, and the share
+     * keeps a long run from tripping on an absolute number it was always going to reach.
+     *
+     * Fatal rather than a warning because of the direction: a below-floor label reports a number too
+     * imprecise to rank, which costs the reader nothing if ignored, while this one reports work
+     * belonging to an execution that had already ended — a plausible number that is simply false.
+     * That is the same category as a leaked label, and it gets the same treatment.
+     */
+    private fun checkStaleContexts() {
+        if (staleContextHits < STALE_MIN_HITS) return
+        if (coarseSampleHits <= 0L) return
+        val share = staleContextHits.toDouble() / coarseSampleHits
+        if (share <= STALE_MAX_SHARE) return
+        var worst = -1
+        for (t in 0 until MAX_COARSE_TYPES) {
+            if (worst < 0 || coarseStaleHits[t] > coarseStaleHits[worst]) worst = t
+        }
+        fail(staleContextMessage(Profiler.coarseNameOf(worst), staleContextHits, share))
+    }
+
+    /**
+     * Stops the session and records why. Called from whatever noticed, on whatever thread.
+     *
+     * Two conditions reach here: a leaked label — see [Profiler.expectBalanced] — and work billed
+     * to finished executions, from [checkStaleContexts]. A label under the timing floor does not:
+     * its number is too imprecise to rank, not false, and it is listed in [Profile.tooSmall].
+     *
+     * Stops sampling rather than the application: this is somebody else's process.
+     */
+    internal fun fail(reason: String) {
+        if (failure != null) return
+        failure = reason
+        running = false
+    }
+
+    /** How much of the occupancy this session sampled was CPU. See [DutyCycle]. */
+    internal fun duty(): DutyReport =
+        duty.report(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting, sampleState)
+
+    /**
+     * How long this session spent with every thread stopped.
+     *
+     * Only a spinning sampler is punctual enough for its lateness to mean anything: parking drifts
+     * by more than half a step on a quiet machine and by thirteen steps on a loaded one, and every
+     * one of those would be counted as a pause that nobody else experienced.
+     *
+     * @param gcNanos the JVM's own count of collection pauses over the session, or -1.
+     */
+    internal fun pauses(gcNanos: Long): PauseReport = PauseReport(
+        measured = wait == WaitStrategy.SPIN,
+        pausedNanos = pause.pausedNanos, pauses = pause.pauses, longestNanos = pause.longestNanos,
+        gcNanos = gcNanos, confirmedNanos = pause.confirmedNanos,
+    )
+
+    private fun waitUntil(deadline: Long) {
+        when (wait) {
+            WaitStrategy.PARK -> {
+                var left = deadline - System.nanoTime()
+                // parkNanos may return early; loop until the deadline has actually passed.
+                while (left > 0 && running) {
+                    LockSupport.parkNanos(left)
+                    left = deadline - System.nanoTime()
+                }
+            }
+
+            WaitStrategy.SLEEP -> {
+                while (running && deadline - System.nanoTime() > 0) {
+                    try {
+                        sleep(1)
+                    } catch (_: InterruptedException) {
+                        return
+                    }
+                }
+            }
+
+            WaitStrategy.SPIN -> {
+                while (running && deadline - System.nanoTime() > 0) onSpinWait()
+            }
+        }
+    }
+
+    /**
+     * Clears the span statistics **on the caller's thread**, then starts sampling.
+     *
+     * Synchronously, and that is the whole point. Doing it inside `run()` puts it on the sampling
+     * thread, which is racing the caller: the caller goes on to release the workers while this
+     * thread is still starting, so the first few milliseconds of spans get recorded and then wiped.
+     * That loses a fraction of a percent of every coarse count — small, systematic, and in the direction that
+     * makes an execution count look *lower* than the call graph says, which reads exactly like a
+     * dropped span.
+     *
+     * The fine tier's `callsAtStart` snapshot is left where it is: it has the same shape of race and
+     * it subtracts rather than resets, so a call counted on both sides of the boundary cancels.
+     */
+    override fun start() {
+        Profiler.resetCoarse()
+        super.start()
+    }
+
+    internal fun shutdown() {
+        running = false
+        LockSupport.unpark(this)
+        join()
+    }
+
+    /** Total samples taken: one per slot per tick. */
+    internal fun totalSamples(): Long = counters.sum()
+
+    private companion object {
+        /** Once a second: this walks the whole ceiling, so it is not a per-tick cost. */
+        const val RECLAIM_NANOS = 1_000_000_000L
+
+        /**
+         * Stale samples below which nothing is concluded, however large the share.
+         *
+         * A ratio taken against a small number is not evidence: a handful of samples early in a run
+         * can clear any share and mean nothing whatever.
+         */
+        const val STALE_MIN_HITS = 20L
+
+        /**
+         * Of the time spent inside coarse executions, the most that may be inside finished ones
+         * before the session stops.
+         */
+        const val STALE_MAX_SHARE = 0.01
+    }
+
+}

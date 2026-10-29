@@ -36,19 +36,22 @@ tasks.register<JavaExec>("cli") {
     mainClass.set("com.ticksnick.Cli")
 }
 
-// The Java caller in a JVM of its own: the registry is process-wide, and the other tests fill
-// nearly all of its coarse ids.
-val javaCallerTest by tasks.registering(Test::class) {
+// Test classes that each get a JVM of their own: the registry is process-wide, and the other tests
+// fill nearly all of its coarse ids.
+val ownJvm = listOf("com/ticksnick/JavaCallerTest*", "com/ticksnick/CallsPerParentTest*")
+
+val ownJvmTest by tasks.registering(Test::class) {
     useJUnitPlatform()
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
-    include("com/ticksnick/JavaCallerTest*")
+    include(ownJvm)
+    forkEvery = 1
 }
 
 tasks.test {
     useJUnitPlatform()
-    exclude("com/ticksnick/JavaCallerTest*")
-    dependsOn(javaCallerTest)
+    exclude(ownJvm)
+    dependsOn(ownJvmTest)
 }
 
 // `./gradlew publishToMavenCentral` uploads a signed deployment; "Publish" on

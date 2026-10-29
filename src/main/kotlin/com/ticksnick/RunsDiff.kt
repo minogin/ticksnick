@@ -192,18 +192,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                 val a = after.matched(aLevel, name)
                 val wb = before.wall(b)
                 val wa = after.wall(a)
-                val sb = before.share(b, bParents)
-                val sa = after.share(a, aParents)
-                val share = when {
-                    sb.n == 0 && sa.n == 0 -> ""
-                    sb.n == 0 || sa.n == 0 -> (if (sb.n == 0) "-" else "%.0f%%".format(Locale.ROOT, sb.mean)) + " -> " +
-                            (if (sa.n == 0) "-" else "%.0f%%".format(Locale.ROOT, sa.mean))
-                    else -> {
-                        val c = Change(sb, sa)
-                        String.format(Locale.ROOT, "%.0f%% -> %.0f%%  %+.1f", sb.mean, sa.mean, c.delta) +
-                                if (c.half.isNaN()) " pp" else String.format(Locale.ROOT, " +-%.1f pp", c.half)
-                    }
-                }
+                val share = shareCell(before.share(b, bParents), after.share(a, aParents))
                 val partial = b.present.size < before.runs.size || a.present.size < after.runs.size
                 val where = if (partial) " (${b.present.size} -> ${a.present.size} runs)" else ""
                 appendLine(
@@ -213,12 +202,60 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                         countPair(b.present.map { b.nodes[it]!!.count }, a.present.map { a.nodes[it]!!.count }),
                     ).trimEnd()
                 )
+                ownRows(b, a, depth)
                 walk(b.nodes.map { it?.children ?: emptyList() }, a.nodes.map { it?.children ?: emptyList() }, b.nodes, a.nodes, depth + 1)
             }
         }
         walk(before.tree(), after.tree(), before.runs.map { null }, after.runs.map { null }, 0)
         appendLine("-".repeat(RUNS_DIFF_WIDTH))
+        if (anyOwn) appendLine(
+            "  $SPLIT_MARK rows are fine labels in a row's own time; Executions on one is its calls per execution of the row, " +
+                "counted, which holds whatever the size of each run"
+        )
         appendLine("  % parent is each run's share of its own parent, its change in percentage points: the run's speed cancels out of it")
+    }
+
+    /** Whether any fine row was drawn under a coarse one, for the key under the tree. */
+    private var anyOwn = false
+
+    /**
+     * The fine labels in the own time of the row matched as [b] and [a]: their wall and share of the
+     * row, and their calls per execution of it, which can be compared between runs that did different
+     * amounts of work. A run with the row and not the label counts at 0.
+     */
+    private fun StringBuilder.ownRows(b: ProfileRuns.Matched, a: ProfileRuns.Matched, depth: Int) {
+        val ob = before.ownOf(b)
+        val oa = after.ownOf(a)
+        for (label in (oa.keys + ob.keys).distinct()) {
+            anyOwn = true
+            // Over the runs with the coarse row, 0 where one has it and not the label; a side caught in
+            // none of them has no figure rather than a 0.
+            fun over(m: ProfileRuns.Matched, f: (Int) -> Double) = Estimate(m.present.map(f).takeIf { v -> v.any { it > 0 } } ?: emptyList())
+            fun wall(m: ProfileRuns.Matched, rows: List<Profile.OwnRow?>?) = over(m) { rows?.get(it)?.wallNanos ?: 0.0 }
+            fun share(m: ProfileRuns.Matched, rows: List<Profile.OwnRow?>?) =
+                over(m) { rows?.get(it)?.share?.takeIf { s -> !s.isNaN() }?.times(100) ?: 0.0 }
+            val wb = wall(b, ob[label])
+            val wa = wall(a, oa[label])
+            appendLine(
+                String.format(
+                    Locale.ROOT, RUNS_DIFF_COARSE_ROW, "  ".repeat(depth) + "  $SPLIT_MARK $label",
+                    pair(wb, wa), changeCell(Change(wb, wa)), shareCell(share(b, ob[label]), share(a, oa[label])),
+                    perExecutionPair(before.perExecution(b, ob[label]), after.perExecution(a, oa[label])),
+                ).trimEnd()
+            )
+        }
+    }
+
+    /** A share of the parent on both sides, in percent, and its change in percentage points. */
+    private fun shareCell(sb: Estimate, sa: Estimate): String = when {
+        sb.n == 0 && sa.n == 0 -> ""
+        sb.n == 0 || sa.n == 0 -> (if (sb.n == 0) "-" else "%.0f%%".format(Locale.ROOT, sb.mean)) + " -> " +
+                (if (sa.n == 0) "-" else "%.0f%%".format(Locale.ROOT, sa.mean))
+        else -> {
+            val c = Change(sb, sa)
+            String.format(Locale.ROOT, "%.0f%% -> %.0f%%  %+.1f", sb.mean, sa.mean, c.delta) +
+                    if (c.half.isNaN()) " pp" else String.format(Locale.ROOT, " +-%.1f pp", c.half)
+        }
     }
 
     private fun StringBuilder.fine() {

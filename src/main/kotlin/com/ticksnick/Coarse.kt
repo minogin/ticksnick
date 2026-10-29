@@ -376,6 +376,8 @@ internal class CoarsePath(
     @JvmField var coveredTicks: Long = 0
     /** Inclusive hits by the fine operation they caught, last entry no fine label. Allocated on the first hit. */
     @JvmField var fine: LongArray? = null
+    /** Fine calls made directly under this path, by fine id. Written by the owner at coarse boundaries. */
+    @JvmField var calls: LongArray? = null
     /**
      * Samples whose innermost context was an execution on this path, by fine label, last entry no
      * label: this path's own time, outside its coarse children. Unlabelled samples of a thread parked
@@ -472,6 +474,11 @@ internal class CoarsePath(
             val f = ownFineCovered ?: LongArray(MAX_OPERATIONS + 1).also { ownFineCovered = it }
             for (i in f.indices) f[i] += oc[i]
         }
+        val ocalls = o.calls
+        if (ocalls != null) {
+            val f = calls ?: LongArray(MAX_OPERATIONS).also { calls = it }
+            for (i in f.indices) f[i] += ocalls[i]
+        }
         for (i in 0 until o.slowCount) recordSlow(o.slowNanos!![i], o.slowKeys!![i]!!)
         o.children?.let { ocs -> for (t in ocs.indices) ocs[t]?.let { child(t).mergeFrom(it) } }
         o.overflow?.let { oos -> for (t in oos.indices) oos[t]?.let { deeper(t).mergeFrom(it) } }
@@ -491,6 +498,7 @@ internal class CoarsePath(
         fine?.fill(0L)
         ownFine?.fill(0L)
         ownFineCovered?.fill(0L)
+        calls?.fill(0L)
         pausedNanos = 0
         slowNanos?.fill(0L)
         slowKeys?.fill(null)
@@ -571,6 +579,7 @@ internal object PathIds {
 inline fun <T> op(op: CoarseOp, body: () -> T): T {
     val slot = Profiler.slot()
     val parent = slot.contextOpaque()
+    slot.flushCalls(parent)
     val ctx = CoarseContext(op.id, parent, System.nanoTime(), slot.pathFor(parent, op.id))
     slot.setContextOpaque(ctx)
     try {
@@ -589,6 +598,7 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
         // leaves the suite green.
         ctx.markClosed()
         slot.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
+        slot.flushCalls(ctx)
     }
 }
 
@@ -607,6 +617,7 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
 inline fun <T> op(op: CoarseOp, key: () -> Any?, body: () -> T): T {
     val slot = Profiler.slot()
     val parent = slot.contextOpaque()
+    slot.flushCalls(parent)
     val ctx = CoarseContext(op.id, parent, System.nanoTime(), slot.pathFor(parent, op.id))
     slot.setContextOpaque(ctx)
     try {
@@ -618,6 +629,7 @@ inline fun <T> op(op: CoarseOp, key: () -> Any?, body: () -> T): T {
         val nanos = System.nanoTime() - ctx.startNanos
         val node = slot.recordSpan(ctx, nanos)
         if (node != null && nanos > node.slowFloor) node.recordSlow(nanos, keyOf(key))
+        slot.flushCalls(ctx)
     }
 }
 

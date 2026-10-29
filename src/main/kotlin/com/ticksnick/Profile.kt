@@ -37,12 +37,51 @@ internal const val OWN_ROW_MIN = 0.005
 /** How far the achieved step may be from the one asked before the `Sampling` line names both. */
 internal const val ASKED_STEP_TOLERANCE = 0.05
 
+/**
+ * What one coarse execution costs with no fine label registered: the context, two `nanoTime` calls
+ * and the accumulate. See [coarseContextNanos].
+ */
+internal const val COARSE_BASE_NANOS = 45.0
+
+/**
+ * What each registered fine label adds to a coarse execution: the pass that moves its calls onto
+ * the path they ran under, at every boundary. See `OpSlot.flushCalls`.
+ */
+internal const val COARSE_PER_FINE_LABEL_NANOS = 0.17
+
+/**
+ * The most a coarse label may cost of the operation it wraps: about what two runs of the same code
+ * already differ by, so a label at the floor moves its operation no further than running it again.
+ */
+internal const val COARSE_MAX_OVERHEAD = 0.05
+
+/** The most all the coarse executions together may cost of the run. */
+internal const val COARSE_MAX_RUN_SHARE = 0.01
+
 /** The second line of a leaked-label warning: the usual cause. */
 internal const val NO_FINALLY = "a label placed with enter/exit has no finally: a body that throws leaves it set"
 
 /** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 internal fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
+
+/**
+ * Calls per execution of the row above, for a fine row under a coarse one: `x340`, or `x2.5` when
+ * the executions did not all make the same number. Blank for a row with no completed execution.
+ */
+internal fun callsPerExecution(calls: Long, executions: Long): String = when {
+    executions <= 0L -> ""
+    calls % executions == 0L -> String.format(Locale.ROOT, "x%,d", calls / executions)
+    calls.toDouble() / executions < 100 -> String.format(Locale.ROOT, "x%.1f", calls.toDouble() / executions)
+    else -> String.format(Locale.ROOT, "x%,.0f", calls.toDouble() / executions)
+}
+
+/** `x340 =` when both sides make the same calls per execution, `x340 -> x68` when not, `-` when neither counted them. */
+internal fun perExecutionPair(before: String, after: String): String = when {
+    before.isEmpty() && after.isEmpty() -> "-"
+    before == after -> "$before ="
+    else -> "${before.ifEmpty { "-" }} -> ${after.ifEmpty { "-" }}"
+}
 
 /** Whether a label is on something too small for the instrument to describe. See [Profile.tooSmall]. */
 internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double): Boolean =
@@ -61,23 +100,27 @@ internal fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): Str
     name, calls, duration(upperNanos), Profile.FLOOR_NANOS, name
 )
 
+/** What one coarse execution costs with [fineLabels] fine labels registered. */
+internal fun coarseContextNanos(fineLabels: Int): Double = COARSE_BASE_NANOS + COARSE_PER_FINE_LABEL_NANOS * fineLabels
+
 /**
- * The shortest a coarse operation may be, given how much of the run it holds. See [Profile.coarseTooSmall].
+ * The shortest a coarse operation may be, given how much of the run it holds and what one execution
+ * costs, [contextNanos]. See [Profile.coarseTooSmall].
  *
  * The tier boundary, as arithmetic rather than a rule of thumb. Two conditions,
  * protecting different things and neither implying the other:
  *
- * 1. `40 ns x executions <= 1% of the run` protects **the program** — that you are measuring what
- *    you started with. In terms of share this is `d >= 4 us x share`.
- * 2. `40 ns <= 5% of the operation's own duration` protects **the number** — that it describes the
- *    code and not the instrument. This is the flat `d >= 800 ns`, and it is what binds below about
- *    20% share, which is nearly always.
+ * 1. `cost x executions <= 1% of the run` protects **the program** — that you are measuring what
+ *    you started with. In terms of share this is `d >= 100 x cost x share`.
+ * 2. `cost <= 5% of the operation's own duration` protects **the number** — that it describes the
+ *    code and not the instrument. This is the flat `d >= 20 x cost`, and it is what binds below
+ *    about 20% share, which is nearly always.
  *
  * A 40 ns operation called rarely passes the first comfortably and is then reported at 80 ns: the
  * program is undisturbed and the measurement is 100% wrong. That is why both are needed.
  */
-internal fun coarseFloorNanos(share: Double): Double =
-    maxOf(Profile.COARSE_FLOOR_NANOS, Profile.COARSE_SHARE_NANOS * share)
+internal fun coarseFloorNanos(share: Double, contextNanos: Double): Double =
+    maxOf(contextNanos / COARSE_MAX_OVERHEAD, contextNanos / COARSE_MAX_RUN_SHARE * share)
 
 /**
  * What to tell someone whose coarse label is on something too small to carry a context.
@@ -87,7 +130,7 @@ internal fun coarseFloorNanos(share: Double): Double =
  * while an operation that fails only the share condition is big enough to measure and too big a
  * fraction of the run to afford measuring.
  */
-internal fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, requiredNanos: Double): String {
+internal fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double): String {
     // Which of the two conditions bound decides what the reader is being told, and they are
     // different complaints with different remedies. Saying "the number would describe the
     // instrument" about an operation whose per-execution overhead is a comfortable 4% is simply
@@ -97,16 +140,16 @@ internal fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double,
     //
     // The fix names the registration, not a call: `op` takes both tiers, so the call site is already
     // right.
-    val shareBound = requiredNanos > Profile.COARSE_FLOOR_NANOS
-    val overhead = Profile.COARSE_CONTEXT_NANOS / meanNanos * 100
+    val shareBound = requiredNanos > contextNanos / COARSE_MAX_OVERHEAD
+    val overhead = contextNanos / meanNanos * 100
     val why = if (shareBound) String.format(
         Locale.ROOT,
         "accurate per execution (%.1f%% overhead), but %,d contexts at %.0f ns are over 1%% of the run",
-        overhead, count, Profile.COARSE_CONTEXT_NANOS
+        overhead, count, contextNanos
     ) else String.format(
         Locale.ROOT,
         "a context costs about %.0f ns, which is %.0f%% of an operation this size",
-        Profile.COARSE_CONTEXT_NANOS, overhead
+        contextNanos, overhead
     )
     return String.format(
         Locale.ROOT,
@@ -415,6 +458,11 @@ internal class CoarseNode internal constructor(
      */
     internal val ownFine: LongArray = LongArray(0),
     internal val ownFineCovered: LongArray = LongArray(0),
+    /**
+     * Fine calls made directly under an execution on this path, by fine id: counted, not sampled.
+     * Empty in a profile saved without them.
+     */
+    internal val calls: LongArray = LongArray(0),
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -1222,8 +1270,15 @@ class Profile internal constructor(
         out
     }
 
-    /** One fine label in a coarse row's own time: its wall, how many threads ran it at a time in one execution, its share of the row. */
-    internal class OwnRow internal constructor(val name: String, val wallNanos: Double, val parallel: Double, val share: Double)
+    /**
+     * One fine label in a coarse row's own time: its wall, how many threads ran it at a time in one
+     * execution, its share of the row; its calls on the row's path, counted, -1 for unlabelled time
+     * or a profile saved without them; and its own thread-time per call, NaN without either.
+     */
+    internal class OwnRow internal constructor(
+        val name: String, val wallNanos: Double, val parallel: Double, val share: Double,
+        val calls: Long = -1, val perCallNanos: Double = Double.NaN,
+    )
 
     /**
      * **The fine labels in a coarse row's own time,** outside its coarse children, heaviest first - or
@@ -1240,18 +1295,41 @@ class Profile internal constructor(
      * part of the leaf runs at the same parallelism: a leaf half `compute` on its own thread and half
      * `assist` on two helpers would read compute 25%, the parked wait 26%, assist 49%. Own time only:
      * a fine label inside another shows its own part.
+     *
+     * A label with calls on the path and no sample there is a row too, at no time: too short or too
+     * rare to be caught, and still run here. Without it a label that ran under two rows would look
+     * as if it had one.
      */
     internal fun ownRowsOf(n: CoarseNode): List<OwnRow>? {
         if (n.ownFineCovered.isEmpty()) return null
         val d = divisors[n] ?: return null
         val wall = n.spanSumNanos / d
-        return (0..MAX_OPERATIONS).filter { n.ownFineCovered[it] > 0 }.map { f ->
-            val w = n.ownFineCovered[f] * stepNanos / d
-            OwnRow(
-                if (f == NO_OP_INDEX) "unlabelled" else operations.firstOrNull { it.id == f }?.name ?: "#$f",
-                w, n.ownFine[f].toDouble() / n.ownFineCovered[f], if (wall > 0) w / wall else Double.NaN,
-            )
+        val counted = n.calls.isNotEmpty()
+        fun callsOf(f: Int): Long = if (counted && f < MAX_OPERATIONS) n.calls[f] else -1L
+        return (0..MAX_OPERATIONS).filter { n.ownFineCovered[it] > 0 || callsOf(it) > 0 }.map { f ->
+            val name = if (f == NO_OP_INDEX) "unlabelled" else operations.firstOrNull { it.id == f }?.name ?: "#$f"
+            val calls = callsOf(f)
+            if (n.ownFineCovered[f] == 0L) OwnRow(name, 0.0, Double.NaN, 0.0, calls)
+            else {
+                val w = n.ownFineCovered[f] * stepNanos / d
+                OwnRow(
+                    name, w, n.ownFine[f].toDouble() / n.ownFineCovered[f], if (wall > 0) w / wall else Double.NaN,
+                    calls, if (calls > 0) n.ownFine[f] * stepNanos / calls else Double.NaN,
+                )
+            }
         }.sortedByDescending { it.wallNanos }
+    }
+
+    /**
+     * Which of [own] are drawn as rows, the rest being one `and N more` line: the heaviest, up to
+     * [FINE_ROWS_SHOWN], from [OWN_ROW_MIN] of the row up; and the smaller ones with calls as well
+     * when they all fit, so a label run a few times here - the one that would otherwise look as if it
+     * had a single parent - is a row while there are few of them.
+     */
+    internal fun drawnOwnRows(own: List<OwnRow>): List<OwnRow> {
+        val big = own.filter { !(it.share < OWN_ROW_MIN) }.take(FINE_ROWS_SHOWN)
+        val small = own.filter { it !in big && it.calls > 0 }
+        return if (big.size + small.size <= FINE_ROWS_SHOWN) big + small.sortedByDescending { it.calls } else big
     }
 
     /** How much of the observed thread-time happened anywhere under [c]. */
@@ -1270,8 +1348,11 @@ class Profile internal constructor(
      */
     internal fun coarseFloorNanosOf(c: CoarseStat): Double {
         val noise = if (c.inclusiveHits <= 0L) 1.0 else 1.0 / sqrt(c.inclusiveHits.toDouble())
-        return coarseFloorNanos((shareOf(c) * (1 - noise)).coerceAtLeast(0.0))
+        return coarseFloorNanos((shareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseContextNanos)
     }
+
+    /** What one coarse execution cost in this run, which rises with the fine labels registered. See [coarseContextNanos]. */
+    internal val coarseContextNanos: Double get() = coarseContextNanos(operations.size)
 
     /**
      * Coarse labels on something too small to carry a context.
@@ -1500,18 +1581,24 @@ class Profile internal constructor(
 
         var anySplit = false
         var anyOwn = false
+        var anyCalls = false
 
         // A fine label under more than one row: each row is its time under that row alone, so the tree
         // never shows its total, and a label spread over three walks reads smaller than one that leads
         // a single walk: `merge` 1.08 s can lead a row while `check` is 2.11 s across three. The
         // total goes once, beside the label's largest row. Unlabelled is
         // not a label.
+        //
+        // With calls counted, every row the label was called under counts, sampled or not, so the
+        // number of operations is exact.
         val spread = coarseTree.flatMap { it.flatten() }
-            .flatMap { n -> ownRowsOf(n).orEmpty().filter { it.name != "unlabelled" }.map { it.name to (n to it.wallNanos) } }
+            .flatMap { n -> ownRowsOf(n).orEmpty().filter { it.name != "unlabelled" }.map { it.name to (n to it) } }
             .groupBy({ it.first }, { it.second })
-            .filterValues { rows -> rows.size > 1 && rows.sumOf { it.second } >= NOTE_MIN_GAIN * rows.maxOf { it.second } }
+            .filterValues { rows -> rows.size > 1 && rows.sumOf { it.second.wallNanos } >= NOTE_MIN_GAIN * rows.maxOf { it.second.wallNanos } }
         val noteAt: Map<Pair<CoarseNode, String>, String> = spread.map { (name, rows) ->
-            (rows.maxBy { it.second }.first to name) to "${duration(rows.sumOf { it.second })} in all, under ${rows.size} operations"
+            val calls = if (rows.all { it.second.calls >= 0 }) String.format(Locale.ROOT, " and %,d calls", rows.sumOf { it.second.calls }) else ""
+            (rows.maxBy { it.second.wallNanos }.first to name) to
+                    "${duration(rows.sumOf { it.second.wallNanos })}$calls in all, under ${rows.size} operations"
         }.toMap()
 
         // A profile saved without own time: a leaf's samples split by label and applied to its wall.
@@ -1579,27 +1666,37 @@ class Profile internal constructor(
                 legacySplit(n, indent, timed)
                 for (child in n.children.sortedWith(heaviest)) node(child, depth + 1, n)
             } else {
-                val drawn = own.filter { !(it.share < OWN_ROW_MIN) }.take(FINE_ROWS_SHOWN)
+                val drawn = drawnOwnRows(own)
                 if (drawn.isNotEmpty()) anyOwn = true
+                if (drawn.any { it.calls >= 0 }) anyCalls = true
                 val items: List<Pair<Double, Any>> = n.children.map { wall(it) to it as Any } + drawn.map { it.wallNanos to it as Any }
                 for ((_, item) in items.sortedWith(compareByDescending<Pair<Double, Any>> { it.first })) {
                     if (item is CoarseNode) node(item, depth + 1, n)
                     else {
                         val r = item as OwnRow
+                        // Counted where it can be: its calls on this path, and per execution of the
+                        // row, which holds whatever the size of the run. A row called and never
+                        // sampled has its calls and no time.
+                        val caught = r.wallNanos > 0
                         appendLine(
                             String.format(
                                 Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
-                                "$indent  $SPLIT_MARK ${r.name}", "own", "",
+                                "$indent  $SPLIT_MARK ${r.name}",
+                                if (r.calls >= 0) String.format(Locale.ROOT, "%,d", r.calls) else "own",
+                                if (r.calls >= 0) callsPerExecution(r.calls, n.count) else "",
                                 if (r.parallel >= PARALLEL_SHOWN) String.format(Locale.ROOT, "%.1f", r.parallel) else "",
-                                if (timed) duration(r.wallNanos) else "-",
-                                if (r.share.isNaN()) "" else shareText(r.share * 100), "", "", "", "", "", "", ""
+                                if (timed && caught) duration(r.wallNanos) else "-",
+                                if (r.share.isNaN() || !caught) "" else shareText(r.share * 100), "",
+                                if (r.perCallNanos.isNaN()) "" else duration(r.perCallNanos), "", "", "", "", ""
                             ).trimEnd() + (noteAt[n to r.name]?.let { " ".repeat(NOTE_MARGIN) + it } ?: "")
                         )
                     }
                 }
                 val rest = own.filter { it !in drawn }
+                val restCalls = rest.sumOf { it.calls.coerceAtLeast(0) }
                 if (rest.isNotEmpty()) appendLine(
-                    "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.share.takeIf { s -> !s.isNaN() } ?: 0.0 } * 100) + " between them"
+                    "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.share.takeIf { s -> !s.isNaN() } ?: 0.0 } * 100) + " between them" +
+                            if (restCalls > 0) String.format(Locale.ROOT, ", %,d calls", restCalls) else ""
                 )
             }
         }
@@ -1616,8 +1713,12 @@ class Profile internal constructor(
             "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; Parallel on one is how many" +
                     " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
+        if (anyCalls) appendLine(
+            "  on a $SPLIT_MARK row, Executions is its calls on that path and x parent per execution of the row above, both counted;" +
+                    " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
+        )
         if (noteAt.isNotEmpty()) appendLine(
-            "  'in all, under N operations' beside a fine row: that label's time under every row it is under, on its largest"
+            "  'in all, under N operations' beside a fine row: that label's time, and calls where counted, under every row it is under, on its largest"
         )
         // An operation with more than one caller is a row under each, and those rows are its
         // figures under that caller alone. Its percentiles over everything are a different
@@ -1867,7 +1968,7 @@ class Profile internal constructor(
             // because the duration it compares is measured rather than inferred — see
             // coarseTooSmall.
             for (c in coarseTooSmall()) add(
-                coarseTooSmallMessage(c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c))
+                coarseTooSmallMessage(c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos)
             )
         }
 
@@ -2176,20 +2277,6 @@ class Profile internal constructor(
 
         /** The fine table's row for samples inside no label. */
         internal const val NO_OPERATION = "(no operation)"
-
-        /**
-         * What one coarse context costs: an allocation, two `nanoTime` calls and the accumulate.
-         *
-         * 21.5 ns of it is measured, from a fit of a timed wrapper, and the allocation is not, so
-         * this is the tier boundary's working figure rather than a measurement.
-         */
-        internal const val COARSE_CONTEXT_NANOS = 40.0
-
-        /** `40 ns ≤ 5% of the operation`. The flat floor, and the one that binds below ~20% share. */
-        internal const val COARSE_FLOOR_NANOS = 800.0
-
-        /** `40 ns × executions ≤ 1% of the run`, rewritten as `d ≥ this × share`. */
-        internal const val COARSE_SHARE_NANOS = 4000.0
 
         /**
          * Below this share, labelled time outside every coarse span is not worth a word.

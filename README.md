@@ -66,9 +66,9 @@ from the time and an exact call count. No call is timed, so the label costs abou
 write.
 
 **Coarse** (`registerCoarse`) is for operations of a few microseconds or more: a request, a batch, a
-phase of an algorithm. Each execution is timed at both ends, about 40 ns. You get exact counts,
+phase of an algorithm. Each execution is timed at both ends, about 50 ns. You get exact counts,
 percentiles and a tree of which operation ran inside which. A coarse operation also shows which fine
-labels its own time went to.
+labels its own time went to, and how many times each was called per execution.
 
 Below 50 ns a fine label is a visible part of what it measures. The report says so and names the
 label. Label the enclosing loop instead, and pass the number of operations inside:

@@ -503,19 +503,27 @@ class CoarseTest {
 
     @Test
     fun `the floor is flat below twenty percent share and rises above it`() {
-        // The share term only binds above ~20%, which is why the flat 800 ns is the rule in
-        // practice and the share term is the exception.
-        assertEquals(800.0, coarseFloorNanos(0.01))
-        assertEquals(800.0, coarseFloorNanos(0.20))
-        assertEquals(2000.0, coarseFloorNanos(0.50))
-        assertEquals(4000.0, coarseFloorNanos(1.0))
+        // The share term only binds above ~20%, which is why the flat floor is the rule in
+        // practice and the share term is the exception. At 40 ns an execution, that is 800 ns.
+        assertEquals(800.0, coarseFloorNanos(0.01, 40.0), 1e-9)
+        assertEquals(800.0, coarseFloorNanos(0.20, 40.0), 1e-9)
+        assertEquals(2000.0, coarseFloorNanos(0.50, 40.0), 1e-9)
+        assertEquals(4000.0, coarseFloorNanos(1.0, 40.0), 1e-9)
+    }
+
+    /** Every registered fine label adds to each coarse execution, so the floor rises with them. */
+    @Test
+    fun `the floor rises with the fine labels registered`() {
+        val few = coarseFloorNanos(0.01, coarseContextNanos(1))
+        val many = coarseFloorNanos(0.01, coarseContextNanos(250))
+        assertTrue(few < 1_000.0 && many > 1_500.0, "few $few, many $many")
     }
 
     @Test
     fun `a coarse label on a 200 ns operation is reported`() {
         val r = report(coarse = listOf(stat(count = 1_000_000, sumNanos = 200_000_000, hits = 200, running = 200)))
         assertEquals(listOf("req"), r.coarseTooSmall().map { it.name })
-        val msg = coarseTooSmallMessage("req", 1_000_000, 200.0, r.coarseFloorNanosOf(r.coarse[0]))
+        val msg = coarseTooSmallMessage("req", 1_000_000, 200.0, r.coarseFloorNanosOf(r.coarse[0]), r.coarseContextNanos)
         // "200 ns" and not "200.0 ns": durations print to three significant digits, so the fourth
         // one - which for a sampled or bucketed number is noise - never reaches the page.
         assertTrue(msg.contains("200 ns"), "the message does not name the measured duration: $msg")
@@ -539,17 +547,17 @@ class CoarseTest {
      */
     @Test
     fun `the share condition does not accuse on counting noise alone`() {
-        // 2.5 us apiece, 25 hits out of 36 labelled: a 69.4% share, so the raw rule would demand
-        // 2778 ns and accuse. 25 hits is a 20% standard error, and at 55.6% the rule demands 2222 ns
+        // 2.8 us apiece, 25 hits out of 36 labelled: a 69.4% share, so the raw rule would demand
+        // 3.1 us and accuse. 25 hits is a 20% standard error, and at 55.6% the rule demands 2.5 us
         // and lets it go. The operation is not exonerated — its share is simply not established.
-        val noisy = stat(count = 400, sumNanos = 1_000_000, hits = 25, running = 25)
+        val noisy = stat(count = 400, sumNanos = 1_120_000, hits = 25, running = 25)
         assertTrue(
             report(coarse = listOf(noisy), labelled = 36).coarseTooSmall().isEmpty(),
             "accused an operation whose share is not established"
         )
         // The same operation with the same share, measured a thousand times over, is accused —
         // it is the uncertainty that spared it, not the share being innocent.
-        val settled = stat(count = 400_000, sumNanos = 1_000_000_000, hits = 25_000, running = 25_000)
+        val settled = stat(count = 400_000, sumNanos = 1_120_000_000, hits = 25_000, running = 25_000)
         assertEquals(
             listOf("req"), report(coarse = listOf(settled), labelled = 36_000).coarseTooSmall().map { it.name }
         )

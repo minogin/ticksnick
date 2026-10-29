@@ -48,7 +48,7 @@ class ProfileTest {
         }
         // The message builders, each of which is a path the render only reaches under a fault.
         check("tooSmall", tooSmallMessage("op", 1_000, 25.0))
-        check("coarseTooSmall", coarseTooSmallMessage("req", 100, 200.0, 800.0))
+        check("coarseTooSmall", coarseTooSmallMessage("req", 100, 200.0, 800.0, 40.0))
         check("leak", leakMessage("op", "worker-1"))
         check("mismatch", mismatchMessage("a", "b"))
         check("stale", staleContextMessage("req", 997, 0.42))

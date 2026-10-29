@@ -150,6 +150,40 @@ internal class OpSlot(
     @JvmField
     val counts = LongArray(MAX_OPERATIONS + 2 * COUNT_PAD)
 
+    /** [counts] as they stood at this thread's last coarse boundary. See [flushCalls]. */
+    @JvmField
+    val countsAtBoundary = LongArray(MAX_OPERATIONS)
+
+    /**
+     * Moves the fine calls made since this thread's last coarse boundary onto the node of [ctx], the
+     * coarse execution they ran directly under. Dropped when [ctx] is null: no coarse parent.
+     *
+     * Called at every change of the innermost coarse execution, so each call lands on exactly one
+     * path and the fine hook itself does nothing more. The cost is a pass over the registered fine
+     * labels at each boundary, which is why the coarse floor rises with their number.
+     *
+     * Calls made before a session starts, inside an execution still open when it does, are counted
+     * with it: the same bargain the span makes. See `Profiler.resetCoarse`.
+     */
+    @PublishedApi
+    internal fun flushCalls(ctx: CoarseContext?) {
+        val n = Profiler.registeredCount()
+        val counts = counts
+        val last = countsAtBoundary
+        val node = if (ctx == null) null else nodeOf(ctx)
+        if (node == null) {
+            System.arraycopy(counts, COUNT_PAD, last, 0, n)
+            return
+        }
+        val calls = node.calls ?: LongArray(MAX_OPERATIONS).also { node.calls = it }
+        // No branch in the loop, so the JIT can vectorize it.
+        for (id in 0 until n) {
+            val c = counts[id + COUNT_PAD]
+            calls[id] += c - last[id]
+            last[id] = c
+        }
+    }
+
     fun count(id: Int) {
         counts[id + COUNT_PAD]++
     }
@@ -256,13 +290,18 @@ internal class OpSlot(
      */
     @PublishedApi
     internal fun recordSpan(ctx: CoarseContext, nanos: Long): CoarsePath? {
+        val node = nodeOf(ctx) ?: return null
+        node.record(nanos)
+        return node
+    }
+
+    /** This thread's node for [ctx]'s path; null for a context made outside the hook. */
+    private fun nodeOf(ctx: CoarseContext): CoarsePath? {
         val p = ctx.path ?: return null
-        val node = if (p.owner === this) p else {
+        return if (p.owner === this) p else {
             val root = coarseRoot ?: CoarsePath(CoarsePath.ROOT, null, this).also { coarseRoot = it }
             resolve(root, ctx)
         }
-        node.record(nanos)
-        return node
     }
 
     /** How deeply this thread is nested in coarse executions. Zero when it is inside none. */
@@ -743,6 +782,7 @@ object Profiler {
     fun enter(op: CoarseOp) {
         val s = local.get()
         val parent = s.contextOpaque()
+        s.flushCalls(parent)
         s.setContextOpaque(CoarseContext(op.id, parent, System.nanoTime(), s.pathFor(parent, op.id)))
     }
 
@@ -766,6 +806,7 @@ object Profiler {
         s.setContextOpaque(ctx.parent)
         ctx.markClosed()
         s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
+        s.flushCalls(ctx)
     }
 
     /** One scope per operation, made once, so opening one allocates nothing. */
@@ -836,6 +877,7 @@ object Profiler {
             else -> return true
         }
         imbalances.incrementAndGet()
+        s.flushCalls(ctx)
         s.setContextOpaque(null)
         s.depth = 0
         s.setOpaque(NO_OP)
@@ -1093,7 +1135,10 @@ object Profiler {
             spanMinNanos = if (n.count == 0L) 0L else n.minNanos, spanMaxNanos = n.maxNanos,
             spans = n.spans, inclusiveHits = n.inclusiveHits, runningInclusiveHits = n.runningInclusiveHits,
             instanceTicks = n.instanceTicks, coveredTicks = n.coveredTicks,
-            ownFine = n.ownFine ?: LongArray(0), ownFineCovered = n.ownFineCovered ?: LongArray(0),
+            // Zeros rather than empty for a path never caught in its own time: empty means a profile
+            // saved without these, and such a path still has its calls to show.
+            ownFine = n.ownFine ?: LongArray(MAX_OPERATIONS + 1), ownFineCovered = n.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1),
+            calls = n.calls ?: LongArray(MAX_OPERATIONS),
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),

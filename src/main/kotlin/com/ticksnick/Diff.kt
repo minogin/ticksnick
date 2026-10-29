@@ -66,6 +66,10 @@ internal class ProfileDiff(
             appendLine("-".repeat(DIFF_WIDTH))
             tree(after.coarseTree, before.coarseTree, 0)
             appendLine("-".repeat(DIFF_WIDTH))
+            if (anyOwn) appendLine(
+                "  $SPLIT_MARK rows are fine labels in a row's own time; Executions on one is its calls per execution of the row, " +
+                "counted, which holds whatever the size of each run"
+            )
         }
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS - own time, matched by name, sorted by the change")
@@ -112,14 +116,51 @@ internal class ProfileDiff(
             val a = beforeNodes.firstOrNull { it.name == b.name }
             seen += b.name
             node(indent, b.name, a, b)
+            ownRows(indent, a, b)
             tree(b.children, a?.children ?: emptyList(), depth + 1)
         }
         // Paths that the earlier run had and this one does not: printed under their parent, with
         // nothing on the right, so that a label that was removed is not silently gone.
         for (a in beforeNodes.filter { it.name !in seen }.sortedByDescending { wallBefore[it] ?: 0.0 }) {
             node(indent, a.name, a, null)
+            ownRows(indent, a, null)
             tree(emptyList(), a.children, depth + 1)
         }
+    }
+
+    /** Whether any fine row was drawn under a coarse one, for the key under the tree. */
+    private var anyOwn = false
+
+    /**
+     * The fine labels in a coarse row's own time, on either side: their wall, and their calls per
+     * execution of the row. Totals of two runs that did different amounts of work cannot be compared;
+     * calls per execution can, and `x340 =` says the step did the same work.
+     */
+    private fun StringBuilder.ownRows(indent: String, a: CoarseNode?, b: CoarseNode?) {
+        val ra = a?.let { before.ownRowsOf(it) }.orEmpty()
+        val rb = b?.let { after.ownRowsOf(it) }.orEmpty()
+        val names = (after.drawnOwnRows(rb) + before.drawnOwnRows(ra)).map { it.name }.distinct()
+        for (name in names) {
+            anyOwn = true
+            val x = ra.firstOrNull { it.name == name }
+            val y = rb.firstOrNull { it.name == name }
+            val ta = x?.wallNanos ?: 0.0
+            val tb = y?.wallNanos ?: 0.0
+            appendLine(
+                String.format(
+                    Locale.ROOT, COARSE_DIFF_ROW, "$indent  $SPLIT_MARK $name",
+                    pair(ta, tb, ta > 0, tb > 0), change(ta, tb, ta > 0 && tb > 0), "",
+                    perExecutionPair(perExecution(x, a), perExecution(y, b)),
+                ).trimEnd()
+            )
+        }
+    }
+
+    /** [r]'s calls per execution of [n]: none on a path that counted calls is `x0`; blank where they were not counted. */
+    private fun perExecution(r: Profile.OwnRow?, n: CoarseNode?): String {
+        if (n == null) return ""
+        val calls = r?.calls ?: if (n.calls.isNotEmpty()) 0L else -1L
+        return if (calls < 0) "" else callsPerExecution(calls, n.count)
     }
 
     private fun StringBuilder.node(indent: String, name: String, a: CoarseNode?, b: CoarseNode?) {

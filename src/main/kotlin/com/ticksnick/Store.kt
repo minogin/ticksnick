@@ -187,6 +187,7 @@ internal object ProfileStore {
             line(k + "coveredTicks", n.coveredTicks)
             if (n.ownFine.isNotEmpty()) sparse(k + "ownFine", n.ownFine)
             if (n.ownFineCovered.isNotEmpty()) sparse(k + "ownFineCovered", n.ownFineCovered)
+            if (n.calls.isNotEmpty()) sparse(k + "calls", n.calls)
             // Only where there are any; a node without these lines loads with none.
             if (n.slowest.isNotEmpty()) {
                 line(k + "slowest", n.slowest.size)
@@ -308,6 +309,8 @@ internal object ProfileStore {
                 // Optional: without them a node has no own fine rows (see Profile.ownRowsOf).
                 ownFine = if (k + "ownFine" in m) sparse(k + "ownFine", MAX_OPERATIONS + 1) else LongArray(0),
                 ownFineCovered = if (k + "ownFineCovered" in m) sparse(k + "ownFineCovered", MAX_OPERATIONS + 1) else LongArray(0),
+                // Optional: without them a fine row under a coarse one has no calls (see Profile.ownRowsOf).
+                calls = if (k + "calls" in m) sparse(k + "calls", MAX_OPERATIONS) else LongArray(0),
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
                 slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
                     SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))

@@ -185,6 +185,31 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
         if (parent == null || parent.count == 0L) Double.NaN else wallOf(i, node) * 100 / wallOf(i, parent)
     }
 
+    /**
+     * The fine labels drawn in the own time of the row [m] in any run, each with its row in every
+     * run: null where the run has the coarse row and not the label.
+     */
+    internal fun ownOf(m: Matched): Map<String, List<Profile.OwnRow?>> {
+        val rows = m.nodes.mapIndexed { i, n -> n?.let { runs[i].ownRowsOf(it) }.orEmpty() }
+        val drawn = m.nodes.indices.flatMap { i -> runs[i].drawnOwnRows(rows[i]).map { it.name } }.distinct()
+        return drawn.associateWith { name -> rows.map { r -> r.firstOrNull { it.name == name } } }
+    }
+
+    /**
+     * Calls per execution of [m] for one fine label, [rows] from [ownOf]: one figure when every run
+     * agrees, `~` their mean when not, blank where no run counted them.
+     */
+    internal fun perExecution(m: Matched, rows: List<Profile.OwnRow?>?): String {
+        val per = m.present.mapNotNull { i ->
+            val node = m.nodes[i]!!
+            val calls = rows?.get(i)?.calls ?: if (node.calls.isNotEmpty()) 0L else -1L
+            if (calls < 0) null else calls to node.count
+        }
+        if (per.isEmpty()) return ""
+        val texts = per.map { (c, n) -> callsPerExecution(c, n) }.distinct()
+        return if (texts.size == 1) texts[0] else String.format(Locale.ROOT, "~x%.1f", per.map { (c, n) -> c.toDouble() / n }.average())
+    }
+
     /** The heaviest root row, a benchmark's batch: the number an article quotes. */
     internal fun root(): Matched? = childrenOf(runs.map { it.coarseTree }).firstOrNull()
 

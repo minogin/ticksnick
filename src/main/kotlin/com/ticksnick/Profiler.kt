@@ -417,6 +417,8 @@ object Profiler {
      * Do this at startup, not on the hot path — it takes a map lookup, which is many times the cost
      * of the hook it feeds.
      */
+    @JvmStatic
+    @JvmName("registerFine")
     fun registerFine(name: String): FineOp = FineOp(registerFineId(name))
 
     /**
@@ -428,6 +430,7 @@ object Profiler {
      * budget as everything else. Idempotent for the same name and arity; the same name with a
      * different arity is an error, since the ids were already handed out.
      */
+    @JvmStatic
     fun registerFine(name: String, arity: Int): FineOps =
         FineOps(reserve(name, arity, ids, arities, nextId, names, MAX_OPERATIONS, "operations"), arity)
 
@@ -436,8 +439,14 @@ object Profiler {
      * on. As the integer family, with the enum's constants as the index and their names in the
      * report; the hot path is `base + ordinal`, and an index of the wrong type does not compile.
      */
+    @JvmSynthetic
     inline fun <reified E : Enum<E>> registerFine(name: String): FineEnumOps<E> =
         FineEnumOps(registerFineFamily(name, enumValues<E>().map { it.name }))
+
+    /** The enum family for Java, which has no reified type parameters: `registerFine("byKind", Kind.class)`. */
+    @JvmStatic
+    fun <E : Enum<E>> registerFine(name: String, type: Class<E>): FineEnumOps<E> =
+        FineEnumOps(registerFineFamily(name, type.enumConstants.map { it.name }))
 
     @PublishedApi
     internal fun registerFineFamily(name: String, labels: List<String>): Int =
@@ -505,17 +514,26 @@ object Profiler {
      * carry both labels: the fine one measures the operation's *self* time, the coarse one its
      * duration and everything nested under it, and comparing the two is a cross-check worth having.
      */
+    @JvmStatic
+    @JvmName("registerCoarse")
     fun registerCoarse(name: String): CoarseOp = CoarseOp(registerCoarseId(name))
 
     /** A family of coarse operations, indexed on the hot path. The coarse twin of [registerFine] with an arity. */
+    @JvmStatic
     fun registerCoarse(name: String, arity: Int): CoarseOps = CoarseOps(
         reserve(name, arity, coarseIds, coarseArities, nextCoarseId, coarseNames, MAX_COARSE_TYPES, "coarse operations"),
         arity,
     )
 
     /** A family of coarse operations indexed by an enum. The coarse twin of the enum [registerFine]. */
+    @JvmSynthetic
     inline fun <reified E : Enum<E>> registerCoarse(name: String): CoarseEnumOps<E> =
         CoarseEnumOps(registerCoarseFamily(name, enumValues<E>().map { it.name }))
+
+    /** The enum family for Java. The coarse twin of the `Class` [registerFine]. */
+    @JvmStatic
+    fun <E : Enum<E>> registerCoarse(name: String, type: Class<E>): CoarseEnumOps<E> =
+        CoarseEnumOps(registerCoarseFamily(name, type.enumConstants.map { it.name }))
 
     @PublishedApi
     internal fun registerCoarseFamily(name: String, labels: List<String>): Int =
@@ -664,11 +682,23 @@ object Profiler {
      * warning, a plausible wrong number — the contaminating direction. A library's "after"
      * callback is often not inside a `finally`, so this is not a hypothetical. See [expectBalanced].
      */
+    @JvmStatic
+    @JvmName("enterFine")
     fun enter(op: FineOp) {
         val s = local.get()
         if (s.depth < MAX_SPAN_DEPTH) s.stack[s.depth++] = s.getOpaque() else s.overflows++
         s.setOpaque(op.id)
         s.count(op.id)
+    }
+
+    /** The same, for a boundary around [times] units of the operation rather than one. See `op(op, times)`. */
+    @JvmStatic
+    @JvmName("enterFine")
+    fun enter(op: FineOp, times: Int) {
+        val s = local.get()
+        if (s.depth < MAX_SPAN_DEPTH) s.stack[s.depth++] = s.getOpaque() else s.overflows++
+        s.setOpaque(op.id)
+        s.count(op.id, times)
     }
 
     /**
@@ -685,6 +715,8 @@ object Profiler {
      * into a crash in somebody else's process — and it still unwinds, so one mistake does not
      * cascade into every label after it.
      */
+    @JvmStatic
+    @JvmName("exitFine")
     fun exit(op: FineOp) {
         val s = local.get()
         val current = s.getOpaque()
@@ -700,6 +732,8 @@ object Profiler {
      * no `finally` here**, so a body that throws leaves the context open and everything the thread
      * does afterwards is billed to it. See [expectBalanced].
      */
+    @JvmStatic
+    @JvmName("enterCoarse")
     fun enter(op: CoarseOp) {
         val s = local.get()
         val parent = s.contextOpaque()
@@ -713,6 +747,8 @@ object Profiler {
      * reported rather than thrown: it means the caller closed something it never opened, which is a
      * measurement problem and not a reason to stop somebody else's program.
      */
+    @JvmStatic
+    @JvmName("exitCoarse")
     fun exit(op: CoarseOp) {
         val s = local.get()
         val ctx = s.contextOpaque()
@@ -724,6 +760,40 @@ object Profiler {
         s.setContextOpaque(ctx.parent)
         ctx.markClosed()
         s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
+    }
+
+    /** One [Scope] per operation, made once, so opening one allocates nothing. */
+    private val fineScopes = Array(MAX_OPERATIONS) { Scope(it, coarse = false) }
+    private val coarseScopes = Array(MAX_COARSE_TYPES) { Scope(it, coarse = true) }
+
+    /**
+     * Enters [op] and returns the [Scope] that leaves it, for Java's try-with-resources:
+     * `try (var s = Profiler.fine(PARSE)) { parse(line); }`. In Kotlin, `op(PARSE) { }` does the same.
+     */
+    @JvmStatic
+    @JvmName("fine")
+    fun fine(op: FineOp): Scope {
+        val scope = fineScopes[op.id]
+        enter(op)
+        return scope
+    }
+
+    /** The same, for a block of [times] units of the operation. See `op(op, times)`. */
+    @JvmStatic
+    @JvmName("fine")
+    fun fine(op: FineOp, times: Int): Scope {
+        val scope = fineScopes[op.id]
+        enter(op, times)
+        return scope
+    }
+
+    /** Enters an execution of [op] and returns the [Scope] that closes it. The coarse twin of [fine]. */
+    @JvmStatic
+    @JvmName("coarse")
+    fun coarse(op: CoarseOp): Scope {
+        val scope = coarseScopes[op.id]
+        enter(op)
+        return scope
     }
 
     /** One closing call that did not match what was open. Counted with the leaks, and fatal under strict. */
@@ -744,6 +814,7 @@ object Profiler {
      *
      * Resets the stack, so one leak is one report rather than every subsequent check failing too.
      */
+    @JvmStatic
     fun expectBalanced(): Boolean {
         val s = local.get()
         // Read before anything is reset, and defensively: a slot can hold NO_OP with a depth above
@@ -819,6 +890,7 @@ object Profiler {
      * of one read makes an operation look *longer* than it is, which cannot manufacture an
      * accusation, and the window is two instructions wide either way.
      */
+    @JvmStatic
     fun release() {
         val s = local.get()
         if (s.index >= 0) slotByIndex.set(s.index, null)
@@ -926,6 +998,8 @@ object Profiler {
      * [strict] stops the session if a label leaks or is closed out of order, since either bills
      * samples to the wrong operation. Switch it off to profile code you do not own and cannot fix.
      */
+    @JvmStatic
+    @JvmOverloads
     fun start(
         stepMillis: Double = 1.0,
         wait: WaitStrategy = WaitStrategy.SPIN,
@@ -946,6 +1020,7 @@ object Profiler {
     }
 
     /** Stops sampling and returns what was collected. */
+    @JvmStatic
     fun stop(): Profile {
         Logo.once()
         val s = checkNotNull(sampler) { "not sampling" }

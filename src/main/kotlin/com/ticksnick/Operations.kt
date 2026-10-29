@@ -29,7 +29,7 @@ package com.ticksnick
  * operation and the first coarse one are both the integer `0`; as bare ints, passing one for the
  * other would compile, run, and report a plausible wrong answer. Two distinct types cannot be
  * confused, and both erase to a bare `int`, so nothing is paid for it at run time. Java gets no such
- * check, since value classes erase there, but the name mangling makes these calls unusable from Java anyway.
+ * check: there both are an `int`, which is why its calls name the kind, `enterFine` and `enterCoarse`.
  */
 
 /**
@@ -64,6 +64,7 @@ value class CoarseOp internal constructor(@PublishedApi internal val id: Int) {
  * a depth, a type, a size bucket. Not a node id. See [Profiler.registerFine].
  */
 class FineOps internal constructor(internal val base: Int, internal val arity: Int) {
+    @JvmName("get")
     operator fun get(i: Int): FineOp {
         if (i < 0 || i >= arity) throw IndexOutOfBoundsException("index $i of a family of $arity")
         return FineOp(base + i)
@@ -74,6 +75,7 @@ class FineOps internal constructor(internal val base: Int, internal val arity: I
 
 /** A family of coarse operations indexed by a small integer. The coarse twin of [FineOps]. */
 class CoarseOps internal constructor(internal val base: Int, internal val arity: Int) {
+    @JvmName("get")
     operator fun get(i: Int): CoarseOp {
         if (i < 0 || i >= arity) throw IndexOutOfBoundsException("index $i of a family of $arity")
         return CoarseOp(base + i)
@@ -88,6 +90,7 @@ class CoarseOps internal constructor(internal val base: Int, internal val arity:
  * compile. See [Profiler.registerFine].
  */
 class FineEnumOps<E : Enum<E>> @PublishedApi internal constructor(internal val base: Int) {
+    @JvmName("get")
     operator fun get(e: E): FineOp = FineOp(base + e.ordinal)
 
     override fun toString(): String = "fine#$base[enum]"
@@ -95,7 +98,22 @@ class FineEnumOps<E : Enum<E>> @PublishedApi internal constructor(internal val b
 
 /** A family of coarse operations indexed by an enum. The coarse twin of [FineEnumOps]. */
 class CoarseEnumOps<E : Enum<E>> @PublishedApi internal constructor(internal val base: Int) {
+    @JvmName("get")
     operator fun get(e: E): CoarseOp = CoarseOp(base + e.ordinal)
 
     override fun toString(): String = "coarse#$base[enum]"
+}
+
+/**
+ * An open label, closed by Java's try-with-resources: `try (var s = Profiler.fine(PARSE)) { ... }`.
+ *
+ * Java's block form. Java cannot inline Kotlin's `op(PARSE) { }`, so a lambda would be a real call
+ * and possibly an allocation on every call. `close()` is the matching exit, so a body that throws
+ * cannot leave the label set. A scope holds no state of its own: [Profiler.fine] hands out the same
+ * one for an operation every time, on every thread.
+ */
+class Scope internal constructor(private val id: Int, private val coarse: Boolean) : AutoCloseable {
+    override fun close() {
+        if (coarse) Profiler.exit(CoarseOp(id)) else Profiler.exit(FineOp(id))
+    }
 }

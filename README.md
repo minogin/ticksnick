@@ -141,6 +141,31 @@ you cannot fix. The leaks are still counted and reported.
 - `strict` (true): stop at the first leaked label, see above.
 - `sampleState` (true): record whether each sampled thread was running or waiting.
 
+### From Java
+
+The same jar. In Java a handle is an `int`, and a block is a try-with-resources:
+
+```java
+static final int BATCH = Profiler.registerCoarse("batch");
+static final int PARSE = Profiler.registerFine("parse");
+
+Profiler.start();
+try (var b = Profiler.coarse(BATCH)) {
+    for (var line : input) try (var p = Profiler.fine(PARSE)) { parse(line); }
+}
+Profiler.stop().save(Path.of("profiles", "baseline"));
+System.out.println(TickSnick.load(Path.of("profiles", "baseline")).render());
+```
+
+- A fine and a coarse handle are both `int`, so Java cannot tell them apart. The calls name the
+  kind instead: `fine` and `coarse`, `enterFine`/`exitFine` and `enterCoarse`/`exitCoarse`. Passing
+  one kind to the other's call compiles and reports the wrong operation.
+- Opening a scope allocates nothing: each operation has one, made at startup.
+- `Profiler.fine(LOOKUP, keys.size())` is `op(LOOKUP, times = keys.size) { }`.
+- Families: `LEVEL.get(depth)`, and `Profiler.registerCoarse("resolve", Kind.class)` for an enum.
+- Settings by position, from the left: `Profiler.start(1.0, WaitStrategy.PARK)`.
+- `enterFine` and `exitFine` around a block need a `finally`, as a lock does.
+
 ## Runs and folders
 
 A JVM run differs from the next one: the CPU clock, the JIT and the heap layout all vary. One run

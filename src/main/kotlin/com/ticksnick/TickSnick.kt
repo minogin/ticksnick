@@ -12,8 +12,10 @@ import java.nio.file.Path
  */
 object TickSnick {
     /** Every run in [folder], oldest first. */
+    @JvmStatic
     fun load(folder: Path): ProfileRuns = ProfileRuns.load(folder).also { Logo.once() }
 
     /** [before] -> [after]: each side the mean of its runs, the change with its 95% interval once both have two. */
+    @JvmStatic
     fun diff(before: ProfileRuns, after: ProfileRuns): String = RunsDiff(before, after).render().also { Logo.once() }
 }

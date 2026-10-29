@@ -36,8 +36,19 @@ tasks.register<JavaExec>("cli") {
     mainClass.set("com.ticksnick.Cli")
 }
 
+// The Java caller in a JVM of its own: the registry is process-wide, and the other tests fill
+// nearly all of its coarse ids.
+val javaCallerTest by tasks.registering(Test::class) {
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    include("com/ticksnick/JavaCallerTest*")
+}
+
 tasks.test {
     useJUnitPlatform()
+    exclude("com/ticksnick/JavaCallerTest*")
+    dependsOn(javaCallerTest)
 }
 
 // `./gradlew publishToMavenCentral` uploads a signed deployment; "Publish" on

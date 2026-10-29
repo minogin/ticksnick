@@ -42,10 +42,8 @@ class TreeTest {
         sink = s
     }
 
-    /** Starts a session and waits past the sampler's first tick, where it resets the coarse totals. */
     private fun start() {
         Profiler.start(stepMillis = 1.0, strict = false)
-        Thread.sleep(30)
     }
 
     private fun Profile.root(name: String): CoarseNode? = coarseTree.firstOrNull { it.name == name }

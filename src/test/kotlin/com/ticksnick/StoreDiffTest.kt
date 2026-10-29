@@ -53,7 +53,6 @@ class StoreDiffTest {
         val stalls = Profiler.registerFine("store-stalls")
         val smooth = Profiler.registerFine("store-smooth")
         Profiler.start(stepMillis = 1.0, strict = false)
-        Thread.sleep(30)
         op(req) {
             op(step) {
                 val until = System.nanoTime() + 300_000_000

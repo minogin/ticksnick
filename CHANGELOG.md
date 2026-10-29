@@ -2,6 +2,13 @@
 
 Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
+## Unreleased
+
+### Fixed
+
+- Calls made right after `Profiler.start()` are counted. `start()` returns once the sampler has
+  taken its starting counts; a session shorter than the sampler thread's start-up counted no calls.
+
 ## 0.5.0 - 2026-10-27
 
 ### Runs are saved to folders and read as a set

@@ -548,6 +548,21 @@ class RegistryTest {
         assertEquals(1, r.threadsOf("test:threads-warmup"), "the session counted the warm-up's threads")
     }
 
+    /**
+     * `start()` returns once the sampler has taken its snapshot of the counts, so a call made right
+     * after it is counted. Without that wait, a session shorter than the sampler thread's start-up
+     * would report no calls at all.
+     */
+    @Test
+    fun `a call made right after start is counted`() {
+        val id = Profiler.registerFine("test:right-after-start")
+        Profiler.start(stepMillis = 1.0, strict = false)
+        op(id) { }
+        val r = Profiler.stop()
+
+        assertEquals(1, r.operations.first { it.name == "test:right-after-start" }.calls)
+    }
+
     /** The row for one operation by name, since ids are shared with every other test in the JVM. */
     private fun Profile.threadsOf(name: String): Int =
         operations.first { it.name == name }.threads

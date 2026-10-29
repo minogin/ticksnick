@@ -1,6 +1,7 @@
 package com.ticksnick
 
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.locks.LockSupport
 
 /**
@@ -567,10 +568,17 @@ internal class Sampler(
         if (sampleState) duty.watch(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting)
     }
 
+    /** Opened once the snapshots are taken. [start] waits for it, so it returns into a running session. */
+    private val started = CountDownLatch(1)
+
     override fun run() {
         // Before the first tick, so that no call is counted whose sample could not have been taken.
-        for (id in 0 until MAX_OPERATIONS) callsAtStart[id] = Profiler.callsOf(id)
-        for (id in 0 until MAX_OPERATIONS) threadsAtStart[id] = Profiler.threadsOf(id)
+        try {
+            for (id in 0 until MAX_OPERATIONS) callsAtStart[id] = Profiler.callsOf(id)
+            for (id in 0 until MAX_OPERATIONS) threadsAtStart[id] = Profiler.threadsOf(id)
+        } finally {
+            started.countDown()
+        }
         var next = System.nanoTime() + nextInterval()
         var prev = 0L
         var first = 0L
@@ -968,12 +976,26 @@ internal class Sampler(
      * makes an execution count look *lower* than the call graph says, which reads exactly like a
      * dropped span.
      *
-     * The fine tier's `callsAtStart` snapshot is left where it is: it has the same shape of race and
-     * it subtracts rather than resets, so a call counted on both sides of the boundary cancels.
+     * The fine tier's `callsAtStart` snapshot stays in `run()`, before the first tick, and the caller
+     * waits for it instead. A call made before the snapshot is subtracted out, so without the wait a
+     * session shorter than the thread's start-up would count no calls at all, and a longer one would
+     * lose its first calls. Taking the snapshot here would not do: on a busy machine the calls made before
+     * the thread runs would be counted with no sample that could have seen them.
      */
     override fun start() {
         Profiler.resetCoarse()
         super.start()
+        var interrupted = false
+        while (true) {
+            try {
+                started.await()
+                break
+            } catch (_: InterruptedException) {
+                // Keep waiting: throwing here would leave the thread running with nothing holding it.
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
     }
 
     internal fun shutdown() {

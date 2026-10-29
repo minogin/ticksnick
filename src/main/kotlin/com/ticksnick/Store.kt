@@ -113,6 +113,10 @@ internal object ProfileStore {
             line("clock.samples", clock.samples.joinToString(" ") { if (it.isNaN()) "-" else it.toString() })
         }
 
+        // Only when recorded; a file without them has no `Sampling` line.
+        p.wait?.let { line("sampler.wait", it.name) }
+        line("sampler.askedStepNanos", p.askedStepNanos)
+
         line("operations", p.operations.size)
         p.operations.forEachIndexed { i, o ->
             val k = "op.$i."
@@ -321,6 +325,8 @@ internal object ProfileStore {
             coarse = coarse, openContextsAtEnd = int("openContextsAtEnd"),
             labelledOutsideCoarse = long("labelledOutsideCoarse"), staleContextHits = long("staleContextHits"),
             coarseSampleHits = long("coarseSampleHits"), pause = pause, coarseTree = tree, clock = clock,
+            wait = m["sampler.wait"]?.let { WaitStrategy.valueOf(it) },
+            askedStepNanos = m["sampler.askedStepNanos"]?.toLong() ?: 0L,
         )
     }
 

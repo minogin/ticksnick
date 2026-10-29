@@ -18,6 +18,7 @@ CAREFUL       times: 1 run of 'naive', no interval - the next JVM can run faster
 
 Wall time     117 s = 104 s active + 13.0 s paused (11.1%) in 57 pauses, longest 1.98 s
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
+Sampling      every 1.0 ms: the sampler keeps one of the 14 processors busy to hold the interval
 ```
 
 ### CAREFUL
@@ -55,7 +56,18 @@ only. The coarse table is timed, so a span includes any pause inside it.
 
 **Cores** is how many cores were busy on average, and with what: the threads that entered a label,
 the rest of the process (GC, the sampler, the JIT) and its parts. Here four workers kept 2.85 cores
-busy, while GC took 1.73. The sampler spins on a core by default (`WaitStrategy.SPIN`).
+busy, while GC took 1.73.
+
+**Sampling** is how often a sample was taken, and what the sampler cost the program. With 4 or more
+processors it spins on one of them to hold the interval, as here. With fewer it sleeps between
+samples, which leaves the processor to the program and makes the interval longer and less regular:
+
+```
+Sampling      every 1.6 ms (1.0 ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors
+```
+
+A sampler told to spin on fewer than 4 processors gets the remedy at the end of the line:
+`start(wait = PARK) to free it`.
 
 The CPU's clock is recorded through the run, as a share of its base frequency. A single report
 mentions it only in `CAREFUL`, when it moved; the reports over runs list it for every run.

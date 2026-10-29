@@ -449,4 +449,69 @@ class ProfileTest {
         assertTrue("1,000,000 =" in text, "equal calls should read as =: $text")
         assertTrue("a -> b" in text, "the names are missing: $text")
     }
+
+    // ---------------------------------------------------------------- the Sampling line
+
+    /** One second of sampling, [ticks] of it, on [processors], with the step asked at 1 ms. */
+    private fun sampled(wait: WaitStrategy, processors: Int, ticks: Long) = Profile(
+        operations = emptyList(), idleHits = 0, ticks = ticks,
+        samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 1,
+        duty = DutyReport(
+            labelledDuty = 0.99, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
+            resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,
+            cpuNanos = 990_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.99, maxWindowDuty = 0.99,
+            anomalies = 0, maxSampleNanos = 200_000, processors = processors,
+        ),
+        wait = wait, askedStepNanos = 1_000_000,
+    )
+
+    /** A parked sampler says it freed a processor, and the step it got against the one asked. */
+    @Test
+    fun `a parked sampler says what it freed and the step it got`() {
+        assertEquals(
+            "every 1.6 ms (1.0 ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors",
+            sampled(WaitStrategy.PARK, processors = 2, ticks = 626).samplingLine(),
+        )
+    }
+
+    @Test
+    fun `a spinning sampler on enough processors says what it holds, with no remedy`() {
+        assertEquals(
+            "every 1.0 ms: the sampler keeps one of the 14 processors busy to hold the interval",
+            sampled(WaitStrategy.SPIN, processors = 14, ticks = 1_001).samplingLine(),
+        )
+    }
+
+    @Test
+    fun `a spinning sampler on few processors names the remedy`() {
+        assertEquals(
+            "every 1.0 ms: the sampler keeps one of the 2 processors busy to hold the interval - start(wait = PARK) to free it",
+            sampled(WaitStrategy.SPIN, processors = 2, ticks = 1_001).samplingLine(),
+        )
+    }
+
+    @Test
+    fun `the default spins from four processors and parks below`() {
+        assertEquals(WaitStrategy.PARK, defaultWait(2))
+        assertEquals(WaitStrategy.PARK, defaultWait(3))
+        assertEquals(WaitStrategy.SPIN, defaultWait(4))
+    }
+
+    /** The strategy and the asked step survive the file, and a file without them has no line. */
+    @Test
+    fun `the Sampling line survives the file`() {
+        val path = Files.createTempFile("ticksnick", PROFILE_EXTENSION)
+        try {
+            ProfileStore.save(sampled(WaitStrategy.PARK, processors = 2, ticks = 626), path)
+            val loaded = ProfileStore.load(path)
+            assertEquals(WaitStrategy.PARK, loaded.wait)
+            assertEquals(1_000_000, loaded.askedStepNanos)
+            assertTrue("Sampling      every 1.6 ms (1.0 ms asked)" in loaded.render())
+
+            ProfileStore.save(report(emptyList()), path)
+            assertEquals(null, ProfileStore.load(path).samplingLine())
+        } finally {
+            Files.deleteIfExists(path)
+        }
+    }
 }

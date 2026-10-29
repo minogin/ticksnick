@@ -134,8 +134,9 @@ you cannot fix. The leaks are still counted and reported.
 
 - `stepMillis` (1.0): the sampling interval. Sampling every thread takes a few microseconds, so the
   interval is set by how many threads there are, not by the resolution you want.
-- `wait` (`SPIN`): how the sampler waits between samples. `SPIN` takes a core and keeps the interval
-  exact. `PARK` and `SLEEP` leave the core free, and the interval grows longer and less regular.
+- `wait` (`SPIN` with 4 or more processors, `PARK` below): how the sampler waits between samples.
+  `SPIN` takes a core and keeps the interval exact. `PARK` and `SLEEP` leave the core free, and the
+  interval grows longer and less regular. The report's `Sampling` line says which one ran.
 - `jitter` (0.25): each interval varies at random by up to this fraction, so sampling does not fall
   in step with a loop in the program.
 - `strict` (true): stop at the first leaked label, see above.

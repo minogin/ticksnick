@@ -16,6 +16,13 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - `registerFine(name, Kind.class)` and `registerCoarse(name, Kind.class)` register an enum family.
 - The Kotlin API is unchanged.
 
+### The sampler on small machines
+
+- With fewer than 4 processors the sampler parks between samples by default instead of spinning,
+  which held one of them. `wait = WaitStrategy.SPIN` still spins.
+- The report has a `Sampling` line: the interval achieved, and whether the sampler held a processor
+  or left it free. A spinning sampler on fewer than 4 processors is named with the remedy.
+
 ### Fixed
 
 - Calls made right after `Profiler.start()` are counted. `start()` returns once the sampler has

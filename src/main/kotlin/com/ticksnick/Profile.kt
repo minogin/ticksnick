@@ -34,6 +34,9 @@ internal const val PARALLEL_SHOWN = 1.1
 /** Below this share of its row, a fine row under a coarse one is counted in "and N more" rather than drawn. */
 internal const val OWN_ROW_MIN = 0.005
 
+/** How far the achieved step may be from the one asked before the `Sampling` line names both. */
+internal const val ASKED_STEP_TOLERANCE = 0.05
+
 /** The second line of a leaked-label warning: the usual cause. */
 internal const val NO_FINALLY = "a label placed with enter/exit has no finally: a body that throws leaves it set"
 
@@ -629,9 +632,36 @@ class Profile internal constructor(
     internal val coarseTree: List<CoarseNode> = emptyList(),
     /** The CPU clock over the session; [ClockReport.NOT_RECORDED] for a profile saved before it was. */
     internal val clock: ClockReport = ClockReport.NOT_RECORDED,
+    /** How the sampler waited; null for a profile saved before it was recorded. See [samplingLine]. */
+    internal val wait: WaitStrategy? = null,
+    /** The step asked for at `start()`, in nanoseconds; 0 for a profile saved before it was recorded. */
+    internal val askedStepNanos: Long = 0,
 ) {
     /** False when a fatal finding stopped the session. */
     internal val ok: Boolean get() = failure == null
+
+    /**
+     * How often the sampler sampled, and what that cost the program: a spinning sampler holds a
+     * processor to keep the step, a parked one frees it and samples later than asked. Said with
+     * the remedy when a spinning sampler holds one of few processors. Null when not recorded.
+     */
+    internal fun samplingLine(): String? {
+        val w = wait ?: return null
+        if (stepNanos.isNaN()) return null
+        val n = duty.processors
+        val processors = if (n > 0) "one of the $n processors" else "a processor"
+        return if (w == WaitStrategy.SPIN) {
+            "every ${stepText(stepNanos)}: the sampler keeps $processors busy to hold the interval" +
+                    if (n in 1 until SPIN_MIN_PROCESSORS) " - start(wait = PARK) to free it" else ""
+        } else {
+            val asked = if (askedStepNanos > 0 && abs(stepNanos / askedStepNanos - 1) > ASKED_STEP_TOLERANCE)
+                " (${stepText(askedStepNanos.toDouble())} asked)" else ""
+            "every ${stepText(stepNanos)}$asked: the sampler sleeps between samples, so as not to take $processors"
+        }
+    }
+
+    private fun stepText(nanos: Double): String =
+        String.format(Locale.ROOT, if (nanos >= 1_000_000) "%.1f ms" else "%.2f ms", nanos / 1e6)
 
     /** Samples inside a fine label. Self time by construction: the hook keeps the innermost id. */
     internal val fineHits: Long get() = operations.sumOf { it.hits }
@@ -1871,6 +1901,8 @@ class Profile internal constructor(
         appendLine(pause.headerLine(samplingSpanNanos))
         // Always, under the wall time: who had the cores, the program's threads being only some of it.
         duty.coresLine()?.let { appendLine(row("Cores", it)) }
+        // The one mechanism shown: whether the sampler held a processor, which the reader can change.
+        samplingLine()?.let { appendLine(row("Sampling", it)) }
         // The tree first: the overview - what ran inside what, how often, what part of its parent -
         // and the own-time table after it for the detail. The tree is what a reader reads; the
         // table is what they look up.

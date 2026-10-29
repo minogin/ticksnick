@@ -11,8 +11,8 @@ import java.util.concurrent.locks.LockSupport
  * and fall behind on a large share of ticks, while SPIN holds the step to about a microsecond.
  * With every core loaded PARK can stretch the step tenfold: the sampler cannot get scheduled.
  *
- * SPIN is the default; the others are kept for comparison, worth re-running on different
- * hardware. PARK also bunches: after falling behind it fires several ticks in quick succession,
+ * SPIN is the default from [SPIN_MIN_PROCESSORS] processors, PARK below that, where a spinning
+ * sampler would hold a large share of the machine. SLEEP is kept for comparison. PARK also bunches: after falling behind it fires several ticks in quick succession,
  * and bunched samples are correlated samples, which more samples will not fix.
  */
 enum class WaitStrategy {
@@ -61,8 +61,8 @@ private val ROOT = Any()
  * Counters are plain longs: this thread is their only writer.
  */
 internal class Sampler(
-    private val stepNanos: Long,
-    private val wait: WaitStrategy = WaitStrategy.SPIN,
+    internal val stepNanos: Long,
+    internal val wait: WaitStrategy = WaitStrategy.SPIN,
     private val jitterFraction: Double = 0.25,
     dutyWindowNanos: Long = DutyCycle.DEFAULT_WINDOW_NANOS,
     /**

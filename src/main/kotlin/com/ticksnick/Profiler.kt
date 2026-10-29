@@ -10,6 +10,12 @@ import kotlin.math.min
 internal const val NO_OP = -1
 
 /**
+ * Processors from which the sampler spins by default. Below this a spinning sampler holds a large
+ * share of the machine - half of it on two - so it parks instead and samples less punctually.
+ */
+internal const val SPIN_MIN_PROCESSORS = 4
+
+/**
  * Ceiling on how many distinct operations may be registered.
  *
  * Fixed rather than growable on purpose. The hot path indexes a counter array by operation id, and
@@ -997,12 +1003,15 @@ object Profiler {
      *
      * [strict] stops the session if a label leaks or is closed out of order, since either bills
      * samples to the wrong operation. Switch it off to profile code you do not own and cannot fix.
+     *
+     * [wait] is [WaitStrategy.SPIN] from [SPIN_MIN_PROCESSORS] processors and [WaitStrategy.PARK]
+     * below, unless given.
      */
     @JvmStatic
     @JvmOverloads
     fun start(
         stepMillis: Double = 1.0,
-        wait: WaitStrategy = WaitStrategy.SPIN,
+        wait: WaitStrategy = defaultWait(),
         jitter: Double = 0.25,
         strict: Boolean = true,
         sampleState: Boolean = true,
@@ -1105,9 +1114,15 @@ object Profiler {
             pause = pauses,
             coarseTree = coarseTree,
             clock = clockReport,
+            wait = s.wait,
+            askedStepNanos = s.stepNanos,
         )
     }
 }
+
+/** The sampler's wait when `start()` is not told: spin while a processor can be spared, park below. */
+internal fun defaultWait(processors: Int = Runtime.getRuntime().availableProcessors()): WaitStrategy =
+    if (processors >= SPIN_MIN_PROCESSORS) WaitStrategy.SPIN else WaitStrategy.PARK
 
 /**
  * Marks the calling thread as being inside operation [id] for the duration of [body].

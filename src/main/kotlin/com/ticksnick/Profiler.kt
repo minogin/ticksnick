@@ -762,17 +762,17 @@ object Profiler {
         s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
     }
 
-    /** One [Scope] per operation, made once, so opening one allocates nothing. */
-    private val fineScopes = Array(MAX_OPERATIONS) { Scope(it, coarse = false) }
-    private val coarseScopes = Array(MAX_COARSE_TYPES) { Scope(it, coarse = true) }
+    /** One scope per operation, made once, so opening one allocates nothing. */
+    private val fineScopes = Array(MAX_OPERATIONS) { FineScope(it) }
+    private val coarseScopes = Array(MAX_COARSE_TYPES) { CoarseScope(it) }
 
     /**
-     * Enters [op] and returns the [Scope] that leaves it, for Java's try-with-resources:
+     * Enters [op] and returns the [FineScope] that leaves it, for Java's try-with-resources:
      * `try (var s = Profiler.fine(PARSE)) { parse(line); }`. In Kotlin, `op(PARSE) { }` does the same.
      */
     @JvmStatic
     @JvmName("fine")
-    fun fine(op: FineOp): Scope {
+    fun fine(op: FineOp): FineScope {
         val scope = fineScopes[op.id]
         enter(op)
         return scope
@@ -781,16 +781,16 @@ object Profiler {
     /** The same, for a block of [times] units of the operation. See `op(op, times)`. */
     @JvmStatic
     @JvmName("fine")
-    fun fine(op: FineOp, times: Int): Scope {
+    fun fine(op: FineOp, times: Int): FineScope {
         val scope = fineScopes[op.id]
         enter(op, times)
         return scope
     }
 
-    /** Enters an execution of [op] and returns the [Scope] that closes it. The coarse twin of [fine]. */
+    /** Enters an execution of [op] and returns the [CoarseScope] that closes it. The coarse twin of [fine]. */
     @JvmStatic
     @JvmName("coarse")
-    fun coarse(op: CoarseOp): Scope {
+    fun coarse(op: CoarseOp): CoarseScope {
         val scope = coarseScopes[op.id]
         enter(op)
         return scope

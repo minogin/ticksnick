@@ -111,9 +111,15 @@ class CoarseEnumOps<E : Enum<E>> @PublishedApi internal constructor(internal val
  * and possibly an allocation on every call. `close()` is the matching exit, so a body that throws
  * cannot leave the label set. A scope holds no state of its own: [Profiler.fine] hands out the same
  * one for an operation every time, on every thread.
+ *
+ * Two final classes rather than one with a flag, so `close()` is a direct call with no branch on
+ * the kind.
  */
-class Scope internal constructor(private val id: Int, private val coarse: Boolean) : AutoCloseable {
-    override fun close() {
-        if (coarse) Profiler.exit(CoarseOp(id)) else Profiler.exit(FineOp(id))
-    }
+class FineScope internal constructor(private val id: Int) : AutoCloseable {
+    override fun close() = Profiler.exit(FineOp(id))
+}
+
+/** An open coarse execution, closed by try-with-resources. The coarse twin of [FineScope]. */
+class CoarseScope internal constructor(private val id: Int) : AutoCloseable {
+    override fun close() = Profiler.exit(CoarseOp(id))
 }

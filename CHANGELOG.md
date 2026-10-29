@@ -11,8 +11,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - Handles are `int` in Java. `registerFine`, `registerCoarse` and the families' `get` return one.
 - `enterFine`, `exitFine`, `enterCoarse` and `exitCoarse` are `enter` and `exit` under Java names.
   `enterFine(op, times)` is new, in Kotlin `enter(op, times)`.
-- `Profiler.fine(op)`, `fine(op, times)` and `coarse(op)` enter and return a `Scope` for
-  try-with-resources. `close()` exits. Nothing is allocated.
+- `Profiler.fine(op)`, `fine(op, times)` and `coarse(op)` enter and return a `FineScope` or a
+  `CoarseScope` for try-with-resources. `close()` exits. Nothing is allocated.
 - `registerFine(name, Kind.class)` and `registerCoarse(name, Kind.class)` register an enum family.
 - The Kotlin API is unchanged.
 

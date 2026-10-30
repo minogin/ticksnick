@@ -215,12 +215,12 @@ class PauseTest {
     private fun pause(
         paused: Long, count: Long, longest: Long, gc: Long,
         confirmed: Long = if (gc < 0) 0 else minOf(paused, gc), measured: Boolean = true,
-    ) = PauseReport(measured, paused, count, longest, gc, confirmed)
+    ) = Pauses(measured, paused, count, longest, gc, confirmed)
 
     /** The table heading says "over N s active", so the word has to be on the page whatever happened. */
     @Test
     fun `wall time is split on a run with no pause too`() {
-        for (quiet in listOf(PauseReport.NONE, pause(0, 0, 0, gc = 0))) {
+        for (quiet in listOf(Pauses.NONE, pause(0, 0, 0, gc = 0))) {
             val line = quiet.headerLine(60 * second)
             assertTrue(line.startsWith("Wall time"), line)
             assertTrue("60.0 s = 60.0 s active + 0 paused" in line, line)

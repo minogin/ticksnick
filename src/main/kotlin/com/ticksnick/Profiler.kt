@@ -488,7 +488,7 @@ object Profiler {
     internal var allocationsAvailable = AllocationClock.available
 
     private var startedAt: Long = 0
-    /** The CPU clock over the session. See [ClockReport]. */
+    /** The CPU clock over the session. See [ClockTrace]. */
     private var clock: ClockProbe? = null
 
     /** The JVM's collection-pause count when the current session began, or -1. See [GcPauseClock]. */
@@ -1146,7 +1146,7 @@ object Profiler {
         sampler = null
         val allocations = allocationSession != 0
         allocationSession = 0
-        val clockReport = clock?.stop() ?: ClockReport.NOT_RECORDED
+        val clockTrace = clock?.stop() ?: ClockTrace.NOT_RECORDED
         clock = null
         val duration = System.nanoTime() - startedAt
         // Both ends or neither: a clock that could not be read at one of them has no difference.
@@ -1228,7 +1228,7 @@ object Profiler {
             coarseSampleHits = s.coarseSampleHits,
             pause = pauses,
             coarseTree = coarseTree,
-            clock = clockReport,
+            clock = clockTrace,
             wait = s.wait,
             askedStepNanos = s.stepNanos,
             allocations = allocations,

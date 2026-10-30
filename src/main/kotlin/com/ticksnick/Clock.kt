@@ -40,7 +40,7 @@ private const val WINDOWS_TIME = "% Processor Time"
  * our own, which would measure the core that thread landed on - on a hybrid CPU possibly an
  * efficiency core reporting a drop that never happened - and which would take a core from the run.
  */
-internal class ClockReport internal constructor(
+internal class ClockTrace internal constructor(
     /** One per [CLOCK_PERIOD_MILLIS], NaN for a second the machine was idle or the read failed. */
     val samples: DoubleArray,
     /** True: percentages of the base clock. False: MHz, where the OS does not publish the base. */
@@ -90,14 +90,14 @@ internal class ClockReport internal constructor(
 
     internal companion object {
         /** A run with no clock in it, or built by hand: nothing to say. */
-        val NOT_RECORDED = ClockReport(DoubleArray(0), ofBase = true, notMeasured = null)
+        val NOT_RECORDED = ClockTrace(DoubleArray(0), ofBase = true, notMeasured = null)
 
         /**
          * A `Clock` line for the diff, and a `Careful` line under it when the two runs ran at clocks
          * further apart than [CLOCK_MOVED]: a time difference that size may be the machine, not the
          * code. Empty when neither side recorded a clock.
          */
-        fun diffLines(before: ClockReport, after: ClockReport): List<String> {
+        fun diffLines(before: ClockTrace, after: ClockTrace): List<String> {
             val a = before.mean
             val b = after.mean
             if (a.isNaN() && b.isNaN()) return emptyList()
@@ -106,7 +106,7 @@ internal class ClockReport internal constructor(
         }
 
         /** The warning when the two runs' clocks are more than [CLOCK_MOVED] apart, for the diff's `CAREFUL` section. */
-        fun diffCareful(before: ClockReport, after: ClockReport): List<String> {
+        fun diffCareful(before: ClockTrace, after: ClockTrace): List<String> {
             val a = before.mean
             val b = after.mean
             if (a.isNaN() || b.isNaN() || before.ofBase != after.ofBase || max(a, b) <= min(a, b) * (1 + CLOCK_MOVED)) return emptyList()
@@ -168,7 +168,7 @@ internal class ClockProbe {
         }, "ticksnick-clock").apply { isDaemon = true; start() }
     }
 
-    fun stop(): ClockReport {
+    fun stop(): ClockTrace {
         running = false
         source?.close()
         try {
@@ -181,7 +181,7 @@ internal class ClockProbe {
         thread?.interrupt()
         thread?.join(2 * CLOCK_PERIOD_MILLIS)
         val values = synchronized(samples) { samples.toDoubleArray() }
-        return ClockReport(values, ofBase = source?.ofBase ?: true, notMeasured = failure)
+        return ClockTrace(values, ofBase = source?.ofBase ?: true, notMeasured = failure)
     }
 }
 

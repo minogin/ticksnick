@@ -168,7 +168,7 @@ internal object GcPauseClock {
 /**
  * How long the session spent with every thread stopped. See [PauseTracker].
  */
-internal class PauseReport internal constructor(
+internal class Pauses internal constructor(
     /**
      * False when the sampler was not spinning. A parked or sleeping sampler is late on every tick
      * by the scheduler's doing, so its lateness says nothing about the threads it is watching.
@@ -272,6 +272,6 @@ internal class PauseReport internal constructor(
 
     internal companion object {
         /** A session nothing is known about: a report built by hand, with no sampler behind it. */
-        val NONE = PauseReport(measured = true, pausedNanos = 0, pauses = 0, longestNanos = 0, gcNanos = -1)
+        val NONE = Pauses(measured = true, pausedNanos = 0, pauses = 0, longestNanos = 0, gcNanos = -1)
     }
 }

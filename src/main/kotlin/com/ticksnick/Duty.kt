@@ -520,7 +520,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
      * from it. The arithmetic lives there and not here, so that it can be checked without starting
      * a sampler.
      */
-    fun report(
+    fun result(
         slotHits: LongArray,
         slotLabelled: LongArray,
         slotWaiting: LongArray,

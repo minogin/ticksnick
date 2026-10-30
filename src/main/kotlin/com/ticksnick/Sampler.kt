@@ -922,7 +922,7 @@ internal class Sampler(
 
     /** How much of the occupancy this session sampled was CPU. See [DutyCycle]. */
     internal fun duty(): Duty =
-        duty.report(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting, sampleState)
+        duty.result(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting, sampleState)
 
     /**
      * How long this session spent with every thread stopped.
@@ -933,7 +933,7 @@ internal class Sampler(
      *
      * @param gcNanos the JVM's own count of collection pauses over the session, or -1.
      */
-    internal fun pauses(gcNanos: Long): PauseReport = PauseReport(
+    internal fun pauses(gcNanos: Long): Pauses = Pauses(
         measured = wait == WaitStrategy.SPIN,
         pausedNanos = pause.pausedNanos, pauses = pause.pauses, longestNanos = pause.longestNanos,
         gcNanos = gcNanos, confirmedNanos = pause.confirmedNanos,

@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 /** The clock: reading the OS's output, the busy weighting, and what the report and the diff say. */
 class ClockTest {
 
-    private fun report(vararg samples: Double) = ClockReport(samples, ofBase = true, notMeasured = null)
+    private fun report(vararg samples: Double) = ClockTrace(samples, ofBase = true, notMeasured = null)
 
     @Test
     fun `typeperf columns pair each core's clock with its busy time and skip the totals`() {
@@ -55,22 +55,22 @@ class ClockTest {
         assertEquals(emptyList(), report(200.0, 200.0, 200.0, 200.0, 120.0, 200.0, 200.0, 200.0, 200.0, 200.0).careful())
         // Too few samples to say anything.
         assertEquals(emptyList(), report(205.0, 135.0).careful())
-        val mac = ClockReport(DoubleArray(0), ofBase = true, notMeasured = "macOS reads the CPU clock only as root")
+        val mac = ClockTrace(DoubleArray(0), ofBase = true, notMeasured = "macOS reads the CPU clock only as root")
         assertEquals(listOf("clock: not measured - macOS reads the CPU clock only as root"), mac.careful())
-        assertEquals(emptyList(), ClockReport.NOT_RECORDED.careful())
+        assertEquals(emptyList(), ClockTrace.NOT_RECORDED.careful())
     }
 
     @Test
     fun `the diff compares the two runs' clocks and warns when they differ`() {
         val fast = report(205.0, 205.0, Double.NaN, 205.0)
         val slow = report(135.0, 135.0, 135.0)
-        val differ = ClockReport.diffLines(fast, slow)
+        val differ = ClockTrace.diffLines(fast, slow)
         assertEquals(1, differ.size)
         assertTrue("205% -> 135% of base" in differ[0], differ[0])
-        assertTrue("1.52x" in ClockReport.diffCareful(fast, slow).single())
-        assertEquals(emptyList(), ClockReport.diffCareful(fast, report(200.0, 200.0)))
-        assertTrue("- -> 135%" in ClockReport.diffLines(ClockReport.NOT_RECORDED, slow)[0])
-        assertEquals(emptyList(), ClockReport.diffLines(ClockReport.NOT_RECORDED, ClockReport.NOT_RECORDED))
+        assertTrue("1.52x" in ClockTrace.diffCareful(fast, slow).single())
+        assertEquals(emptyList(), ClockTrace.diffCareful(fast, report(200.0, 200.0)))
+        assertTrue("- -> 135%" in ClockTrace.diffLines(ClockTrace.NOT_RECORDED, slow)[0])
+        assertEquals(emptyList(), ClockTrace.diffLines(ClockTrace.NOT_RECORDED, ClockTrace.NOT_RECORDED))
     }
 
     @Test

@@ -738,11 +738,11 @@ class Run internal constructor(
     /** Samples caught inside a coarse execution at all — the population [staleContextHits] is part of. */
     internal val coarseSampleHits: Long = 0,
     /** How long every thread was stopped, which is what stretches [stepNanos] past the requested step. */
-    internal val pause: PauseReport = PauseReport.NONE,
+    internal val pause: Pauses = Pauses.NONE,
     /** The coarse tree: the roots, each with what ran under it. Empty when no coarse label was placed. */
     internal val coarseTree: List<CoarseNode> = emptyList(),
-    /** The CPU clock over the session; [ClockReport.NOT_RECORDED] for a run saved before it was. */
-    internal val clock: ClockReport = ClockReport.NOT_RECORDED,
+    /** The CPU clock over the session; [ClockTrace.NOT_RECORDED] for a run saved before it was. */
+    internal val clock: ClockTrace = ClockTrace.NOT_RECORDED,
     /** How the sampler waited; null for a run saved before it was recorded. See [samplingLine]. */
     internal val wait: WaitStrategy? = null,
     /** The step asked for at `start()`, in nanoseconds; 0 for a run saved before it was recorded. */

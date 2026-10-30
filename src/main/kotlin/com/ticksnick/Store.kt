@@ -271,12 +271,12 @@ internal object RunStore {
             spanNanos = m["duty.spanNanos"]?.toLong() ?: 0L,
             processors = m["duty.processors"]?.toInt() ?: 0,
         )
-        val pause = PauseReport(
+        val pause = Pauses(
             measured = bool("pause.measured"), pausedNanos = long("pause.pausedNanos"),
             pauses = long("pause.pauses"), longestNanos = long("pause.longestNanos"),
             gcNanos = long("pause.gcNanos"), confirmedNanos = long("pause.confirmedNanos"),
         )
-        val clock = if ("clock.ofBase" !in m) ClockReport.NOT_RECORDED else ClockReport(
+        val clock = if ("clock.ofBase" !in m) ClockTrace.NOT_RECORDED else ClockTrace(
             samples = str("clock.samples").split(' ').filter { it.isNotEmpty() }
                 .map { if (it == "-") Double.NaN else it.toDouble() }.toDoubleArray(),
             ofBase = bool("clock.ofBase"),

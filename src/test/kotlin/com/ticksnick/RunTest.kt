@@ -53,8 +53,8 @@ class RunTest {
         check("mismatch", mismatchMessage("a", "b"))
         check("stale", staleContextMessage("req", 997, 0.42))
         // And a report carrying as many of the optional blocks at once as one can.
-        check("render", loadedReport().render())
-        check("render(legend)", loadedReport().render(legend = true))
+        check("render", loadedRun().render())
+        check("render(legend)", loadedRun().render(legend = true))
         assertTrue(
             offenders.isEmpty(),
             "non-ASCII in printed output:\n" + offenders.joinToString("\n")
@@ -62,7 +62,7 @@ class RunTest {
     }
 
     /** A report with the warnings, the duty block and both tables all present at once. */
-    private fun loadedReport(): Run {
+    private fun loadedRun(): Run {
         val fine = OperationStat(0, "work", 100, 1_000_000, 60, 3, 20, 10, 100)
         val c = CoarseStat(
             0, "request", 10, 10_000_000, 100, 2_000_000, Spans(),
@@ -81,7 +81,7 @@ class RunTest {
             untrackedSlots = 3, reclaimedSlots = 4, idleWaitingHits = 5,
             coarse = listOf(c), openContextsAtEnd = 1, labelledOutsideCoarse = 60,
             staleContextHits = 20, coarseSampleHits = 100,
-            pause = PauseReport(true, 90_000_000, 3, 60_000_000, gcNanos = 10_000_000),
+            pause = Pauses(true, 90_000_000, 3, 60_000_000, gcNanos = 10_000_000),
         )
     }
 
@@ -431,7 +431,7 @@ class RunTest {
 
     @Test
     fun `a profile survives a round trip through a file`() {
-        val p = loadedReport()
+        val p = loadedRun()
         val path = Files.createTempFile("ticksnick", RUN_EXTENSION)
         try {
             RunStore.save(p, path)
@@ -444,7 +444,7 @@ class RunTest {
 
     @Test
     fun `a diff matches operations by name and marks unchanged calls`() {
-        val text = OneRunDiff(loadedReport(), loadedReport(), "a", "b").render()
+        val text = OneRunDiff(loadedRun(), loadedRun(), "a", "b").render()
         assertTrue("work" in text, "the fine operation is missing: $text")
         assertTrue("1,000,000 =" in text, "equal calls should read as =: $text")
         assertTrue("a -> b" in text, "the names are missing: $text")

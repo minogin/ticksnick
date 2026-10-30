@@ -147,7 +147,9 @@ execution, with its coarse children and every thread that ran under it. It is co
 It sits beside `Mean` and is per execution for the same reason: it can be compared between runs of
 different sizes. It is bytes allocated, not memory held: an operation can allocate gigabytes and
 hold none of it. Each execution includes about 100 bytes of the label's own, and the first execution
-on a path a few KB more, which matters only for an operation that allocates very little.
+on a path a few KB more, which matters only for an operation that allocates very little. A thread
+counts from its first coarse boundary in the session, so an execution already open at `start` misses
+what it allocates up to there, and one still open at `stop` misses what came after its last.
 
 **`slowest:`** appears under an operation registered with a key (`op(X, key = { id }) { }`): its
 longest executions on that path, with their keys.

@@ -38,6 +38,15 @@ class JavaCallerTest {
     }
 
     @Test
+    fun `allocations can be asked for from Java`() {
+        JavaCaller.allocating(1)
+        val profile = JavaCaller.allocating(5)
+        val plan = profile.coarseTree.single { it.name == "java:plan" }
+        val mb = (1 shl 20).toDouble()
+        assertTrue(profile.allocatedPerExecution(plan) in 3 * mb..3 * mb + 4096, "${profile.allocatedPerExecution(plan)}")
+    }
+
+    @Test
     fun `Java saves, loads and diffs a folder`() {
         val folder = Files.createTempDirectory("java-caller")
         val report = JavaCaller.report(JavaCaller.run(1), folder)

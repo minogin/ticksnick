@@ -18,6 +18,7 @@ public final class JavaCaller {
     static final FineEnumOps<Kind> STEP = Profiler.registerFine("java:step", Kind.class);
 
     static long sink;
+    static volatile byte[] held;
 
     private JavaCaller() {
     }
@@ -55,6 +56,20 @@ public final class JavaCaller {
             }
         }
         if (!Profiler.expectBalanced()) throw new AssertionError("a label was left open");
+        return Profiler.stop();
+    }
+
+    /** The setting from Java, through a scope and a pair: 1 MB in the plan and 2 MB in a level inside it. */
+    static Profile allocating(int plans) {
+        Profiler.start(1.0, WaitStrategy.PARK, 0.25, false, true, true);
+        for (int i = 0; i < plans; i++) {
+            try (var plan = Profiler.coarse(PLAN)) {
+                held = new byte[1 << 20];
+                Profiler.enterCoarse(LEVEL.get(0));
+                held = new byte[2 << 20];
+                Profiler.exitCoarse(LEVEL.get(0));
+            }
+        }
         return Profiler.stop();
     }
 

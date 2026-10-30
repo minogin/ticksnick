@@ -477,6 +477,10 @@ object Profiler {
 
     private var allocationsMissing = false
 
+    /** Whether this JVM can report allocated bytes. A field, so that a test can be a JVM that cannot. */
+    @JvmField
+    internal var allocationsAvailable = AllocationClock.available
+
     private var startedAt: Long = 0
     /** The CPU clock over the session. See [ClockReport]. */
     private var clock: ClockProbe? = null
@@ -1080,7 +1084,9 @@ object Profiler {
      *
      * [allocations] counts the bytes allocated under each coarse path, for the report's `Allocated`
      * column. Off by default: it adds two reads to every coarse execution. Where the JVM cannot
-     * report them the session runs without, and the report says so.
+     * report them the session runs without, and the report says so. A thread counts from its first
+     * coarse boundary in the session, so an execution already open at [start] misses what it
+     * allocates up to that boundary, and one still open at [stop] misses what came after its last.
      */
     @JvmStatic
     @JvmOverloads
@@ -1094,8 +1100,8 @@ object Profiler {
     ) {
         Logo.once()
         check(sampler == null) { "already sampling" }
-        allocationSession = if (allocations && AllocationClock.available) ++sessions else 0
-        allocationsMissing = allocations && !AllocationClock.available
+        allocationSession = if (allocations && allocationsAvailable) ++sessions else 0
+        allocationsMissing = allocations && !allocationsAvailable
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()

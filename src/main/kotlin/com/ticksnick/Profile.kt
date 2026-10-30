@@ -1,5 +1,7 @@
 package com.ticksnick
 
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.min
@@ -93,8 +95,14 @@ internal fun bytes(v: Double): String {
         x /= 1024
         u++
     }
-    val digits = if (u == 0 || x >= 100) 0 else if (x >= 10) 1 else 2
-    return String.format(Locale.ROOT, "%.${digits}f %s", x, units[u])
+    fun digits(of: Double) = if (u == 0 || of >= 100) 0 else if (of >= 10) 1 else 2
+    // Rounded before it is printed, so that 9.999 reads 10.0 and 1,023.9 KB reads 1.00 MB.
+    x = BigDecimal(x).setScale(digits(x), RoundingMode.HALF_UP).toDouble()
+    if (x >= 1024 && u < units.size - 1) {
+        x = 1.0
+        u++
+    }
+    return String.format(Locale.ROOT, "%.${digits(x)}f %s", x, units[u])
 }
 
 /** `before -> after` of two byte figures, a dash on a side that has none. */
@@ -1637,7 +1645,7 @@ class Profile internal constructor(
                 "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
         )
-        appendLine("-".repeat(COARSE_WIDTH + coarseExtra))
+        appendLine("-".repeat(coarseRuleWidth))
         val byType = coarse.associateBy { it.type }
         val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
         val walls = wallsOf()
@@ -1803,7 +1811,7 @@ class Profile internal constructor(
         for (root in coarseTree.sortedWith(heaviest)) {
             node(root, 0, null)
         }
-        appendLine("-".repeat(COARSE_WIDTH + coarseExtra))
+        appendLine("-".repeat(coarseRuleWidth))
         // The key, once and next to the rows that need it, as the star's is under the own-time table.
         if (anySplit) appendLine(
             "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
@@ -1848,7 +1856,7 @@ class Profile internal constructor(
                     )
                 )
             }
-            appendLine("-".repeat(COARSE_WIDTH + coarseExtra))
+            appendLine("-".repeat(coarseRuleWidth))
         }
         // A context made by hand rather than by the hook has no path and is in no tree. Its type
         // still has its per-type figures; said here so it is not lost.

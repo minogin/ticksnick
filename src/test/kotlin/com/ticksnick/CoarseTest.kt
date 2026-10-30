@@ -424,6 +424,7 @@ class CoarseTest {
         /** The tree; by default every operation is a root with no children. */
         tree: List<CoarseNode> = coarse.map { node(it) },
         fineName: String = "fine",
+        allocations: Boolean = false,
     ) = Profile(
         operations = listOf(OperationStat(0, fineName, labelled, labelled, 0, 0, 0, 0, labelled)),
         idleHits = 0,
@@ -444,6 +445,7 @@ class CoarseTest {
         staleContextHits = staleContextHits,
         coarseSampleHits = coarseSampleHits,
         coarseTree = tree,
+        allocations = allocations,
     )
 
     @Test
@@ -562,6 +564,32 @@ class CoarseTest {
         assertEquals(
             listOf("req"), report(coarse = listOf(settled), labelled = 36_000).coarseTooSmall().map { it.name }
         )
+    }
+
+    // --- the Allocated column ---------------------------------------------------------
+
+    /** 1.2 us clears 20 x 45 ns and not 20 x (45 + 27) ns: the same operation, the same run, one setting apart. */
+    @Test
+    fun `counting allocations flags an operation the floor would otherwise pass`() {
+        val c = stat(count = 1_000_000, sumNanos = 1_200_000_000, hits = 1_000, running = 1_000)
+        assertTrue(report(listOf(c)).coarseTooSmall().isEmpty())
+
+        val counted = report(listOf(c), allocations = true)
+        assertEquals(listOf("req"), counted.coarseTooSmall().map { it.name })
+        assertTrue("a context costs about 72 ns" in counted.render(), counted.render())
+    }
+
+    /** A profile saved without own time splits a leaf by its samples, a row of its own format. */
+    @Test
+    fun `a split row stays in line with the column on`() {
+        val query = stat(count = 3, sumNanos = 3_000_000_000, hits = 0, running = 0, inclusive = 3000, runningInclusive = 3000, name = "query")
+        val fine = LongArray(MAX_OPERATIONS + 1).also { it[0] = 3000 }
+        val lines = report(listOf(query), labelled = 3000, tree = listOf(node(query, fine = fine)), allocations = true).render().lines()
+
+        val head = lines.first { it.startsWith("Coarse operation") }
+        assertTrue("Allocated" in head, head)
+        val row = lines.first { it.trimStart().startsWith("- fine") }
+        assertEquals(head.indexOf("% parent") + "% parent".length, row.trimEnd().length, "out of line: $row")
     }
 
     // --- the name column -------------------------------------------------------------

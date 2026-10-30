@@ -144,6 +144,7 @@ you cannot fix. The leaks are still counted and reported.
 - `allocations` (false): count the bytes allocated under each coarse operation, for the report's
   `Allocated` column. It adds about 30 ns to each coarse execution. It needs a JVM that reports
   them, as HotSpot does; on one that does not, the session runs without and the report says so.
+- `tags` (none): what the run cannot say by itself, see [Tags and setup](#tags-and-setup).
 
 ### From Java
 
@@ -168,24 +169,45 @@ System.out.println(TickSnick.load(Path.of("profiles", "baseline")).render());
 - `Profiler.fine(LOOKUP, keys.size())` is `op(LOOKUP, times = keys.size) { }`.
 - Families: `LEVEL.get(depth)`, and `Profiler.registerCoarse("resolve", Kind.class)` for an enum.
 - Settings by position, from the left: `Profiler.start(1.0, WaitStrategy.PARK)`.
+- Tags with `Profiler.tag("warmups", 2)` after `start`.
 - `enterFine` and `exitFine` around a block need a `finally`, as a lock does.
 
-## Runs and folders
+## Runs and profiles
 
-A JVM run differs from the next one: the CPU clock, the JIT and the heap layout all vary. One run
-cannot say how much. So TickSnick compares sets of runs, not single runs.
+A **profile** is how a program behaves: same code, same workload, same setup. A **run** is one
+measurement of it, what one session leaves behind. One JVM differs from the next: the CPU clock, the
+JIT and the heap layout all vary, and one run cannot say how much. So a profile is built from several
+runs, and on disk it is a folder of them.
 
-- `Profile.save(folder)` writes the run as a new file in the folder, named by the time. A save never
-  overwrites another run.
-- **A folder holds one version of the code.** Save changed code to a new folder. If a run should not
-  count, move it out of the folder.
-- `TickSnick.load(folder).render()` reports a folder of several runs as one: every figure is the
-  mean of the runs, with its 95% interval.
-- `TickSnick.diff(before, after)` gives each change its 95% interval. It says `faster` or `slower`
-  only when the whole interval is on one side of zero.
+- `Profiler.stop()` returns the run. `save(folder)` writes it as a new `.tsr` file in the folder,
+  named by the time. A save never overwrites another run.
+- **A folder holds one profile.** Save a run that differs in code, workload or setup to a new folder.
+  If a run should not count, move it out of the folder. Each run should come from its own JVM.
+- `TickSnick.load(folder).render()` reports the profile: every figure is the mean of the runs, with
+  its 95% interval.
+- `TickSnick.diff(before, after)` compares two profiles and gives each change its 95% interval. It
+  says `faster` or `slower` only when the whole interval is on one side of zero. Which of code,
+  workload or setup differs between the two is the question it answers.
 
 A single run renders as a report of its own. It warns that its times have no interval. Its shares of
 the parent are still reliable.
+
+## Tags and setup
+
+A run reads its own setup at `start`: the Java version, the JVM, the OS, the CPU, the processors, the
+heap, the collector and the `-X` and `-XX` flags. It cannot see what the program did before `start`,
+or which workload it was given. Tags say that:
+
+```kotlin
+Profiler.start(tags = mapOf("warmups" to 2, "batches" to 3, "roots" to "org.apache.*"))
+Profiler.tag("threads", pool.size)   // known later, or from Java
+```
+
+A report prints both under its warnings. TickSnick warns but does not refuse: when the runs of a
+folder differ in a tag or in the setup, the report lists the values, `warmups: 1, 2; batches: 3-10`,
+and one `CAREFUL` line names them. A diff shows what differs between its two profiles, and warns only
+when one of them is mixed. Tags and setup are saved in the `.tsr` file, so nothing secret belongs in a
+tag.
 
 The same from the command line, with the jar and the Kotlin standard library on the classpath:
 

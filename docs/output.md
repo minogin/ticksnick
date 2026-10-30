@@ -46,13 +46,32 @@ The common ones:
 - `Thread-time%: may be off by up to N pp` and the `Runnable` warnings - some labelled time was not
   spent on a CPU, so a share of time may differ from a share of CPU. The lines under the warning say
   why: threads waiting for a core, or blocking I/O and native calls.
+- `runs: they differ in ...` - the runs of a folder disagree on a tag or on the setup, so they are not
+  one profile. Move a run that differs out of the folder. It is always the last warning.
+- `runs: N of M came from one JVM` - two sessions of one JVM are not independent, so the interval
+  reads too narrow.
+
+Warnings go up. A report over several runs shows each run's own warnings, and the same warning from
+several runs is one line ending in `(2 of 4 runs)`. A diff shows the warnings of both its profiles,
+`(2 of 4 runs in 'naive')`.
+
+### Tags and Setup
+
+```
+Tags          warmups: 2; batches: 3; roots: org.apache.*
+Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; Processors: 14; Heap: 18 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00 ms; Wait: SPIN
+```
+
+**Tags** are what the program said about the run. **Setup** is what the run read by itself, and how it
+measured. When runs differ, each name lists its values: `warmups: 1, 2; batches: 3-10`. A run with no
+value for a name shows `-`.
 
 ### The header
 
 **Wall time** is the length of the session: **active** time plus **paused** time. Paused time is
 when every thread was stopped, mostly by GC: ticks where the sampler woke a whole interval late and
 the JVM confirms a collection. No samples are taken in a pause, so the fine table covers active time
-only. The coarse table is timed, so a span includes any pause inside it.
+only. The coarse table is timed, so an execution's time includes any pause inside it.
 
 **Cores** is how many cores were busy on average, and with what: the threads that entered a label,
 the rest of the process (GC, the sampler, the JIT) and its parts. Here four workers kept 2.85 cores
@@ -170,7 +189,7 @@ passedOn                   |          6.00%      24.9 s          100% / 0%   222
 ```
 
 One row per label, across the whole run, in its **own** time: time inside it and inside no label
-nested in it. A row marked `*` is a coarse operation's own work; its full span is in the table
+nested in it. A row marked `*` is a coarse operation's own work; its full execution is in the table
 above. `(no operation)` is time on profiled threads under no label.
 
 **Load** - what the time went to.
@@ -214,8 +233,8 @@ each.
 
 ## Several runs
 
-A folder is one version of the code, and each file in it is one run, one JVM. With two runs or more,
-every figure is the mean of the runs with its 95% interval:
+A folder is one profile: same code, same workload, same setup. Each file in it is one run, one JVM.
+With two runs or more, every figure is the mean of the runs with its 95% interval:
 
 ```
 Runs          4 runs of 'naive', one JVM each: every figure below is their mean, +- its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
@@ -250,13 +269,23 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
   run.
 
 The fine table over runs follows, with Thread-time, Per call and Calls. To see one run's fine rows
-under each coarse row, and its warnings, render a folder that holds that run alone.
+under each coarse row, render a folder that holds that run alone.
 
 ## The diff
 
-`TickSnick.diff(before, after)` compares every run of one folder with every run of the other: each
-figure is the mean of its side's runs, and the change has a 95% interval by Welch's t, which does not
-assume the two sides vary alike.
+`TickSnick.diff(before, after)` compares two profiles, every run of one folder with every run of the
+other: each figure is the mean of its side's runs, and the change has a 95% interval by Welch's t,
+which does not assume the two sides vary alike.
+
+What differs between the two is shown and is not a warning, because it is the question the diff
+answers. `Tags` lists every tag, and `Setup` only what differs:
+
+```
+Tags          step: naive -> centralEdges; roots: org.apache.* =; batches: 3 =
+Setup         Heap: 12 GB -> 18 GB
+```
+
+A warning about either profile is repeated here, and that includes a profile whose runs are mixed.
 
 ```
 Diff          naive (4 runs) -> centralEdges (4 runs)

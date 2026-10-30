@@ -473,6 +473,12 @@ object Profiler {
     @JvmField
     internal var allocationSession = 0
 
+    /** What this session read about the JVM at [start]. */
+    private var setup = Setup.NONE
+
+    /** What the user said about this session, in the order they said it. */
+    private val sessionTags = LinkedHashMap<String, String>()
+
     private var sessions = 0
 
     private var allocationsMissing = false
@@ -1087,6 +1093,9 @@ object Profiler {
      * report them the session runs without, and the report says so. A thread counts from its first
      * coarse boundary in the session, so an execution already open at [start] misses what it
      * allocates up to that boundary, and one still open at [stop] misses what came after its last.
+     *
+     * [tags] say what the run cannot say by itself, `tags = mapOf("warmups" to 2, "batches" to 3)`:
+     * they print in the report, and the runs of a folder should agree on them. See [tag].
      */
     @JvmStatic
     @JvmOverloads
@@ -1097,9 +1106,15 @@ object Profiler {
         strict: Boolean = true,
         sampleState: Boolean = true,
         allocations: Boolean = false,
+        tags: Map<String, Any> = emptyMap(),
     ) {
         Logo.once()
         check(sampler == null) { "already sampling" }
+        setup = Setup.read()
+        synchronized(sessionTags) {
+            sessionTags.clear()
+            tags.forEach { (name, value) -> sessionTags[name] = value.toString() }
+        }
         allocationSession = if (allocations && allocationsAvailable) ++sessions else 0
         allocationsMissing = allocations && !allocationsAvailable
         startedAt = System.nanoTime()
@@ -1110,6 +1125,16 @@ object Profiler {
         sampler = Sampler((stepMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
             .also { it.start() }
         clock = ClockProbe().also { it.start() }
+    }
+
+    /**
+     * Adds a tag to this session: for Java, where [start]'s `tags` comes after every other argument,
+     * and for a value known only once the session is running. The same name again replaces it.
+     */
+    @JvmStatic
+    fun tag(name: String, value: Any) {
+        check(sampler != null) { "not sampling" }
+        synchronized(sessionTags) { sessionTags[name] = value.toString() }
     }
 
     /** Stops sampling and returns what was collected. */
@@ -1208,6 +1233,8 @@ object Profiler {
             askedStepNanos = s.stepNanos,
             allocations = allocations,
             allocationsMissing = allocationsMissing,
+            setup = setup,
+            tags = synchronized(sessionTags) { sessionTags.toMap() },
         )
     }
 }

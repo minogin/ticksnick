@@ -99,7 +99,8 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
 
     fun render(): String =
         if (before.runs.size == 1 && after.runs.size == 1)
-            OneRunDiff(before.runs[0], after.runs[0], before.runName(0), after.runName(0)).render(careful = listOf(ONE_RUN_DIFF_CAREFUL))
+            OneRunDiff(before.runs[0], after.runs[0], before.runName(0), after.runName(0))
+                .render(careful = listOf(ONE_RUN_DIFF_CAREFUL) + before.warnings(named = true) + after.warnings(named = true))
         else across()
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
@@ -121,6 +122,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         appendLine(row("Diff", "${before.name} (${before.described()}) -> ${after.name} (${after.described()})"))
         val rootName = (after.root() ?: before.root())?.name
         carefulBlock(careful(rootName))
+        factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
         appendLine(
             row(
                 "", "each side the mean of its runs, one JVM each; the change +- its 95% interval (Welch's t); " +
@@ -168,8 +170,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             )
         for (side in listOf(before, after)) {
             if (side.runs.size == 1) lines += "times: 1 run of '${side.name}', no interval - a change may be noise and no row gets a verdict; run it again for one"
-            val root = rootName?.let { side.matched(side.tree(), it) }
-            lines += side.carefulLines(root, where = " in '${side.name}'")
+            lines += side.warnings(named = true)
         }
         if (rootName != null) {
             fun countsOf(side: Profile) = side.matched(side.tree(), rootName).let { m -> m.present.map { m.nodes[it]!!.count } }.distinct()

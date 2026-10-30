@@ -150,7 +150,7 @@ class Profile internal constructor(internal val name: String, internal val files
      */
     fun render(): String {
         Logo.once()
-        return if (runs.size == 1) runs[0].render(careful = listOf(ONE_RUN_CAREFUL.format(name))) else across()
+        return if (runs.size == 1) runs[0].render(careful = listOf(ONE_RUN_CAREFUL.format(name)) + warnings()) else across()
     }
 
     /** One coarse row over the runs: the node at this path in each, null where a run has none. */
@@ -260,7 +260,8 @@ class Profile internal constructor(internal val name: String, internal val files
             )
         )
         val root = root()
-        carefulBlock(carefulLines(root))
+        carefulBlock(warnings())
+        factLines(tagMaps, setupMaps)
         runList()
         val wall = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
         val active = Estimate(runs.map { it.activeNanos.toDouble() })
@@ -278,15 +279,58 @@ class Profile internal constructor(internal val name: String, internal val files
         coarseAcross()
         fineAcross()
         appendLine()
-        appendLine("  each run's own report, with its fine rows under every coarse row and its warnings: render a folder holding that run alone")
+        appendLine("  each run's own report, with its fine rows under every coarse row: render a folder holding that run alone")
         appendLine("=".repeat(RUNS_WIDTH + maxOf(coarseExtra, fineExtra)))
     }
 
+    /** Each run's tags, one map per run. */
+    internal val tagMaps: List<Map<String, String>> get() = runs.map { it.tags }
+
+    /** Each run's facts, one map per run that has any: a run saved without a setup does not say. */
+    internal val setupMaps: List<Map<String, String>> get() = runs.filter { it.setup.facts.isNotEmpty() }.map { it.facts }
+
     /**
-     * What makes the interval mean something other than the code's own noise: runs that do not look
-     * like one setup, and a clock that was not the same in all of them.
+     * **Every warning about this profile**, worst first. The one place they come from: a report prints
+     * them, and a diff prints them for each of its sides, because a diff is only as good as the two
+     * profiles in it. Each run's own come up from [Run.warnings], one line for those that read the same.
+     * [named] says whose they are, for a diff.
+     *
+     * What makes the interval mean something other than chance comes first, since every figure below
+     * rests on it, and the runs' own after it. The line that the runs differ is last and one line
+     * however many names it lists: a mix can be meant, so it must not push out a warning that is not.
      */
-    internal fun carefulLines(root: Matched?, where: String = ""): List<String> {
+    internal fun warnings(named: Boolean = false): List<String> {
+        val where = if (named) " in '$name'" else ""
+        val mixed = mixedNames(tagMaps) + mixedNames(setupMaps)
+        return intervalWarnings(root(), where) + runWarnings(where) + if (mixed.isEmpty()) emptyList() else listOf(
+            "runs$where: they differ in ${mixed.joinToString(", ")} - " +
+                    "a folder is same code, same workload, same setup; move a run that differs out of it"
+        )
+    }
+
+    /** Each run's own warnings, the same one once, with how many runs said it. */
+    private fun runWarnings(where: String): List<String> {
+        val said = LinkedHashMap<String, Int>()
+        for (run in runs) {
+            val failure = run.failure?.let { "profiling stopped: $it - this run's numbers are not a result" }
+            for (w in listOfNotNull(failure) + run.warnings()) said.merge(w, 1, Int::plus)
+        }
+        return said.map { (warning, count) ->
+            val place = when {
+                runs.size > 1 -> " ($count of ${runs.size} runs$where)"
+                where.isEmpty() -> ""
+                else -> " (${where.trim()})"
+            }
+            val lines = warning.lines()
+            (listOf(lines.first() + place) + lines.drop(1)).joinToString("\n")
+        }
+    }
+
+    /**
+     * What makes the interval mean something other than chance: runs that do not look like one setup,
+     * a clock that was not the same in all of them, and runs of one JVM, which are not independent.
+     */
+    private fun intervalWarnings(root: Matched?, where: String): List<String> {
         val lines = mutableListOf<String>()
         if (root != null) {
             val counts = runs.indices.map { root.nodes[it]?.count ?: 0L }
@@ -302,6 +346,9 @@ class Profile internal constructor(internal val name: String, internal val files
                 "clock$where: ${runs[0].clock.format(lo)} to ${runs[0].clock.format(hi)} across the runs - a run's time " +
                         "follows it and the interval includes that; hold the clock still (turbo off) for a tighter one"
         }
+        val shared = runs.mapNotNull { it.setup.jvm }.groupingBy { it }.eachCount().values.filter { it > 1 }.sum()
+        if (shared > 0) lines +=
+            "runs$where: $shared of ${runs.size} came from one JVM - the interval counts them as independent, so it reads too narrow"
         return lines
     }
 

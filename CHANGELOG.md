@@ -4,6 +4,29 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 ## Unreleased
 
+### Runs and profiles
+
+- `Profiler.stop()` returns a `Run`, which was `Profile`. `TickSnick.load(folder)` returns a `Profile`,
+  which was `ProfileRuns`. A profile is how a program behaves, and a run is one measurement of it.
+- Saved runs are `.tsr` files and start with `ticksnick-run 3`. Older files are refused.
+
+### Tags and setup
+
+- `Profiler.start(tags = mapOf("warmups" to 2))` and `Profiler.tag(name, value)` say what a run cannot
+  say by itself.
+- A run saves its setup: Java version, JVM, OS, CPU, processors, heap, collector, `-X` and `-XX` flags,
+  and the JVM's identity.
+- Every report prints `Tags` and `Setup` lines under its warnings. A diff prints every tag and what
+  differs in the setup.
+- A folder whose runs differ in a tag, the setup, the sampling interval, the wait strategy or
+  `allocations` gets one `CAREFUL` line, last, and runs of one JVM get another.
+
+### Warnings
+
+- The report over runs and both diffs show each run's own warnings, which only the report of one run
+  did. The same warning from several runs is one line that says how many.
+- A diff shows the warnings of both its profiles, each naming its profile.
+
 ### Callable from Java
 
 - `Profiler` and `TickSnick` are called statically: `Profiler.start()`, not `Profiler.INSTANCE`.

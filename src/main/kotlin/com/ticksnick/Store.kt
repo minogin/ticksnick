@@ -119,6 +119,18 @@ internal object RunStore {
         if (p.allocations) line("allocations", true)
         if (p.allocationsMissing) line("allocationsMissing", true)
 
+        line("tags", p.tags.size)
+        p.tags.entries.forEachIndexed { i, (name, value) ->
+            text("tag.$i.name", name)
+            text("tag.$i.value", value)
+        }
+        line("setup", p.setup.facts.size)
+        p.setup.facts.entries.forEachIndexed { i, (name, value) ->
+            text("setup.$i.name", name)
+            text("setup.$i.value", value)
+        }
+        text("setup.jvm", p.setup.jvm)
+
         line("operations", p.operations.size)
         p.operations.forEachIndexed { i, o ->
             val k = "op.$i."
@@ -270,6 +282,11 @@ internal object RunStore {
             ofBase = bool("clock.ofBase"),
             notMeasured = text("clock.notMeasured"),
         )
+        // Optional: a run saved without them has no tags and no setup, and says nothing about either.
+        fun pairs(key: String, each: String): Map<String, String> = (0 until (m[key]?.toInt() ?: 0)).associate { i ->
+            (text("$each.$i.name") ?: "") to (text("$each.$i.value") ?: "")
+        }
+        val setup = pairs("setup", "setup").let { if (it.isEmpty()) Setup.NONE else Setup(it, text("setup.jvm")) }
         val operations = (0 until int("operations")).map { i ->
             val k = "op.$i."
             OperationStat(
@@ -337,6 +354,8 @@ internal object RunStore {
             askedStepNanos = m["sampler.askedStepNanos"]?.toLong() ?: 0L,
             allocations = m["allocations"]?.toBoolean() ?: false,
             allocationsMissing = m["allocationsMissing"]?.toBoolean() ?: false,
+            setup = setup,
+            tags = pairs("tags", "tag"),
         )
     }
 

@@ -751,7 +751,19 @@ class Run internal constructor(
     internal val allocations: Boolean = false,
     /** Whether it was asked to on a JVM that cannot say. */
     internal val allocationsMissing: Boolean = false,
+    /** What the session read about the JVM. [Setup.NONE] for a run saved without one. */
+    internal val setup: Setup = Setup.NONE,
+    /** What the user said about the session, in the order they said it. */
+    internal val tags: Map<String, String> = emptyMap(),
 ) {
+    /** [setup] and how the session measured: what the runs of a folder should agree on, by name. */
+    internal val facts: Map<String, String>
+        get() = setup.facts + buildMap {
+            if (askedStepNanos > 0) put("Sampling", duration(askedStepNanos.toDouble()))
+            wait?.let { put("Wait", it.name) }
+            if (allocations) put("Allocated", "counted")
+        }
+
     /** False when a fatal finding stopped the session. */
     internal val ok: Boolean get() = failure == null
 
@@ -2030,7 +2042,7 @@ class Run internal constructor(
      * All in one place and before any table, not where each is computed: printed there, a warning
      * about a fine operation would sit under the coarse table and read as one about a coarse one.
      */
-    private fun warnings(): List<String> =
+    internal fun warnings(): List<String> =
         // Ordered by what each costs the reader: numbers that are missing or inflated first, then
         // what limits the whole run, then labels in the wrong tier, which are honest measurements
         // of the wrong-sized thing.
@@ -2089,10 +2101,10 @@ class Run internal constructor(
 
     /**
      * @param legend every column explained, at the bottom. Off by default: see [renderLegend].
-     * @param careful warnings from the caller, in a `CAREFUL` section under the logo: [Profile]'s
-     * line that one run has no interval.
+     * @param careful the warnings, in a `CAREFUL` section under the logo: [Profile.warnings] and the
+     * line that one run has no interval, when this run is a profile's only one.
      */
-    internal fun render(legend: Boolean = false, careful: List<String> = emptyList()): String = buildString {
+    internal fun render(legend: Boolean = false, careful: List<String> = warnings()): String = buildString {
         if (failure != null) {
             appendLine("!".repeat(pageWidth))
             appendLine("PROFILING STOPPED - these numbers were not going to be right:")
@@ -2108,7 +2120,8 @@ class Run internal constructor(
         // first TickSnick call, see [Logo].
         appendLine("=".repeat(pageWidth))
         // Every warning, before any number: see [carefulBlock] and [warnings].
-        carefulBlock(careful + warnings())
+        carefulBlock(careful)
+        factLines(listOf(tags), listOf(facts))
         // One line: wall time split into active and paused. The report shows what matters for
         // optimising performance or says the report is unreliable. The split is the first - GC
         // tuning is about those figures. Mechanisms (the step, the clock, the windows) and lines

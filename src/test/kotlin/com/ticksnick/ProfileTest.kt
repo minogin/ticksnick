@@ -101,13 +101,13 @@ class ProfileTest {
         operations = listOf(OperationStat(0, "work", 10, 10, 0, 0, 0, 0, 10)), idleHits = 0, ticks = 1_001,
         samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 1,
         duty = DutyReport(
-            labelledDuty = 0.99, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
+            labelledDuty = 0.999, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,
-            cpuNanos = 990_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.99, maxWindowDuty = 0.99,
+            cpuNanos = 999_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.999, maxWindowDuty = 0.999,
             anomalies = 0, maxSampleNanos = 200_000,
         ),
         coarse = listOf(
-            CoarseStat(0, "runBatch", 3, 1, 1, 1, Spans(), 10, 10, 10, 10, 10, 10, LongArray(MAX_OPERATIONS + 1))
+            CoarseStat(0, "runBatch", 3, 3_000_000_000, 1_000_000_000, 1_000_000_000, Spans(), 10, 10, 10, 10, 10, 10, LongArray(MAX_OPERATIONS + 1))
         ),
         coarseTree = tree,
     )

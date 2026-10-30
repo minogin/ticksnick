@@ -46,6 +46,7 @@ internal class OneRunDiff(
         carefulBlock(
             careful + ClockReport.diffCareful(before.clock, after.clock) + allocationsCareful(listOf(before), listOf(after))
         )
+        factDiffLines(listOf(before.tags), listOf(after.tags), listOf(before.facts), listOf(after.facts))
         // Three lines and not one `wall = active + paused`, so that each carries its change, as every
         // row below does.
         fun headerLine(key: String, a: Double, b: Double): String {

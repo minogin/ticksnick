@@ -35,6 +35,7 @@ class JavaCallerTest {
         assertEquals(3, count("java:level[1]"))
         assertEquals(3, count("java:phase[CHECK]"))
         assertEquals(0, profile.imbalances)
+        assertEquals("3", profile.tags["plans"])
     }
 
     @Test

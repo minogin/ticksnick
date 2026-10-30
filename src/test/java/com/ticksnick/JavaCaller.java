@@ -26,6 +26,7 @@ public final class JavaCaller {
     /** One session through every Java form, {@code plans} times over. */
     static Run run(int plans) {
         Profiler.start(1.0, WaitStrategy.PARK);
+        Profiler.tag("plans", plans);
         for (int i = 0; i < plans; i++) {
             try (var plan = Profiler.coarse(PLAN)) {
                 try (var rule = Profiler.fine(RULE)) {

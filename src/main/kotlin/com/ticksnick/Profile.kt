@@ -123,22 +123,26 @@ internal fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Doub
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
 
 /**
- * Calls per execution of the row above, for a fine row under a coarse one: `x340`, or `x2.5` when
- * the executions did not all make the same number. Blank for a row with no completed execution.
+ * The `Per parent` figure, in every table that has one: [count] per execution of the row above. `340`,
+ * or `2.5` when the executions did not all make the same number; blank with no completed execution.
  */
-internal fun callsPerExecution(calls: Long, executions: Long): String = when {
-    executions <= 0L -> ""
-    calls % executions == 0L -> String.format(Locale.ROOT, "x%,d", calls / executions)
-    calls.toDouble() / executions < 100 -> String.format(Locale.ROOT, "x%.1f", calls.toDouble() / executions)
-    else -> String.format(Locale.ROOT, "x%,.0f", calls.toDouble() / executions)
+internal fun perParentText(count: Long, parentCount: Long): String = when {
+    parentCount <= 0L -> ""
+    count % parentCount == 0L -> String.format(Locale.ROOT, "%,d", count / parentCount)
+    count.toDouble() / parentCount < 100 -> String.format(Locale.ROOT, "%.1f", count.toDouble() / parentCount)
+    else -> String.format(Locale.ROOT, "%,.0f", count.toDouble() / parentCount)
 }
 
-/** `x340 =` when both sides make the same calls per execution, `x340 -> x68` when not, `-` when neither counted them. */
-internal fun perExecutionPair(before: String, after: String): String = when {
-    before.isEmpty() && after.isEmpty() -> "-"
+/** `Per parent` on both sides of a diff: `340 =` when they agree, `340 -> 68` when not, blank when neither has one. */
+internal fun perParentPair(before: String, after: String): String = when {
+    before.isEmpty() && after.isEmpty() -> ""
     before == after -> "$before ="
     else -> "${before.ifEmpty { "-" }} -> ${after.ifEmpty { "-" }}"
 }
+
+/** The same for a coarse row, which is blank in the report at once per parent, so here too when both sides are. */
+internal fun coarsePerParentPair(before: String, after: String): String =
+    if (before == "1" && after == "1") "" else perParentPair(before, after)
 
 /** Whether a label is on something too small for the instrument to describe. See [Profile.tooSmall]. */
 internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double): Boolean =
@@ -1604,7 +1608,7 @@ class Profile internal constructor(
             appendLine("    how many ran at a time under each parent, at its level and above. % parent is of the")
             appendLine("    parent's wall, and the rest of 100% is the parent's own time outside this child")
             appendLine("  parallel is how many of a row's executions ran at a time under the same parent execution,")
-            appendLine("    blank at 1. Read it beside x parent: x4.0 with 2.0 is four started, two at a time")
+            appendLine("    blank at 1. Read it beside Per parent: 4 with 2.0 is four started, two at a time")
             appendLine("  '- name  own' under a row: a fine label in its own time, outside its coarse children, with")
             appendLine("    its own Parallel when one execution ran it on several threads at a time")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
@@ -1640,7 +1644,7 @@ class Profile internal constructor(
         )
         appendLine(
             String.format(
-                Locale.ROOT, coarseRow.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
+                Locale.ROOT, coarseRow.replace("%,11d", "%11s"), "Coarse operation", "Executions", "Per parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
                 if (allocations) String.format(Locale.ROOT, "%${ALLOCATED_COLUMN}s", "Allocated") else "",
                 "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
@@ -1664,14 +1668,11 @@ class Profile internal constructor(
 
         // Against the row above: how many executions per execution of the parent - the loop count -
         // and what part of the parent's wall time this row is. Left blank where there is nothing to
-        // read: a root has no parent, and a child run exactly once per parent execution is x1. Under
+        // read: a root has no parent, and a child run exactly once per parent execution is 1. Under
         // 100%, with the rest the parent's own time outside this child. Wall, not summed durations.
         fun perParent(n: CoarseNode, parent: CoarseNode?): String = when {
-            parent == null || parent.count == 0L || n.count == parent.count -> ""
-            else -> {
-                val x = n.count.toDouble() / parent.count
-                if (x < 100) String.format(Locale.ROOT, "x%.1f", x) else String.format(Locale.ROOT, "x%,.0f", x)
-            }
+            parent == null || n.count == parent.count -> ""
+            else -> perParentText(n.count, parent.count)
         }
 
         fun shareOfParent(n: CoarseNode, parent: CoarseNode?): String = when {
@@ -1679,7 +1680,7 @@ class Profile internal constructor(
             else -> shareText(wall(n) * 100.0 / wall(parent))
         }
 
-        // Beside `x parent`, so the two read as one sentence: 4 per request, 2.0 at a time - more
+        // Beside `Per parent`, so the two read as one sentence: 4 per request, 2.0 at a time - more
         // threads would help. Blank at 1, which is most rows. One decimal: the second of a sampled
         // average is noise. On the row that runs in parallel, not on the forking row, which is not
         // itself parallel.
@@ -1791,7 +1792,7 @@ class Profile internal constructor(
                                 Locale.ROOT, coarseRow.replace("%,11d", "%11s"),
                                 "$indent  $SPLIT_MARK ${r.name}",
                                 if (r.calls >= 0) String.format(Locale.ROOT, "%,d", r.calls) else "own",
-                                if (r.calls >= 0) callsPerExecution(r.calls, n.count) else "",
+                                if (r.calls >= 0) perParentText(r.calls, n.count) else "",
                                 if (r.parallel >= PARALLEL_SHOWN) String.format(Locale.ROOT, "%.1f", r.parallel) else "",
                                 if (timed && caught) duration(r.wallNanos) else "-",
                                 if (r.share.isNaN() || !caught) "" else shareText(r.share * 100), "",
@@ -1822,7 +1823,7 @@ class Profile internal constructor(
                     " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
         if (anyCalls) appendLine(
-            "  on a $SPLIT_MARK row, Executions is its calls on that path and x parent per execution of the row above, both counted;" +
+            "  on a $SPLIT_MARK row, Executions is its calls on that path and Per parent per execution of the row above, both counted;" +
                     " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
         )
         if (allocations) appendLine(
@@ -2413,14 +2414,14 @@ class Profile internal constructor(
         internal const val WIDTH = 168
 
         /** The coarse table alone, drawn to the table rather than to a round number. */
-        internal const val COARSE_WIDTH = 165
+        internal const val COARSE_WIDTH = 167
 
         /**
          * One row of the coarse table: name, executions, per parent and parallel, wall and its share of
          * the parent, paused, mean, the `Allocated` cell - padded by the caller, and empty unless asked
          * for - four durations, the split.
          */
-        internal const val COARSE_ROW = "%-30s %,11d %8s %8s %10s %8s %10s %10s%s %10s %10s %10s %10s %18s"
+        internal const val COARSE_ROW = "%-30s %,11d %10s %8s %10s %8s %10s %10s%s %10s %10s %10s %10s %18s"
 
         /** One row of the fine table, heading and data. The widths are [FINE_COLUMNS]. */
         internal const val FINE_ROW = "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s"

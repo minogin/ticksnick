@@ -66,14 +66,14 @@ internal class ProfileDiff(
             appendLine(
                 String.format(
                     Locale.ROOT, coarseRow,
-                    "Coarse operation", "Wall", "change", "Paused", "Executions", "Allocated"
+                    "Coarse operation", "Wall", "change", "Paused", "Executions", "Per parent", "Allocated"
                 )
             )
             appendLine("-".repeat(DIFF_WIDTH + coarseExtra))
             tree(after.coarseTree, before.coarseTree, 0)
             appendLine("-".repeat(DIFF_WIDTH + coarseExtra))
             if (anyOwn) appendLine(
-                "  $SPLIT_MARK rows are fine labels in a row's own time; Executions on one is its calls per execution of the row, " +
+                "  $SPLIT_MARK rows are fine labels in a row's own time; Per parent on one is its calls per execution of the row, " +
                 "counted, which holds whatever the size of each run"
             )
         }
@@ -115,22 +115,25 @@ internal class ProfileDiff(
         appendLine("=".repeat(DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
     }
 
-    private fun StringBuilder.tree(afterNodes: List<CoarseNode>, beforeNodes: List<CoarseNode>, depth: Int) {
+    private fun StringBuilder.tree(
+        afterNodes: List<CoarseNode>, beforeNodes: List<CoarseNode>, depth: Int,
+        parentBefore: CoarseNode? = null, parentAfter: CoarseNode? = null,
+    ) {
         val indent = "  ".repeat(depth)
         val seen = HashSet<String>()
         for (b in afterNodes.sortedByDescending { wallAfter[it] ?: 0.0 }) {
             val a = beforeNodes.firstOrNull { it.name == b.name }
             seen += b.name
-            node(indent, b.name, a, b)
+            node(indent, b.name, a, b, parentBefore, parentAfter)
             ownRows(indent, a, b)
-            tree(b.children, a?.children ?: emptyList(), depth + 1)
+            tree(b.children, a?.children ?: emptyList(), depth + 1, a, b)
         }
         // Paths that the earlier run had and this one does not: printed under their parent, with
         // nothing on the right, so that a label that was removed is not silently gone.
         for (a in beforeNodes.filter { it.name !in seen }.sortedByDescending { wallBefore[it] ?: 0.0 }) {
-            node(indent, a.name, a, null)
+            node(indent, a.name, a, null, parentBefore, parentAfter)
             ownRows(indent, a, null)
-            tree(emptyList(), a.children, depth + 1)
+            tree(emptyList(), a.children, depth + 1, a, null)
         }
     }
 
@@ -138,9 +141,9 @@ internal class ProfileDiff(
     private var anyOwn = false
 
     /**
-     * The fine labels in a coarse row's own time, on either side: their wall, and their calls per
-     * execution of the row. Totals of two runs that did different amounts of work cannot be compared;
-     * calls per execution can, and `x340 =` says the step did the same work.
+     * The fine labels in a coarse row's own time, on either side, in the report's form: wall, calls,
+     * and calls per execution of the row. Totals of two runs that did different amounts of work cannot
+     * be compared; calls per execution can, and `340 =` says the step did the same work.
      */
     private fun StringBuilder.ownRows(indent: String, a: CoarseNode?, b: CoarseNode?) {
         val ra = a?.let { before.ownRowsOf(it) }.orEmpty()
@@ -152,24 +155,31 @@ internal class ProfileDiff(
             val y = rb.firstOrNull { it.name == name }
             val ta = x?.wallNanos ?: 0.0
             val tb = y?.wallNanos ?: 0.0
+            val ca = ownCalls(x, a)
+            val cb = ownCalls(y, b)
             appendLine(
                 String.format(
                     Locale.ROOT, coarseRow, "$indent  $SPLIT_MARK $name",
                     pair(ta, tb, ta > 0, tb > 0), change(ta, tb, ta > 0 && tb > 0), "",
-                    perExecutionPair(perExecution(x, a), perExecution(y, b)), "",
+                    if (ca == null && cb == null) "own" else counts(ca, cb),
+                    perParentPair(ca?.let { perParentText(it, a!!.count) } ?: "", cb?.let { perParentText(it, b!!.count) } ?: ""),
+                    "",
                 ).trimEnd()
             )
         }
     }
 
-    /** [r]'s calls per execution of [n]: none on a path that counted calls is `x0`; blank where they were not counted. */
-    private fun perExecution(r: Profile.OwnRow?, n: CoarseNode?): String {
-        if (n == null) return ""
+    /** [r]'s calls on [n]: 0 for a label not there on a path that counted calls; null where they were not counted. */
+    private fun ownCalls(r: Profile.OwnRow?, n: CoarseNode?): Long? {
+        if (n == null) return null
         val calls = r?.calls ?: if (n.calls.isNotEmpty()) 0L else -1L
-        return if (calls < 0) "" else callsPerExecution(calls, n.count)
+        return calls.takeIf { it >= 0 }
     }
 
-    private fun StringBuilder.node(indent: String, name: String, a: CoarseNode?, b: CoarseNode?) {
+    private fun perParent(n: CoarseNode?, parent: CoarseNode?): String =
+        if (n == null || parent == null) "" else perParentText(n.count, parent.count)
+
+    private fun StringBuilder.node(indent: String, name: String, a: CoarseNode?, b: CoarseNode?, parentBefore: CoarseNode?, parentAfter: CoarseNode?) {
         val ta = a?.let { wallBefore[it] } ?: Double.NaN
         val tb = b?.let { wallAfter[it] } ?: Double.NaN
         appendLine(
@@ -180,6 +190,7 @@ internal class ProfileDiff(
                 change(ta, tb, a != null && b != null && a.count > 0 && b.count > 0),
                 pair(a?.pausedNanos?.toDouble() ?: 0.0, b?.pausedNanos?.toDouble() ?: 0.0, a != null && a.pausedNanos > 0, b != null && b.pausedNanos > 0),
                 counts(a?.count, b?.count),
+                coarsePerParentPair(perParent(a, parentBefore), perParent(b, parentAfter)),
                 bytesPair(
                     a?.takeIf { before.allocations }?.let { before.allocatedPerExecution(it) } ?: Double.NaN,
                     b?.takeIf { after.allocations }?.let { after.allocatedPerExecution(it) } ?: Double.NaN,
@@ -229,6 +240,6 @@ internal class ProfileDiff(
     companion object {
         const val DIFF_WIDTH = 150
         const val FINE_DIFF_ROW = "%-26s | %21s %16s | %21s | %28s | %24s"
-        const val COARSE_DIFF_ROW = "%-40s | %21s %16s | %21s | %28s"
+        const val COARSE_DIFF_ROW = "%-40s | %21s %16s | %21s | %24s | %14s"
     }
 }

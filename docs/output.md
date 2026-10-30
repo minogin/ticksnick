@@ -76,23 +76,23 @@ mentions it only in `CAREFUL`, when it moved; the reports over runs list it for 
 
 ```
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
-Coarse operation                Executions x parent Parallel     Wall v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
-runBatch                                 3                       82.0 s              4.20 s     27.3 s     27.4 s          -          -     27.6 s      80.0% / 20.0%
-  resolveRoot                       92,667  x30,889      4.0     82.0 s     100%     4.20 s    3.53 ms     602 us    7.50 ms    61.6 ms     434 ms          100% / 0%
-    resolve                        278,001     x3.0              82.0 s     100%     4.20 s    1.18 ms     146 us    2.57 ms    19.0 ms     358 ms          100% / 0%
-      select                       278,001                       42.5 s      52%     3.90 s     611 us    62.7 us    1.27 ms    11.6 ms     348 ms          100% / 0%
-      via                          278,001                       28.1 s      34%     2.99 s     404 us    47.9 us     856 us    6.06 ms     339 ms          100% / 0%
-      reach                        278,001                       10.1 s      12%     1.15 s     145 us    27.8 us     362 us    1.65 ms     166 ms          100% / 0%
+Coarse operation                Executions Per parent Parallel     Wall v % parent     Paused       Mean        p50        p90        p99        Max Runnable / Waiting
+runBatch                                 3                         82.0 s              4.20 s     27.3 s     27.4 s          -          -     27.6 s      80.0% / 20.0%
+  resolveRoot                       92,667     30,889      4.0     82.0 s     100%     4.20 s    3.53 ms     602 us    7.50 ms    61.6 ms     434 ms          100% / 0%
+    resolve                        278,001          3              82.0 s     100%     4.20 s    1.18 ms     146 us    2.57 ms    19.0 ms     358 ms          100% / 0%
+      select                       278,001                         42.5 s      52%     3.90 s     611 us    62.7 us    1.27 ms    11.6 ms     348 ms          100% / 0%
+      via                          278,001                         28.1 s      34%     2.99 s     404 us    47.9 us     856 us    6.06 ms     339 ms          100% / 0%
+      reach                        278,001                         10.1 s      12%     1.15 s     145 us    27.8 us     362 us    1.65 ms     166 ms          100% / 0%
 ```
 
 The table is a tree: each operation sits under the one it ran inside, and its figures cover the
 executions on that path only. The same label on two paths is two rows.
 
 - **Executions** - how many times it ran on this path. Measured, not sampled.
-- **x parent** - executions per execution of the parent: 30,889 `resolveRoot` per `runBatch`, three
-  `resolve` per `resolveRoot`.
+- **Per parent** - executions per execution of the parent: 30,889 `resolveRoot` per `runBatch`, three
+  `resolve` per `resolveRoot`. Blank at one.
 - **Parallel** - how many of its executions ran at the same time under one parent execution. Blank
-  when they ran one at a time. Read it beside `x parent`: `x30,889` with `4.0` is 30,889 started,
+  when they ran one at a time. Read it beside `Per parent`: `30,889` with `4.0` is 30,889 started,
   four at a time.
 - **Wall** - the part of the root's wall time this row took: its durations summed, then divided by
   how many ran at a time, at its level and above. The table is sorted by it (`v`).
@@ -110,20 +110,20 @@ executions on that path only. The same label on two paths is two rows.
 children:
 
 ```
-Coarse operation                Executions x parent Parallel     Wall v % parent     Paused       Mean
-batch                                    1                       1.16 s                   -     1.16 s
-  plan                                  10    x10.0              1.01 s      87%          -     101 ms
-    - rule                           3,400     x340              710 ms      70%                209 us
-    - visit                          1,000     x100              201 ms      20%                201 us      300 ms and 1,100 calls in all, under 2 operations
-    - rare                             500      x50             99.2 ms      10%                198 us
+Coarse operation                Executions Per parent Parallel     Wall v % parent     Paused       Mean
+batch                                    1                         1.16 s                   -     1.16 s
+  plan                                  10         10              1.01 s      87%          -     101 ms
+    - rule                           3,400        340              710 ms      70%                209 us
+    - visit                          1,000        100              201 ms      20%                201 us      300 ms and 1,100 calls in all, under 2 operations
+    - rare                             500         50             99.2 ms      10%                198 us
     - and 1 more, <1% between them
-  cleanup                               10    x10.0              150 ms      13%          -    15.0 ms
-    - visit                            100      x10             98.2 ms      65%                982 us
-    - unlabelled                       own                      49.6 ms      33%
-    - rare                              10       x1                   -
+  cleanup                               10         10              150 ms      13%          -    15.0 ms
+    - visit                            100         10             98.2 ms      65%                982 us
+    - unlabelled                       own                        49.6 ms      33%
+    - rare                              10          1                   -
 ```
 
-- **Executions** - the label's calls on this path, counted. **x parent** - calls per execution of
+- **Executions** - the label's calls on this path, counted. **Per parent** - calls per execution of
   the row above: 340 `rule` per `plan`. It does not depend on how many plans the run made, so it
   can be compared between runs of different sizes.
 - **Wall, % parent** - its time, sampled, and its share of the row's own time.
@@ -135,7 +135,8 @@ batch                                    1                       1.16 s         
 - `and 1 more, <1% between them` folds the small rows. Small rows with calls are drawn while they
   fit within six rows.
 
-A diff shows the `-` rows too, with calls per execution on both sides: `x340 =` is the same work
+A diff leaves out some columns, and what it shows has the same name and form as here, with both
+sides in a cell: `1,360 -> 680` under `Executions`, and `340 =` under `Per parent` for the same work
 per plan. It shows `Allocated` when a side counted it, and warns when only one did.
 
 Counting the calls per path adds to each coarse execution a little for every registered fine

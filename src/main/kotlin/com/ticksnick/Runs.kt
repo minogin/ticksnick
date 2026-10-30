@@ -196,18 +196,29 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
     }
 
     /**
-     * Calls per execution of [m] for one fine label, [rows] from [ownOf]: one figure when every run
-     * agrees, `~` their mean when not, blank where no run counted them.
+     * One fine label's calls in each run that has the row [m], [rows] from [ownOf]: 0 for a run that
+     * counted calls and has not the label, nothing for one that did not count them.
      */
-    internal fun perExecution(m: Matched, rows: List<Profile.OwnRow?>?): String {
-        val per = m.present.mapNotNull { i ->
-            val node = m.nodes[i]!!
-            val calls = rows?.get(i)?.calls ?: if (node.calls.isNotEmpty()) 0L else -1L
-            if (calls < 0) null else calls to node.count
-        }
-        if (per.isEmpty()) return ""
-        val texts = per.map { (c, n) -> callsPerExecution(c, n) }.distinct()
-        return if (texts.size == 1) texts[0] else String.format(Locale.ROOT, "~x%.1f", per.map { (c, n) -> c.toDouble() / n }.average())
+    internal fun ownCalls(m: Matched, rows: List<Profile.OwnRow?>?): List<Long> = m.present.mapNotNull { i ->
+        val calls = rows?.get(i)?.calls ?: if (m.nodes[i]!!.calls.isNotEmpty()) 0L else -1L
+        calls.takeIf { it >= 0 }
+    }
+
+    /** `Per parent` for one fine label under the row [m]. See [perParentOver]. */
+    internal fun callsPerParent(m: Matched, rows: List<Profile.OwnRow?>?): String {
+        val calls = ownCalls(m, rows)
+        return perParentOver(if (calls.size == m.present.size) calls.zip(m.present.map { m.nodes[it]!!.count }) else emptyList())
+    }
+
+    /** `Per parent` for the coarse row [m], [parents] one node per run. See [perParentOver]. */
+    internal fun coarsePerParent(m: Matched, parents: List<CoarseNode?>): String =
+        perParentOver(m.present.mapNotNull { i -> parents[i]?.let { p -> m.nodes[i]!!.count to p.count } })
+
+    /** A count and its parent's in each run: one figure when every run agrees, `~` their mean when not, blank with none. */
+    private fun perParentOver(runs: List<Pair<Long, Long>>): String {
+        if (runs.isEmpty()) return ""
+        val texts = runs.map { (c, p) -> perParentText(c, p) }.distinct()
+        return if (texts.size == 1) texts[0] else String.format(Locale.ROOT, "~%.1f", runs.map { (c, p) -> c.toDouble() / p }.average())
     }
 
     /** Whether any run here counted allocated bytes. */

@@ -4,6 +4,8 @@ import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
@@ -75,15 +77,15 @@ class CallsPerParentTest {
 
     /** What each fine row under a coarse row should read: calls on that path, and per parent. */
     private fun expected(plans: Int) = mapOf(
-        listOf("batch", "plan", "rule") to ("%,d".format(340 * plans) to "x340"),
-        listOf("batch", "plan", "visit") to ("%,d".format(100 * plans) to "x100"),
-        listOf("batch", "plan", "rare") to ("%,d".format(50 * plans) to "x50"),
-        listOf("batch", "cleanup", "visit") to ("%,d".format(10 * plans) to "x10"),
-        listOf("batch", "cleanup", "rare") to ("%,d".format(plans) to "x1"),
+        listOf("batch", "plan", "rule") to ("%,d".format(340 * plans) to "340"),
+        listOf("batch", "plan", "visit") to ("%,d".format(100 * plans) to "100"),
+        listOf("batch", "plan", "rare") to ("%,d".format(50 * plans) to "50"),
+        listOf("batch", "cleanup", "visit") to ("%,d".format(10 * plans) to "10"),
+        listOf("batch", "cleanup", "rare") to ("%,d".format(plans) to "1"),
     )
 
     /**
-     * The fine rows of the coarse tree in [report], by path: the `Executions` and `x parent` cells.
+     * The fine rows of the coarse tree in [report], by path: the `Executions` and `Per parent` cells.
      * A coarse row's path comes from its indent; a fine row is `- name` under the row above it.
      */
     private fun fineRows(report: String): Map<List<String>, Pair<String, String?>> {
@@ -98,7 +100,7 @@ class CallsPerParentTest {
             val cells = line.trim().split(Regex(" +"))
             if (cells[0] == "-") {
                 if (cells[1] == "and") continue
-                out[stack.take(indent / 2) + cells[1]] = cells[2] to cells.getOrNull(3)?.takeIf { it.startsWith("x") }
+                out[stack.take(indent / 2) + cells[1]] = cells[2] to cells.getOrNull(3)?.takeIf { it.matches(Regex("[0-9,.]+")) }
             } else {
                 while (stack.size > indent / 2) stack.removeAt(stack.size - 1)
                 stack.add(cells[0])
@@ -129,18 +131,37 @@ class CallsPerParentTest {
         val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         println(diff)
 
-        val rows = HashMap<Pair<String, String>, String>()
+        checkDiff(diff)
+    }
+
+    /** A diff of 4 plans a run against 2: each row in the report's form, the calls and their figure per parent. */
+    private fun checkDiff(diff: String) {
+        val rows = HashMap<Pair<String, String>, List<String>>()
         var coarse = ""
         for (line in diff.lines().takeWhile { !it.startsWith("COARSE AND FINE") }) {
-            val name = line.substringBefore("|").trim()
-            if (name.startsWith("- ")) rows[coarse to name.removePrefix("- ")] = line.substringAfterLast("|").trim()
-            else if ("|" in line) coarse = name
+            val cells = line.split("|").map { it.trim() }
+            if (cells.size < 5 || cells[0] == "Coarse operation") continue
+            val name = cells[0]
+            if (!name.startsWith("- ")) coarse = name
+            rows[coarse to name.removePrefix("- ")] = cells.takeLast(2)
         }
         val wanted = mapOf(
-            ("plan" to "rule") to "x340 =", ("plan" to "visit") to "x100 =", ("plan" to "rare") to "x50 =",
-            ("cleanup" to "visit") to "x10 =", ("cleanup" to "rare") to "x1 =",
+            ("plan" to "plan") to listOf("4 -> 2", "4 -> 2"), ("cleanup" to "cleanup") to listOf("4 -> 2", "4 -> 2"),
+            ("plan" to "rule") to listOf("1,360 -> 680", "340 ="), ("plan" to "visit") to listOf("400 -> 200", "100 ="),
+            ("plan" to "rare") to listOf("200 -> 100", "50 ="),
+            ("cleanup" to "visit") to listOf("40 -> 20", "10 ="), ("cleanup" to "rare") to listOf("4 -> 2", "1 ="),
+            ("cleanup" to "unlabelled") to listOf("own", ""),
         )
         for ((row, want) in wanted) assertEquals(want, rows[row], "$row in:\n$diff")
+        assertTrue(diff.lines().any { it.contains("Per parent") }, diff)
+        assertFalse(Regex("\\| *x[0-9]").containsMatchIn(diff), "the old form: $diff")
+    }
+
+    @Test
+    fun `a diff of one run shows the same as the report`() {
+        val before = run(plans = 4)
+        val after = run(plans = 2)
+        checkDiff(ProfileDiff(before, after).render())
     }
 
     @Test

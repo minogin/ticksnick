@@ -406,8 +406,8 @@ class CoarseTest {
         assertEquals(12e9 / 3.4, walls.getValue(branch), 1.0)
         assertEquals(8.4e9 / 3.4, walls.getValue(leaf), 1.0)
         val text = r.render()
-        assertTrue(Regex("""branch\s+800\s+x4\.0\s+3\.4\s+3\.53 s\s+88%""").containsMatchIn(text), text)
-        assertTrue(Regex("""leaf\s+2,400\s+x3\.0\s+2\.47 s\s+70%""").containsMatchIn(text), text)
+        assertTrue(Regex("""branch\s+800\s+4\s+3\.4\s+3\.53 s\s+88%""").containsMatchIn(text), text)
+        assertTrue(Regex("""leaf\s+2,400\s+3\s+2\.47 s\s+70%""").containsMatchIn(text), text)
     }
 
     /**
@@ -728,15 +728,15 @@ class CoarseTest {
         val tree = listOf(node(run, children = listOf(node(resolve, children = listOf(node(select), node(via))))))
         val lines = report(listOf(run, resolve, select, via), labelled = 4000, tree = tree).render().lines()
         val header = lines.first { it.startsWith("Coarse operation") }
-        val xAt = header.indexOf("x parent")
+        val perAt = header.indexOf("Per parent")
         val shareAt = header.indexOf("% parent")
-        assertTrue(xAt > 0 && shareAt > 0, "the columns have no header: $header")
+        assertTrue(perAt > 0 && shareAt > 0, "the columns have no header: $header")
         fun cells(prefix: String): Pair<String, String> =
-            lines.first { it.startsWith(prefix) }.let { it.substring(xAt, xAt + 8).trim() to it.substring(shareAt, shareAt + 8).trim() }
+            lines.first { it.startsWith(prefix) }.let { it.substring(perAt, perAt + 10).trim() to it.substring(shareAt, shareAt + 8).trim() }
         assertEquals("" to "", cells("run "), "a root has no parent")
-        assertEquals("x12.0" to "100%", cells("  resolve "))
+        assertEquals("12" to "100%", cells("  resolve "))
         assertEquals("" to "60%", cells("    select "), "once per resolve is not a loop count")
-        assertEquals("x3.0" to "30%", cells("    via "))
+        assertEquals("3" to "30%", cells("    via "))
     }
 
     /** An operation under two callers is a row under each and, once, the figure over both. */

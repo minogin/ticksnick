@@ -26,11 +26,13 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 ### Fine calls per coarse execution
 
 - Fine calls are counted on the coarse path they ran under. A `-` row shows its calls in
-  `Executions`, its calls per execution of the row in `x parent`, and its own time per call in
+  `Executions`, its calls per execution of the row in `Per parent`, and its own time per call in
   `Mean`. A label called on a path and never sampled there gets a row with its calls.
+- `x parent` is now `Per parent`, and its figures have no `x`: `5,262`, and `3` for what was `x3.0`.
 - `in all, under N operations` gives the label's calls too, and N counts every row it was called
   under.
-- Diffs show the `-` rows under coarse rows, with calls per execution on both sides.
+- Diffs show the `-` rows under coarse rows, and a `Per parent` column. What a diff shows has the
+  name and form it has in the report.
 - Each coarse execution costs a little more for every registered fine label, and the coarse floor
   check takes the number of fine labels into account.
 

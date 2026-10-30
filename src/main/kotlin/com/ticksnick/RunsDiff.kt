@@ -9,10 +9,10 @@ internal const val RUNS_DIFF_WIDTH = 165
 
 /** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative, the verdict. */
 internal const val RUNS_DIFF_HEADER = "%7s -> %-7s  %-22s %-15s %s"
-internal const val RUNS_DIFF_COARSE_ROW = "%-40s | %-20s %-24s | %-28s | %s"
+internal const val RUNS_DIFF_COARSE_ROW = "%-40s | %-20s %-24s | %-28s | %-24s | %s"
 
 /** The same with the `Allocated` column, for a diff where a side counted them. */
-internal const val RUNS_DIFF_ALLOCATED_ROW = "%-40s | %-20s %-24s | %-28s | %-16s | %s"
+internal const val RUNS_DIFF_ALLOCATED_ROW = "%-40s | %-20s %-24s | %-28s | %-24s | %-14s | %s"
 internal const val RUNS_DIFF_FINE_ROW = "%-26s | %-20s %-24s | %-20s %-24s | %s"
 
 /** The `CAREFUL` line of a diff of one run against one, which [ProfileDiff] renders. */
@@ -200,6 +200,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                     "  ".repeat(depth) + name + where,
                     pair(wb, wa), changeCell(Change(wb, wa)), share,
                     countPair(b.present.map { b.nodes[it]!!.count }, a.present.map { a.nodes[it]!!.count }),
+                    coarsePerParentPair(before.coarsePerParent(b, bParents), after.coarsePerParent(a, aParents)),
                     bytesPair(before.allocated(b).mean, after.allocated(a).mean),
                 )
                 ownRows(rows, b, a, depth)
@@ -219,12 +220,12 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
         val format = widened(if (allocations) RUNS_DIFF_ALLOCATED_ROW else RUNS_DIFF_COARSE_ROW, coarseExtra)
         appendLine()
         appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%")
-        appendLine(String.format(Locale.ROOT, format, "Coarse operation", "Wall", "change", "% parent", "Executions", "Allocated"))
+        appendLine(String.format(Locale.ROOT, format, "Coarse operation", "Wall", "change", "% parent", "Executions", "Per parent", "Allocated"))
         appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
         for (r in coarseRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
         appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
         if (anyOwn) appendLine(
-            "  $SPLIT_MARK rows are fine labels in a row's own time; Executions on one is its calls per execution of the row, " +
+            "  $SPLIT_MARK rows are fine labels in a row's own time; Per parent on one is its calls per execution of the row, " +
                 "counted, which holds whatever the size of each run"
         )
         appendLine("  % parent is each run's share of its own parent, its change in percentage points: the run's speed cancels out of it")
@@ -251,10 +252,13 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                 over(m) { rows?.get(it)?.share?.takeIf { s -> !s.isNaN() }?.times(100) ?: 0.0 }
             val wb = wall(b, ob[label])
             val wa = wall(a, oa[label])
+            val cb = before.ownCalls(b, ob[label])
+            val ca = after.ownCalls(a, oa[label])
             rows += listOf(
                 "  ".repeat(depth) + "  $SPLIT_MARK $label",
                 pair(wb, wa), changeCell(Change(wb, wa)), shareCell(share(b, ob[label]), share(a, oa[label])),
-                perExecutionPair(before.perExecution(b, ob[label]), after.perExecution(a, oa[label])), "",
+                if (cb.isEmpty() && ca.isEmpty()) "own" else countPair(cb, ca),
+                perParentPair(before.callsPerParent(b, ob[label]), after.callsPerParent(a, oa[label])), "",
             )
         }
     }

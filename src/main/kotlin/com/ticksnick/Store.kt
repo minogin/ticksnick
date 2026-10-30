@@ -217,16 +217,16 @@ internal object RunStore {
 
     fun load(path: Path): Run {
         val lines = Files.readAllLines(path)
-        require(lines.isNotEmpty() && lines[0].startsWith("ticksnick-")) { "$path is not a TickSnick run" }
-        require(lines[0] == RUN_FORMAT) { "$path is format '${lines[0]}', this build reads '$RUN_FORMAT'" }
+        require(lines.isNotEmpty() && lines[0].startsWith("ticksnick-")) { "'$path' is not a TickSnick run" }
+        require(lines[0] == RUN_FORMAT) { "'$path' is format '${lines[0]}', this build reads '$RUN_FORMAT'" }
         val m = HashMap<String, String>()
         for (l in lines.drop(1)) {
             if (l.isEmpty()) continue
             val t = l.indexOf('\t')
-            require(t > 0) { "$path: a line without a tab: $l" }
+            require(t > 0) { "'$path': a line without a tab: $l" }
             m[l.substring(0, t)] = l.substring(t + 1)
         }
-        fun str(k: String): String = m[k] ?: throw IllegalArgumentException("$path: missing $k")
+        fun str(k: String): String = m[k] ?: throw IllegalArgumentException("'$path': missing $k")
         fun long(k: String) = str(k).toLong()
         fun int(k: String) = str(k).toInt()
         fun dbl(k: String) = str(k).toDouble()

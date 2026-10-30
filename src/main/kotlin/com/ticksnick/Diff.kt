@@ -30,12 +30,17 @@ internal class ProfileDiff(
     private val wallBefore = before.wallsOf()
     private val wallAfter = after.wallsOf()
 
+    private val coarseExtra = nameOverflow(COARSE_DIFF_ROW, before.coarseRowNames() + after.coarseRowNames())
+    private val coarseRow = widened(COARSE_DIFF_ROW, coarseExtra)
+    private val fineExtra = nameOverflow(FINE_DIFF_ROW, matched().map { it.label })
+    private val fineRow = widened(FINE_DIFF_ROW, fineExtra)
+
     /** One operation on both sides; either side may be absent. */
     private class Pair(val label: String, val a: Profile.OperationRow?, val b: Profile.OperationRow?)
 
     /** @param careful warnings from the caller, in the `CAREFUL` section under the title. */
     fun render(careful: List<String> = emptyList()): String = buildString {
-        appendLine("=".repeat(DIFF_WIDTH))
+        appendLine("=".repeat(DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
         appendLine(row("Diff", "$beforeName -> $afterName"))
         carefulBlock(
             careful + ClockReport.diffCareful(before.clock, after.clock)
@@ -59,13 +64,13 @@ internal class ProfileDiff(
             appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path")
             appendLine(
                 String.format(
-                    Locale.ROOT, COARSE_DIFF_ROW,
+                    Locale.ROOT, coarseRow,
                     "Coarse operation", "Wall", "change", "Paused", "Executions"
                 )
             )
-            appendLine("-".repeat(DIFF_WIDTH))
+            appendLine("-".repeat(DIFF_WIDTH + coarseExtra))
             tree(after.coarseTree, before.coarseTree, 0)
-            appendLine("-".repeat(DIFF_WIDTH))
+            appendLine("-".repeat(DIFF_WIDTH + coarseExtra))
             if (anyOwn) appendLine(
                 "  $SPLIT_MARK rows are fine labels in a row's own time; Executions on one is its calls per execution of the row, " +
                 "counted, which holds whatever the size of each run"
@@ -75,11 +80,11 @@ internal class ProfileDiff(
         appendLine("COARSE AND FINE OPERATIONS - own time, matched by name, sorted by the change")
         appendLine(
             String.format(
-                Locale.ROOT, FINE_DIFF_ROW,
+                Locale.ROOT, fineRow,
                 "Operation", "Thread-time", "change", "Thread-time per call", "Calls", "Long"
             )
         )
-        appendLine("-".repeat(DIFF_WIDTH))
+        appendLine("-".repeat(DIFF_WIDTH + fineExtra))
         val pairs = matched()
         fun moved(x: Pair): Double {
             val a = threadTime(before, x.a).let { if (it.isNaN()) 0.0 else it }
@@ -95,7 +100,7 @@ internal class ProfileDiff(
             val hasB = (p.b?.hits ?: 0L) > 0L
             appendLine(
                 String.format(
-                    Locale.ROOT, FINE_DIFF_ROW,
+                    Locale.ROOT, fineRow,
                     p.label,
                     pair(ta, tb, hasA, hasB),
                     change(ta, tb, hasA && hasB),
@@ -105,8 +110,8 @@ internal class ProfileDiff(
                 )
             )
         }
-        appendLine("-".repeat(DIFF_WIDTH))
-        appendLine("=".repeat(DIFF_WIDTH))
+        appendLine("-".repeat(DIFF_WIDTH + fineExtra))
+        appendLine("=".repeat(DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
     }
 
     private fun StringBuilder.tree(afterNodes: List<CoarseNode>, beforeNodes: List<CoarseNode>, depth: Int) {
@@ -148,7 +153,7 @@ internal class ProfileDiff(
             val tb = y?.wallNanos ?: 0.0
             appendLine(
                 String.format(
-                    Locale.ROOT, COARSE_DIFF_ROW, "$indent  $SPLIT_MARK $name",
+                    Locale.ROOT, coarseRow, "$indent  $SPLIT_MARK $name",
                     pair(ta, tb, ta > 0, tb > 0), change(ta, tb, ta > 0 && tb > 0), "",
                     perExecutionPair(perExecution(x, a), perExecution(y, b)),
                 ).trimEnd()
@@ -168,7 +173,7 @@ internal class ProfileDiff(
         val tb = b?.let { wallAfter[it] } ?: Double.NaN
         appendLine(
             String.format(
-                Locale.ROOT, COARSE_DIFF_ROW,
+                Locale.ROOT, coarseRow,
                 indent + name,
                 pair(ta, tb, a != null && a.count > 0, b != null && b.count > 0),
                 change(ta, tb, a != null && b != null && a.count > 0 && b.count > 0),

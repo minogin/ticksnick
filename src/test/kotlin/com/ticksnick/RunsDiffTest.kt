@@ -131,6 +131,38 @@ class RunsDiffTest {
         }
     }
 
+    /** A long name sizes its table in a diff of one run, a diff of several and the report over runs. */
+    @Test
+    fun `a long name widens its column and no row goes out of line`() {
+        val long = "rule:JoinPushThroughJoinRule:right".repeat(2)
+        val tree = listOf(node(long, listOf(10L, 20L), listOf(node("short", listOf(5L)))))
+        val ops = listOf(stat(long, 10, 10), OperationStat(1, "short", 5, 5, 0, 0, 0, 0, 5))
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val before = dir.resolve("before").also { Files.createDirectories(it) }
+            val after = dir.resolve("after").also { Files.createDirectories(it) }
+            repeat(2) { save(before, it, tree, ops); save(after, it, tree, ops) }
+            val b = ProfileRuns.load(before)
+            val a = ProfileRuns.load(after)
+            assertInLine(RunsDiff(b, a).render())
+            assertInLine(ProfileDiff(b.runs[0], a.runs[0]).render())
+            assertInLine(b.render())
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /** Every table's bars fall at one column, its head and all its rows. */
+    private fun assertInLine(text: String) {
+        var bar = -1
+        for (line in text.lines()) {
+            if (line.startsWith("COARSE")) bar = -1
+            if ('|' !in line) continue
+            if (bar < 0) bar = line.indexOf('|')
+            assertEquals(bar, line.indexOf('|'), "out of line: $line\n$text")
+        }
+    }
+
     private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
         ProfileStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$PROFILE_EXTENSION"))
 

@@ -38,6 +38,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 - Calls made right after `Profiler.start()` are counted. `start()` returns once the sampler has
   taken its starting counts; a session shorter than the sampler thread's start-up counted no calls.
+- A long operation name no longer pushes its row out of line. Each table's name column grows to the
+  longest name in it, and the rules grow with it. Names are not cut.
 
 ## 0.5.0 - 2026-10-27
 

@@ -423,8 +423,9 @@ class CoarseTest {
         coarseSampleHits: Long = 0,
         /** The tree; by default every operation is a root with no children. */
         tree: List<CoarseNode> = coarse.map { node(it) },
+        fineName: String = "fine",
     ) = Profile(
-        operations = listOf(OperationStat(0, "fine", labelled, labelled, 0, 0, 0, 0, labelled)),
+        operations = listOf(OperationStat(0, fineName, labelled, labelled, 0, 0, 0, 0, labelled)),
         idleHits = 0,
         ticks = 1_000_001,
         samplingSpanNanos = 1_000_000_000_000,
@@ -561,6 +562,35 @@ class CoarseTest {
         assertEquals(
             listOf("req"), report(coarse = listOf(settled), labelled = 36_000).coarseTooSmall().map { it.name }
         )
+    }
+
+    // --- the name column -------------------------------------------------------------
+
+    /** A long name sizes its table: nothing is cut, and no row goes out of line, in either table. */
+    @Test
+    fun `a long name widens its table and every row stays in line`() {
+        val long = "rule:JoinPushThroughJoinRule:right".repeat(2)
+        val a = stat(count = 2, sumNanos = 2_000_000_000, hits = 1000, running = 1000, name = long, id = 0)
+        val b = stat(count = 2, sumNanos = 1_000_000_000, hits = 500, running = 500, name = "short", id = 1)
+        val text = report(listOf(a, b), labelled = 2000, fineName = long).render()
+        val lines = text.lines()
+
+        val fine = lines.filter { it.startsWith("Operation") || (it.startsWith(long) && "|" in it) }
+        assertEquals(2, fine.size, text)
+        assertEquals(1, fine.map { it.indexOf('|') }.distinct().size, text)
+        val cross = lines.first { "+" in it && it.startsWith("-") }.indexOf('+')
+        assertEquals(fine[0].indexOf('|'), cross, "the bar and the rule's cross part: $text")
+
+        val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val executionsEnd = lines[head].indexOf("Executions") + "Executions".length
+        val rows = lines.filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" !in it }
+        assertEquals(2, rows.size, text)
+        for (r in rows) assertTrue(r[executionsEnd - 1].isDigit() && r[executionsEnd] == ' ', "out of line: $r")
+
+        val rule = lines[head + 1].length
+        assertTrue(rows.all { it.length <= rule }, "the rule is shorter than its table: $text")
+        val page = lines.filter { it.isNotEmpty() && it.all { c -> c == '=' } }.map { it.length }.distinct().single()
+        assertTrue(page >= rule, "the page's rule is shorter than its widest table: $text")
     }
 
     // --- work escaping its context ---------------------------------------------------

@@ -234,7 +234,7 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
 
     private fun across(): String = buildString {
         val n = runs.size
-        appendLine("=".repeat(RUNS_WIDTH))
+        appendLine("=".repeat(RUNS_WIDTH + maxOf(coarseExtra, fineExtra)))
         appendLine(
             row(
                 "Runs", "$n runs of '$name', one JVM each: every figure below is their mean, " +
@@ -261,7 +261,7 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
         fineAcross()
         appendLine()
         appendLine("  each run's own report, with its fine rows under every coarse row and its warnings: render a folder holding that run alone")
-        appendLine("=".repeat(RUNS_WIDTH))
+        appendLine("=".repeat(RUNS_WIDTH + maxOf(coarseExtra, fineExtra)))
     }
 
     /**
@@ -317,17 +317,9 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
         }
     }
 
-    private fun StringBuilder.coarseAcross() {
-        if (runs.all { it.coarseTree.isEmpty() }) return
-        appendLine()
-        appendLine("COARSE OPERATIONS ACROSS RUNS - wall time, inclusive, matched by path; each figure the mean of the runs +- 95%")
-        appendLine(
-            String.format(
-                Locale.ROOT, RUNS_COARSE_ROW, "Coarse operation", "Executions", "Wall v", "", "% parent", "",
-                "Mean", "", "p50", "p90", "p99"
-            )
-        )
-        appendLine("-".repeat(RUNS_WIDTH))
+    /** The coarse table's rows, name first. Built before anything is printed: the longest name sizes the page. */
+    private val coarseRows: List<List<String>> by lazy {
+        val rows = ArrayList<List<String>>()
         fun walk(level: List<List<CoarseNode>>, parents: List<CoarseNode?>, depth: Int) {
             for (m in childrenOf(level)) {
                 val wall = wall(m)
@@ -343,19 +335,53 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
                 val where = if (m.present.size < runs.size) " (${m.present.size} of ${runs.size} runs)" else ""
                 fun d(e: Estimate) = if (e.n == 0) "-" else duration(e.mean)
                 fun pm(e: Estimate) = if (e.n == 0) "" else plusMinus(e)
-                appendLine(
-                    String.format(
-                        Locale.ROOT, RUNS_COARSE_ROW, "  ".repeat(depth) + m.name + where, executions,
-                        d(wall), pm(wall),
-                        if (share.n == 0) "" else String.format(Locale.ROOT, "%.0f%%", share.mean), plusMinusPoints(share),
-                        d(mean), pm(mean), d(pct[0]), d(pct[1]), d(pct[2]),
-                    ).trimEnd()
+                rows += listOf(
+                    "  ".repeat(depth) + m.name + where, executions,
+                    d(wall), pm(wall),
+                    if (share.n == 0) "" else String.format(Locale.ROOT, "%.0f%%", share.mean), plusMinusPoints(share),
+                    d(mean), pm(mean), d(pct[0]), d(pct[1]), d(pct[2]),
                 )
                 walk(m.nodes.map { it?.children ?: emptyList() }, m.nodes, depth + 1)
             }
         }
         walk(runs.map { it.coarseTree }, runs.map { null }, 0)
-        appendLine("-".repeat(RUNS_WIDTH))
+        rows
+    }
+
+    /** The fine table's rows, name first. See [coarseRows]. */
+    private val fineRows: List<List<String>> by lazy {
+        fineLines().values.sortedByDescending { it.time.mean }.map { l ->
+            val calls = when {
+                l.calls.all { it == 0L } -> "-"
+                l.calls.distinct().size == 1 -> String.format(Locale.ROOT, "%,d in each", l.calls[0])
+                else -> String.format(Locale.ROOT, "%,d to %,d", l.calls.min(), l.calls.max())
+            }
+            val where = if (l.present < runs.size) " (${l.present} of ${runs.size})" else ""
+            listOf(
+                l.label + where, duration(l.time.mean), plusMinus(l.time),
+                if (l.perCall.n == 0) "-" else duration(l.perCall.mean), if (l.perCall.n == 0) "" else plusMinus(l.perCall),
+                calls,
+            )
+        }
+    }
+
+    private val coarseExtra by lazy { nameOverflow(RUNS_COARSE_ROW, coarseRows.map { it[0] }) }
+    private val fineExtra by lazy { nameOverflow(RUNS_FINE_ROW, fineRows.map { it[0] }) }
+
+    private fun StringBuilder.coarseAcross() {
+        if (runs.all { it.coarseTree.isEmpty() }) return
+        val format = widened(RUNS_COARSE_ROW, coarseExtra)
+        appendLine()
+        appendLine("COARSE OPERATIONS ACROSS RUNS - wall time, inclusive, matched by path; each figure the mean of the runs +- 95%")
+        appendLine(
+            String.format(
+                Locale.ROOT, format, "Coarse operation", "Executions", "Wall v", "", "% parent", "",
+                "Mean", "", "p50", "p90", "p99"
+            )
+        )
+        appendLine("-".repeat(RUNS_WIDTH + coarseExtra))
+        for (r in coarseRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
+        appendLine("-".repeat(RUNS_WIDTH + coarseExtra))
         appendLine("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")
         appendLine("  a percentile is the mean of the runs' percentiles, with no interval; - where a run had too few executions for it")
     }
@@ -363,25 +389,11 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
     private fun StringBuilder.fineAcross() {
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS ACROSS RUNS - own thread-time, matched by name; each figure the mean of the runs +- 95%")
-        appendLine(String.format(Locale.ROOT, RUNS_FINE_ROW, "Operation", "Thread-time", "", "Per call", "", "Calls"))
-        appendLine("-".repeat(RUNS_WIDTH))
-        for (l in fineLines().values.sortedByDescending { it.time.mean }) {
-            val calls = when {
-                l.calls.all { it == 0L } -> "-"
-                l.calls.distinct().size == 1 -> String.format(Locale.ROOT, "%,d in each", l.calls[0])
-                else -> String.format(Locale.ROOT, "%,d to %,d", l.calls.min(), l.calls.max())
-            }
-            val where = if (l.present < runs.size) " (${l.present} of ${runs.size})" else ""
-            appendLine(
-                String.format(
-                    Locale.ROOT, RUNS_FINE_ROW, l.label + where,
-                    duration(l.time.mean), plusMinus(l.time),
-                    if (l.perCall.n == 0) "-" else duration(l.perCall.mean), if (l.perCall.n == 0) "" else plusMinus(l.perCall),
-                    calls,
-                )
-            )
-        }
-        appendLine("-".repeat(RUNS_WIDTH))
+        val format = widened(RUNS_FINE_ROW, fineExtra)
+        appendLine(String.format(Locale.ROOT, format, "Operation", "Thread-time", "", "Per call", "", "Calls"))
+        appendLine("-".repeat(RUNS_WIDTH + fineExtra))
+        for (r in fineRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()))
+        appendLine("-".repeat(RUNS_WIDTH + fineExtra))
     }
 
     companion object {

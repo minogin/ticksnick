@@ -58,8 +58,24 @@ internal const val COARSE_MAX_OVERHEAD = 0.05
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01
 
+/** The first column of a table's row format: its name, left-aligned, at the width written. */
+private val NAME_COLUMN = Regex("^%-(\\d+)s")
+
 /** The second line of a leaked-label warning: the usual cause. */
 internal const val NO_FINALLY = "a label placed with enter/exit has no finally: a body that throws leaves it set"
+
+/**
+ * How much wider than written in [format] a table's name column must be to hold [names]. The width
+ * written is a minimum, so a table of short names reads as it always did. A name is never cut: it
+ * is what the reader searches the code for, and a name wider than its column would push the rest of
+ * its own row out of line.
+ */
+internal fun nameOverflow(format: String, names: Iterable<String>): Int =
+    ((names.maxOfOrNull { it.length } ?: 0) - NAME_COLUMN.find(format)!!.groupValues[1].toInt()).coerceAtLeast(0)
+
+/** [format] with its name column wider by [extra]. See [nameOverflow]. */
+internal fun widened(format: String, extra: Int): String =
+    NAME_COLUMN.replace(format) { "%-${it.groupValues[1].toInt() + extra}s" }
 
 /** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 internal fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
@@ -1320,6 +1336,34 @@ class Profile internal constructor(
         }.sortedByDescending { it.wallNanos }
     }
 
+    /** Every name the coarse table draws in its first column, indents and marks included. See [nameOverflow]. */
+    internal fun coarseRowNames(): List<String> = buildList {
+        fun walk(n: CoarseNode, depth: Int) {
+            val indent = "  ".repeat(depth)
+            add(indent + n.name)
+            val own = ownRowsOf(n)
+            val fine = when {
+                own != null -> drawnOwnRows(own).map { it.name }
+                n.children.isEmpty() -> operations.filter { n.fine[it.id] > 0 }.map { it.name }
+                else -> emptyList()
+            }
+            for (f in fine) add("$indent  $SPLIT_MARK $f")
+            for (c in n.children) walk(c, depth + 1)
+        }
+        for (r in coarseTree) walk(r, 0)
+        // The block of operations under more than one caller.
+        coarseTree.flatMap { it.flatten() }.groupBy { it.type }.values.filter { it.size > 1 }.forEach { add("  " + it[0].name) }
+    }
+
+    private val coarseExtra by lazy { nameOverflow(COARSE_ROW, coarseRowNames()) }
+    private val coarseRow by lazy { widened(COARSE_ROW, coarseExtra) }
+    private val fineExtra by lazy { nameOverflow(FINE_ROW, rows().filter { it.hits > 0 }.map { it.label } + NO_OPERATION) }
+    private val fineRow by lazy { widened(FINE_ROW, fineExtra) }
+    private val fineColumns by lazy { FINE_COLUMNS.copyOf().also { it[0] += fineExtra } }
+
+    /** The report-level rules and banners: the widest table on this page. */
+    private val pageWidth by lazy { maxOf(WIDTH + fineExtra, COARSE_WIDTH + coarseExtra) }
+
     /**
      * Which of [own] are drawn as rows, the rest being one `and N more` line: the heaviest, up to
      * [FINE_ROWS_SHOWN], from [OWN_ROW_MIN] of the row up; and the smaller ones with calls as well
@@ -1538,11 +1582,11 @@ class Profile internal constructor(
         )
         appendLine(
             String.format(
-                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
+                Locale.ROOT, coarseRow.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
                 "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
         )
-        appendLine("-".repeat(COARSE_WIDTH))
+        appendLine("-".repeat(COARSE_WIDTH + coarseExtra))
         val byType = coarse.associateBy { it.type }
         val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
         val walls = wallsOf()
@@ -1615,7 +1659,7 @@ class Profile internal constructor(
                 val share = hits.toDouble() / n.inclusiveHits
                 appendLine(
                     String.format(
-                        Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
+                        Locale.ROOT, coarseRow.replace("%,11d", "%11s"),
                         "$indent  $SPLIT_MARK $name", "own", "", "",
                         if (timed) duration(wall(n) * share) else "-",
                         shareText(share * 100), "", "", "", "", "", "", ""
@@ -1635,7 +1679,7 @@ class Profile internal constructor(
             val timed = n.count > 0
             appendLine(
                 String.format(
-                    Locale.ROOT, COARSE_ROW,
+                    Locale.ROOT, coarseRow,
                     indent + n.name, n.count, perParent(n, parent), parallelText(n),
                     if (timed) duration(wall(n)) else "-",
                     shareOfParent(n, parent),
@@ -1680,7 +1724,7 @@ class Profile internal constructor(
                         val caught = r.wallNanos > 0
                         appendLine(
                             String.format(
-                                Locale.ROOT, COARSE_ROW.replace("%,11d", "%11s"),
+                                Locale.ROOT, coarseRow.replace("%,11d", "%11s"),
                                 "$indent  $SPLIT_MARK ${r.name}",
                                 if (r.calls >= 0) String.format(Locale.ROOT, "%,d", r.calls) else "own",
                                 if (r.calls >= 0) callsPerExecution(r.calls, n.count) else "",
@@ -1703,7 +1747,7 @@ class Profile internal constructor(
         for (root in coarseTree.sortedWith(heaviest)) {
             node(root, 0, null)
         }
-        appendLine("-".repeat(COARSE_WIDTH))
+        appendLine("-".repeat(COARSE_WIDTH + coarseExtra))
         // The key, once and next to the rows that need it, as the star's is under the own-time table.
         if (anySplit) appendLine(
             "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
@@ -1732,7 +1776,7 @@ class Profile internal constructor(
                 val paused = nodesOf[c.type]!!.sumOf { it.pausedNanos }
                 appendLine(
                     String.format(
-                        Locale.ROOT, COARSE_ROW,
+                        Locale.ROOT, coarseRow,
                         "  " + c.name, c.count, "", "",
                         duration(wallOf(c)), "",
                         if (paused > 0) duration(paused.toDouble()) else "-",
@@ -1743,7 +1787,7 @@ class Profile internal constructor(
                     )
                 )
             }
-            appendLine("-".repeat(COARSE_WIDTH))
+            appendLine("-".repeat(COARSE_WIDTH + coarseExtra))
         }
         // A context made by hand rather than by the hook has no path and is in no tree. Its type
         // still has its per-type figures; said here so it is not lost.
@@ -1776,7 +1820,7 @@ class Profile internal constructor(
         val contradicted = coarse.filter { it.count > 0 && workingIsContradicted(it) }
         if (contradicted.isNotEmpty()) {
             appendLine()
-            appendLine("!".repeat(WIDTH))
+            appendLine("!".repeat(pageWidth))
             appendLine("`on a CPU` READS HIGHER THAN THE MEASURED TIME ON CPU CAN SUPPORT")
             for (c in contradicted.sortedByDescending { it.working }) {
                 appendLine(
@@ -1796,7 +1840,7 @@ class Profile internal constructor(
             appendLine("  system's own clock. `on a CPU` is built on thread state, and a thread stopped inside a")
             appendLine("  NATIVE call - a socket read, a file read, an epoll wait - reads RUNNABLE to Java. So it")
             appendLine("  is counted as working, and `waiting` is short by the same amount.")
-            appendLine("!".repeat(WIDTH))
+            appendLine("!".repeat(pageWidth))
         }
         // The opposite fault to the outside-coarse line, and the more serious one. That one is
         // attribution lost and says so; this is attribution invented, and it is stated with the
@@ -1804,7 +1848,7 @@ class Profile internal constructor(
         if (staleContextHits > 0) {
             val worst = coarse.maxByOrNull { it.staleHits }
             appendLine()
-            appendLine("!".repeat(WIDTH))
+            appendLine("!".repeat(pageWidth))
             appendLine(
                 String.format(
                     Locale.ROOT,
@@ -1818,7 +1862,7 @@ class Profile internal constructor(
             appendLine("  Either work was handed to another thread and never waited for, so it outlived the span")
             appendLine("  carrying it - propagate only what the request actually joins - or a span is closed too")
             appendLine("  early, before the work it covers has finished.")
-            appendLine("!".repeat(WIDTH))
+            appendLine("!".repeat(pageWidth))
         }
     }
 
@@ -1979,19 +2023,19 @@ class Profile internal constructor(
      */
     internal fun render(legend: Boolean = false, careful: List<String> = emptyList()): String = buildString {
         if (failure != null) {
-            appendLine("!".repeat(WIDTH))
+            appendLine("!".repeat(pageWidth))
             appendLine("PROFILING STOPPED - these numbers were not going to be right:")
             appendLine("  $failure")
             appendLine("Everything below is what led to that verdict, not a result. Pass strict=false to")
             appendLine("profile anyway, which is what to do when the code is not yours to change.")
-            appendLine("!".repeat(WIDTH))
+            appendLine("!".repeat(pageWidth))
         }
         // One long rule at the top and one after the legend: the report lands in a console full of
         // the program's own output, and its first and last lines should say so. No rules between
         // sections - the headings and the tables' own rules do that, and a rule beside a table's
         // rule is a doubled separator. The logo is not here: it is printed once per JVM by the
         // first TickSnick call, see [Logo].
-        appendLine("=".repeat(WIDTH))
+        appendLine("=".repeat(pageWidth))
         // Every warning, before any number: see [carefulBlock] and [warnings].
         carefulBlock(careful + warnings())
         // One line: wall time split into active and paused. The report shows what matters for
@@ -2051,7 +2095,7 @@ class Profile internal constructor(
                 // sits right after them so the sentence continues - so many calls at this much
                 // each, of which these ran long - and `Spread` follows, because how the time lay
                 // across threads is a different question and on one thread a column of ones.
-                FINE_COLUMNS, FINE_BREAKS,
+                fineColumns, FINE_BREAKS,
                 1..5 to "Load", 6..8 to "Long", 9..12 to "Spread", 13..14 to "Trust"
             )
         )
@@ -2063,7 +2107,7 @@ class Profile internal constructor(
                 //
                 // The header uses the same column widths as the data rows. Any difference is
                 // invisible until a bar is drawn through both, and then it comes out crooked.
-                Locale.ROOT, "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s",
+                Locale.ROOT, fineRow,
                 // `Thread-time%` and `Thread-time` are one quantity, relative and absolute, and
                 // neither is CPU. `Thread-time` against `Wall-time` is the point of having both:
                 // eight threads computing five seconds is forty thread-seconds and the sum is real;
@@ -2110,7 +2154,7 @@ class Profile internal constructor(
                 "Wall-time", "Concurrency", "Workers", "Pool", "Hits", "Noise"
             )
         )
-        if (anyRow) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
+        if (anyRow) appendLine(rule(fineColumns, FINE_BREAKS))
         // Operations the sampler never caught are folded away rather than printed as a screen of
         // zeroes. Folded, not dropped: the
         // count says how many there were, and a *called* operation with no samples is a real
@@ -2136,7 +2180,7 @@ class Profile internal constructor(
         for (r in (seen + outside).sortedByDescending { it.hits }) {
             appendLine(
                 String.format(
-                    Locale.ROOT, "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8d %6s",
+                    Locale.ROOT, fineRow,
                     r.label, percent(r.shareOf() * 100), threadTime(r.hits * stepNanos),
                     runnableSplit(r.waitingShare),
                     if (r.name == NO_OPERATION) "-" else String.format(Locale.ROOT, "%,d", r.calls),
@@ -2152,11 +2196,11 @@ class Profile internal constructor(
                     // wall time rather than a wall time of zero.
                     if (r.name == NO_OPERATION) "-" else threadTime(r.activeTicks * stepNanos),
                     r.concurrency(), r.workers(), r.pool(),
-                    r.hits, percent(r.noiseFloor() * 100),
+                    r.hits.toString(), percent(r.noiseFloor() * 100),
                 )
             )
         }
-        if (anyRow) appendLine(rule(FINE_COLUMNS, FINE_BREAKS))
+        if (anyRow) appendLine(rule(fineColumns, FINE_BREAKS))
         if (contained.isNotEmpty()) {
             appendLine(
                 "  " + contained.sortedByDescending { it.inclusiveHits }.joinToString { it.label } +
@@ -2210,12 +2254,12 @@ class Profile internal constructor(
                 )
             )
         )
-        appendLine("-".repeat(WIDTH))
+        appendLine("-".repeat(pageWidth))
         // Said in the output rather than only in a document: the gap between a share and what
         // removing the operation would save can be a factor of 275, and nothing else on the screen
         // hints at it.
         renderLegend(legend)
-        appendLine("=".repeat(WIDTH))
+        appendLine("=".repeat(pageWidth))
     }
 
     /**
@@ -2303,6 +2347,9 @@ class Profile internal constructor(
 
         /** One row of the coarse table: name, executions, per parent and parallel, wall and its share of the parent, paused, five durations, the split. */
         internal const val COARSE_ROW = "%-30s %,11d %8s %8s %10s %8s %10s %10s %10s %10s %10s %10s %18s"
+
+        /** One row of the fine table, heading and data. The widths are [FINE_COLUMNS]. */
+        internal const val FINE_ROW = "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s"
 
         /**
          * The fine table's data-row widths, in order, so the group band can be laid over them.

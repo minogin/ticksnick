@@ -114,7 +114,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
     }
 
     private fun across(): String = buildString {
-        appendLine("=".repeat(RUNS_DIFF_WIDTH))
+        appendLine("=".repeat(RUNS_DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
         appendLine(row("Diff", "${before.name} (${before.described()}) -> ${after.name} (${after.described()})"))
         val rootName = (after.root() ?: before.root())?.name
         carefulBlock(careful(rootName))
@@ -140,7 +140,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
         fine()
         appendLine()
         appendLine("  faster / slower: the whole 95% interval of the change is below / above 0; unclear: it includes 0 - more runs on both sides narrow it")
-        appendLine("=".repeat(RUNS_DIFF_WIDTH))
+        appendLine("=".repeat(RUNS_DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
     }
 
     private fun clockMean(r: ProfileRuns) = r.runs.map { it.clock.mean }.filter { !it.isNaN() }.let { if (it.isEmpty()) Double.NaN else it.average() }
@@ -178,12 +178,9 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
         return lines
     }
 
-    private fun StringBuilder.coarse() {
-        if (before.runs.all { it.coarseTree.isEmpty() } && after.runs.all { it.coarseTree.isEmpty() }) return
-        appendLine()
-        appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%")
-        appendLine(String.format(Locale.ROOT, RUNS_DIFF_COARSE_ROW, "Coarse operation", "Wall", "change", "% parent", "Executions"))
-        appendLine("-".repeat(RUNS_DIFF_WIDTH))
+    /** The coarse table's rows, name first. Built before anything is printed: the longest name sizes the page. */
+    private val coarseRows: List<List<String>> by lazy {
+        val rows = ArrayList<List<String>>()
         fun walk(bLevel: List<List<CoarseNode>>, aLevel: List<List<CoarseNode>>, bParents: List<CoarseNode?>, aParents: List<CoarseNode?>, depth: Int) {
             // The later version's order, then the paths only the earlier one had, so a removed row is not silently gone.
             val names = after.childrenOf(aLevel).map { it.name }.let { seen -> seen + before.childrenOf(bLevel).map { it.name }.filter { it !in seen } }
@@ -195,19 +192,31 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                 val share = shareCell(before.share(b, bParents), after.share(a, aParents))
                 val partial = b.present.size < before.runs.size || a.present.size < after.runs.size
                 val where = if (partial) " (${b.present.size} -> ${a.present.size} runs)" else ""
-                appendLine(
-                    String.format(
-                        Locale.ROOT, RUNS_DIFF_COARSE_ROW, "  ".repeat(depth) + name + where,
-                        pair(wb, wa), changeCell(Change(wb, wa)), share,
-                        countPair(b.present.map { b.nodes[it]!!.count }, a.present.map { a.nodes[it]!!.count }),
-                    ).trimEnd()
+                rows += listOf(
+                    "  ".repeat(depth) + name + where,
+                    pair(wb, wa), changeCell(Change(wb, wa)), share,
+                    countPair(b.present.map { b.nodes[it]!!.count }, a.present.map { a.nodes[it]!!.count }),
                 )
-                ownRows(b, a, depth)
+                ownRows(rows, b, a, depth)
                 walk(b.nodes.map { it?.children ?: emptyList() }, a.nodes.map { it?.children ?: emptyList() }, b.nodes, a.nodes, depth + 1)
             }
         }
         walk(before.tree(), after.tree(), before.runs.map { null }, after.runs.map { null }, 0)
-        appendLine("-".repeat(RUNS_DIFF_WIDTH))
+        rows
+    }
+
+    private val coarseExtra by lazy { nameOverflow(RUNS_DIFF_COARSE_ROW, coarseRows.map { it[0] }) }
+    private val fineExtra by lazy { nameOverflow(RUNS_DIFF_FINE_ROW, fineRows.map { it[0] }) }
+
+    private fun StringBuilder.coarse() {
+        if (before.runs.all { it.coarseTree.isEmpty() } && after.runs.all { it.coarseTree.isEmpty() }) return
+        val format = widened(RUNS_DIFF_COARSE_ROW, coarseExtra)
+        appendLine()
+        appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%")
+        appendLine(String.format(Locale.ROOT, format, "Coarse operation", "Wall", "change", "% parent", "Executions"))
+        appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
+        for (r in coarseRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
+        appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
         if (anyOwn) appendLine(
             "  $SPLIT_MARK rows are fine labels in a row's own time; Executions on one is its calls per execution of the row, " +
                 "counted, which holds whatever the size of each run"
@@ -223,7 +232,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
      * row, and their calls per execution of it, which can be compared between runs that did different
      * amounts of work. A run with the row and not the label counts at 0.
      */
-    private fun StringBuilder.ownRows(b: ProfileRuns.Matched, a: ProfileRuns.Matched, depth: Int) {
+    private fun ownRows(rows: MutableList<List<String>>, b: ProfileRuns.Matched, a: ProfileRuns.Matched, depth: Int) {
         val ob = before.ownOf(b)
         val oa = after.ownOf(a)
         for (label in (oa.keys + ob.keys).distinct()) {
@@ -236,12 +245,10 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                 over(m) { rows?.get(it)?.share?.takeIf { s -> !s.isNaN() }?.times(100) ?: 0.0 }
             val wb = wall(b, ob[label])
             val wa = wall(a, oa[label])
-            appendLine(
-                String.format(
-                    Locale.ROOT, RUNS_DIFF_COARSE_ROW, "  ".repeat(depth) + "  $SPLIT_MARK $label",
-                    pair(wb, wa), changeCell(Change(wb, wa)), shareCell(share(b, ob[label]), share(a, oa[label])),
-                    perExecutionPair(before.perExecution(b, ob[label]), after.perExecution(a, oa[label])),
-                ).trimEnd()
+            rows += listOf(
+                "  ".repeat(depth) + "  $SPLIT_MARK $label",
+                pair(wb, wa), changeCell(Change(wb, wa)), shareCell(share(b, ob[label]), share(a, oa[label])),
+                perExecutionPair(before.perExecution(b, ob[label]), after.perExecution(a, oa[label])),
             )
         }
     }
@@ -258,11 +265,8 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
         }
     }
 
-    private fun StringBuilder.fine() {
-        appendLine()
-        appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%")
-        appendLine(String.format(Locale.ROOT, RUNS_DIFF_FINE_ROW, "Operation", "Thread-time", "change", "Per call", "change", "Calls"))
-        appendLine("-".repeat(RUNS_DIFF_WIDTH))
+    /** The fine table's rows, name first. See [coarseRows]. */
+    private val fineRows: List<List<String>> by lazy {
         val b = before.fineLines()
         val a = after.fineLines()
         val none = Estimate(emptyList())
@@ -271,7 +275,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
             val ta = a[label]?.time?.mean ?: 0.0
             return abs(ta - tb)
         }
-        for (label in (b.keys + a.keys).distinct().sortedByDescending { moved(it) }) {
+        (b.keys + a.keys).distinct().sortedByDescending { moved(it) }.map { label ->
             val lb = b[label]
             val la = a[label]
             val partial = (lb?.present ?: 0) < before.runs.size || (la?.present ?: 0) < after.runs.size
@@ -280,14 +284,17 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
             val perCall = Change(lb?.perCall ?: none, la?.perCall ?: none)
             val calls = if ((lb?.calls ?: emptyList()).all { it == 0L } && (la?.calls ?: emptyList()).all { it == 0L }) "-"
             else countPair(lb?.calls ?: emptyList(), la?.calls ?: emptyList())
-            appendLine(
-                String.format(
-                    Locale.ROOT, RUNS_DIFF_FINE_ROW, label + where,
-                    pair(time.before, time.after), changeCell(time),
-                    pair(perCall.before, perCall.after), changeCell(perCall), calls,
-                ).trimEnd()
-            )
+            listOf(label + where, pair(time.before, time.after), changeCell(time), pair(perCall.before, perCall.after), changeCell(perCall), calls)
         }
-        appendLine("-".repeat(RUNS_DIFF_WIDTH))
+    }
+
+    private fun StringBuilder.fine() {
+        val format = widened(RUNS_DIFF_FINE_ROW, fineExtra)
+        appendLine()
+        appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%")
+        appendLine(String.format(Locale.ROOT, format, "Operation", "Thread-time", "change", "Per call", "change", "Calls"))
+        appendLine("-".repeat(RUNS_DIFF_WIDTH + fineExtra))
+        for (r in fineRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
+        appendLine("-".repeat(RUNS_DIFF_WIDTH + fineExtra))
     }
 }

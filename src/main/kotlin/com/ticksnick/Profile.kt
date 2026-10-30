@@ -481,7 +481,9 @@ class Profile internal constructor(internal val name: String, internal val files
     companion object {
         /** The profile in [folder]: every run in it. See [RunStore.runs]. */
         internal fun load(folder: Path): Profile {
-            require(java.nio.file.Files.isDirectory(folder)) { "$folder is not a folder of runs" }
+            require(java.nio.file.Files.isDirectory(folder)) {
+                if (java.nio.file.Files.exists(folder)) "$folder is not a profile: a profile is a folder" else "no profile at $folder: no such folder"
+            }
             val files = RunStore.runs(folder)
             require(files.isNotEmpty()) { "no run in $folder" }
             // The folder's own name, also for `.` or a drive root, which have none as given.

@@ -294,7 +294,7 @@ class PauseTest {
 
     // ---------------------------------------------------------------- time on CPU, of run time
 
-    private fun duty(cpu: Long, wall: Long, paused: Long, labelled: Double = Double.NaN) = DutyReport(
+    private fun duty(cpu: Long, wall: Long, paused: Long, labelled: Double = Double.NaN) = Duty(
         labelledDuty = labelled, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
         resolutionNanos = 15_625_000, windowNanos = second, windows = 60, threads = 1,
         cpuNanos = cpu, wallNanos = wall, minWindowDuty = 0.2, maxWindowDuty = 1.0,

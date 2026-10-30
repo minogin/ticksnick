@@ -432,7 +432,7 @@ class CoarseTest {
         samplingSpanNanos = 1_000_000_000_000,
         durationNanos = 1_000_000_000_000,
         threads = 8,
-        duty = DutyReport(
+        duty = Duty(
             labelledDuty = labelledDuty, invisibleOffCpu = 0.0, labelledFraction = 1.0,
             reason = if (dutyAvailable) null else "no window completed",
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000,
@@ -636,7 +636,7 @@ class CoarseTest {
             operations = listOf(fanned),
             idleHits = 0, ticks = 1_000_001, samplingSpanNanos = 1_000_000_000_000,
             durationNanos = 1_000_000_000_000, threads = 8,
-            duty = DutyReport(
+            duty = Duty(
                 labelledDuty = 0.99, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
                 resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 20, threads = 8,
                 cpuNanos = 990_000_000, wallNanos = 1_000_000_000,

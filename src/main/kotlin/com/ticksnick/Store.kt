@@ -248,7 +248,7 @@ internal object RunStore {
             return Spans.of(e.split(' ').filter { it.isNotEmpty() }.map { it.toLong() })
         }
 
-        val duty = DutyReport(
+        val duty = Duty(
             labelledDuty = dbl("duty.labelledDuty"),
             // Optional: a file without it loads NaN, and the duty warning falls back to the labelled duty.
             runnableDuty = m["duty.runnableDuty"]?.toDouble() ?: Double.NaN,

@@ -688,7 +688,7 @@ class Run internal constructor(
     internal val samplingSpanNanos: Long,
     internal val durationNanos: Long,
     internal val threads: Int,
-    internal val duty: DutyReport,
+    internal val duty: Duty,
     /**
      * Why the session stopped early, or null. Non-null means the numbers below describe a run the
      * profiler could not have measured correctly, and they are shown only so the reader can see
@@ -1295,7 +1295,7 @@ class Run internal constructor(
      * the operating system says the whole process used 1.03 s of CPU in a 20 s run - crediting
      * **55x** more CPU than the machine ever spent.
      *
-     * The duty cycle already knows. [DutyReport.labelledDuty] is measured from `getThreadCpuTime`,
+     * The duty cycle already knows. [Duty.labelledDuty] is measured from `getThreadCpuTime`,
      * which counts time on a processor and does see through the boundary, so `inside x labelledDuty`
      * is what that much occupancy could at most have been doing.
      *

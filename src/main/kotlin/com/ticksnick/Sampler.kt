@@ -921,7 +921,7 @@ internal class Sampler(
     }
 
     /** How much of the occupancy this session sampled was CPU. See [DutyCycle]. */
-    internal fun duty(): DutyReport =
+    internal fun duty(): Duty =
         duty.report(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting, sampleState)
 
     /**

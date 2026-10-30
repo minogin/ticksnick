@@ -162,7 +162,7 @@ class StoreDiffTest {
     private fun profile(ops: List<OperationStat>, tree: List<CoarseNode> = emptyList(), coarse: List<CoarseStat> = emptyList()) = Run(
         operations = ops, idleHits = 0, ticks = 1_001, samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000,
         threads = 1,
-        duty = DutyReport(
+        duty = Duty(
             labelledDuty = 0.99, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,
             cpuNanos = 990_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.99, maxWindowDuty = 0.99,

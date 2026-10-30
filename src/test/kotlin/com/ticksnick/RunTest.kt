@@ -71,7 +71,7 @@ class RunTest {
         return Run(
             operations = listOf(fine), idleHits = 50, ticks = 1_000,
             samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 4,
-            duty = DutyReport(
+            duty = Duty(
                 labelledDuty = 0.02, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
                 resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 4,
                 cpuNanos = 20_000_000, wallNanos = 1_000_000_000,
@@ -97,7 +97,7 @@ class RunTest {
         invisible: Double = 0.0,
         labelledFraction: Double = 1.0,
         reason: String? = null,
-    ) = DutyReport(
+    ) = Duty(
         labelledDuty = labelled,
         invisibleOffCpu = invisible,
         labelledFraction = labelledFraction,
@@ -119,7 +119,7 @@ class RunTest {
         idle: Long = 0,
         idleWaiting: Long = 0,
         state: Boolean = true,
-        d: DutyReport = duty(),
+        d: Duty = duty(),
         failure: String? = null,
     ) = Run(
         operations = ops,
@@ -270,7 +270,7 @@ class RunTest {
      */
     @Test
     fun `the cores line says where the cores went`() {
-        val d = DutyReport(
+        val d = Duty(
             labelledDuty = 0.5, runnableDuty = 0.588, invisibleOffCpu = 0.4, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 10, threads = 6,
             cpuNanos = 29_400_000_000, wallNanos = 60_000_000_000, minWindowDuty = 0.5, maxWindowDuty = 0.5,
@@ -296,7 +296,7 @@ class RunTest {
         jit: Long = 3_000_000_000,
         paused: Long = 6_000_000_000,
         profiled: Long = -1,
-    ) = DutyReport(
+    ) = Duty(
         labelledDuty = 0.5, runnableDuty = runnable, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
         resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 10, threads = 6,
         cpuNanos = cpu, wallNanos = 60_000_000_000, minWindowDuty = 0.5, maxWindowDuty = 0.5,
@@ -345,7 +345,7 @@ class RunTest {
      */
     @Test
     fun `the Careful line names the cause from full or spare seconds`() {
-        fun careful(full: Double, spare: Double) = DutyReport(
+        fun careful(full: Double, spare: Double) = Duty(
             labelledDuty = 0.5, runnableDuty = 0.588, invisibleOffCpu = 0.4, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 10, threads = 6,
             cpuNanos = 29_400_000_000, wallNanos = 60_000_000_000, minWindowDuty = 0.5, maxWindowDuty = 0.5,
@@ -456,7 +456,7 @@ class RunTest {
     private fun sampled(wait: WaitStrategy, processors: Int, ticks: Long) = Run(
         operations = emptyList(), idleHits = 0, ticks = ticks,
         samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 1,
-        duty = DutyReport(
+        duty = Duty(
             labelledDuty = 0.99, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,
             cpuNanos = 990_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.99, maxWindowDuty = 0.99,

@@ -252,7 +252,7 @@ class SetupTest {
     ) = Run(
         operations = listOf(OperationStat(0, "work", 10, 10, 0, 0, 0, 0, 10)), idleHits = 0, ticks = 1_001,
         samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 1,
-        duty = DutyReport(
+        duty = Duty(
             labelledDuty = 0.999, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,
             cpuNanos = 999_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.999, maxWindowDuty = 0.999,

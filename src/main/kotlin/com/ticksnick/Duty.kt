@@ -526,14 +526,14 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
         slotWaiting: LongArray,
         slotLabelledWaiting: LongArray,
         stateSampled: Boolean,
-    ): DutyReport = run {
+    ): Duty = run {
         val b =
             if (available) labelledDuty(
                 slotHits, slotLabelled, slotWaiting, slotLabelledWaiting,
                 cpuByIndex, wallByIndex, stateSampled
             )
             else LabelledDuty(Double.NaN, Double.NaN, Double.NaN)
-        DutyReport(
+        Duty(
         labelledDuty = b.duty,
         runnableDuty = b.runnableDuty,
         invisibleOffCpu = b.invisibleOffCpu,
@@ -583,7 +583,7 @@ internal class LabelledDuty(
     val duty: Double,
     val invisibleOffCpu: Double,
     val labelledFraction: Double,
-    /** See [DutyReport.runnableDuty]. */
+    /** See [Duty.runnableDuty]. */
     val runnableDuty: Double = Double.NaN,
 )
 
@@ -689,7 +689,7 @@ internal fun labelledDuty(
 }
 
 /** What the duty measurement came to, and the bound it puts on every share in the report. */
-internal class DutyReport internal constructor(
+internal class Duty internal constructor(
     /**
      * The fraction of *labelled* occupancy that was CPU, worst case. NaN when it could not be
      * computed, and the aggregate [duty] then stands in — pessimistic rather than wrong.

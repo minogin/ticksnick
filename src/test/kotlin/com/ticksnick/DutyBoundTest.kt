@@ -48,7 +48,7 @@ class DutyBoundTest {
         )
     }
 
-    /** The bound the report prints, in percentage points. Clamped the way [DutyReport.boundPp] is. */
+    /** The bound the report prints, in percentage points. Clamped the way [Duty.boundPp] is. */
     private fun pp(duty: Double) = min(100.0, (1 - duty) / duty * 100)
 
     // ---------------------------------------------------------------- properties

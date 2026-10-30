@@ -172,6 +172,23 @@ class SetupTest {
     }
 
     @Test
+    fun `a long section cannot hide that a profile is mixed`() = inTemp { dir ->
+        val before = dir.resolve("before")
+        val after = dir.resolve("after")
+        for (i in 1..MAX_CAREFUL + 2) {
+            save(before, "a$i", run(imbalances = i, tags = mapOf("warmups" to "$i")))
+            save(after, "a$i", run(imbalances = 100 + i, tags = mapOf("batches" to "$i")))
+        }
+        val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
+        assertTrue("more" in text.lines().first { it.contains("... and") }, text)
+        assertTrue("runs in 'before': they differ in warmups" in text, text)
+        assertTrue("runs in 'after': they differ in batches" in text, text)
+        val report = TickSnick.load(before).render()
+        assertTrue("runs: they differ in warmups" in report, report)
+        assertTrue(report.lines().indexOfFirst { "... and" in it } < report.lines().indexOfFirst { "they differ in" in it }, report)
+    }
+
+    @Test
     fun `the diff of one run on each side repeats their warnings too`() = inTemp { dir ->
         val before = dir.resolve("before")
         val after = dir.resolve("after")

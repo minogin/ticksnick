@@ -2104,7 +2104,7 @@ class Run internal constructor(
      * @param careful the warnings, in a `CAREFUL` section under the logo: [Profile.warnings] and the
      * line that one run has no interval, when this run is a profile's only one.
      */
-    internal fun render(legend: Boolean = false, careful: List<String> = warnings()): String = buildString {
+    internal fun render(legend: Boolean = false, careful: Warnings = Warnings(warnings())): String = buildString {
         if (failure != null) {
             appendLine("!".repeat(pageWidth))
             appendLine("PROFILING STOPPED - these numbers were not going to be right:")

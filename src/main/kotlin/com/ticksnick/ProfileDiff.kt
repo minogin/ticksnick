@@ -100,7 +100,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     fun render(): String =
         if (before.runs.size == 1 && after.runs.size == 1)
             OneRunDiff(before.runs[0], after.runs[0], before.runName(0), after.runName(0))
-                .render(careful = listOf(ONE_RUN_DIFF_CAREFUL) + before.warnings(named = true) + after.warnings(named = true))
+                .render(careful = Warnings(listOf(ONE_RUN_DIFF_CAREFUL)) + before.warnings(named = true) + after.warnings(named = true))
         else across()
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
@@ -158,7 +158,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     }
 
     /** What makes the change mean something other than the code's: printed on top, see [carefulBlock]. */
-    private fun careful(rootName: String?): List<String> {
+    private fun careful(rootName: String?): Warnings {
         val lines = mutableListOf<String>()
         val b = clockMean(before)
         val a = clockMean(after)
@@ -168,9 +168,10 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
                 Locale.ROOT, "clock: %s -> %s between the sides - up to %.2fx of a time difference is the machine, not the code; shares hold",
                 before.runs[0].clock.format(b), after.runs[0].clock.format(a), maxOf(a, b) / minOf(a, b)
             )
+        var sides = Warnings()
         for (side in listOf(before, after)) {
-            if (side.runs.size == 1) lines += "times: 1 run of '${side.name}', no interval - a change may be noise and no row gets a verdict; run it again for one"
-            lines += side.warnings(named = true)
+            val interval = if (side.runs.size == 1) listOf("times: 1 run of '${side.name}', no interval - a change may be noise and no row gets a verdict; run it again for one") else emptyList()
+            sides += Warnings(interval) + side.warnings(named = true)
         }
         if (rootName != null) {
             fun countsOf(side: Profile) = side.matched(side.tree(), rootName).let { m -> m.present.map { m.nodes[it]!!.count } }.distinct()
@@ -180,7 +181,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
                 lines += "$rootName: run ${cb[0]} times before, ${ca[0]} after - compare per execution"
         }
         lines += allocationsCareful(before.runs, after.runs)
-        return lines
+        return Warnings(lines + sides.ranked, sides.always)
     }
 
     /** The coarse table's rows, name first. Built before anything is printed: the longest name sizes the page. */

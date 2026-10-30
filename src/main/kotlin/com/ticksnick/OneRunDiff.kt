@@ -40,11 +40,11 @@ internal class OneRunDiff(
     private class Pair(val label: String, val a: Run.OperationRow?, val b: Run.OperationRow?)
 
     /** @param careful warnings from the caller, in the `CAREFUL` section under the title. */
-    fun render(careful: List<String> = emptyList()): String = buildString {
+    fun render(careful: Warnings = Warnings()): String = buildString {
         appendLine("=".repeat(DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
         appendLine(row("Diff", "$beforeName -> $afterName"))
         carefulBlock(
-            careful + ClockReport.diffCareful(before.clock, after.clock) + allocationsCareful(listOf(before), listOf(after))
+            careful + Warnings(ClockReport.diffCareful(before.clock, after.clock) + allocationsCareful(listOf(before), listOf(after)))
         )
         factDiffLines(listOf(before.tags), listOf(after.tags), listOf(before.facts), listOf(after.facts))
         // Three lines and not one `wall = active + paused`, so that each carries its change, as every

@@ -47,18 +47,29 @@ internal const val RUNS_FINE_ROW = "%-26s | %11s %7s | %11s %7s | %27s"
  *
  * A warning with line breaks continues under its own text. Capped at [MAX_CAREFUL], the rest
  * counted: a section that runs to fifty is one a reader learns to skip. The caller orders them by
- * what each costs the reader, worst first.
+ * what each costs the reader, worst first. [Warnings.always] come after the cap and are not cut.
  */
-internal fun StringBuilder.carefulBlock(warnings: List<String>) {
-    if (warnings.isEmpty()) return
-    appendLine()
-    for (w in warnings.take(MAX_CAREFUL)) {
+internal fun StringBuilder.carefulBlock(warnings: Warnings) {
+    if (warnings.ranked.isEmpty() && warnings.always.isEmpty()) return
+    fun print(w: String) {
         val lines = w.lines()
         appendLine(row("CAREFUL", lines.first().trim()))
         for (line in lines.drop(1)) appendLine(row("", line.trim()))
     }
-    if (warnings.size > MAX_CAREFUL) appendLine(row("", "... and ${warnings.size - MAX_CAREFUL} more"))
     appendLine()
+    warnings.ranked.take(MAX_CAREFUL).forEach(::print)
+    if (warnings.ranked.size > MAX_CAREFUL) appendLine(row("", "... and ${warnings.ranked.size - MAX_CAREFUL} more"))
+    warnings.always.forEach(::print)
+    appendLine()
+}
+
+/**
+ * What a `CAREFUL` section prints: [ranked] worst first, up to its cap, and [always] after them.
+ * A profile whose runs are mixed is one line in [always]: last, so a mix that was meant pushes out
+ * nothing, and past the cap, so a long section cannot hide that a profile is not one.
+ */
+internal class Warnings(val ranked: List<String> = emptyList(), val always: List<String> = emptyList()) {
+    operator fun plus(other: Warnings) = Warnings(ranked + other.ranked, always + other.always)
 }
 
 /** Student's t for a 95% interval with [df] degrees of freedom. */
@@ -150,7 +161,7 @@ class Profile internal constructor(internal val name: String, internal val files
      */
     fun render(): String {
         Logo.once()
-        return if (runs.size == 1) runs[0].render(careful = listOf(ONE_RUN_CAREFUL.format(name)) + warnings()) else across()
+        return if (runs.size == 1) runs[0].render(careful = Warnings(listOf(ONE_RUN_CAREFUL.format(name))) + warnings()) else across()
     }
 
     /** One coarse row over the runs: the node at this path in each, null where a run has none. */
@@ -296,15 +307,18 @@ class Profile internal constructor(internal val name: String, internal val files
      * [named] says whose they are, for a diff.
      *
      * What makes the interval mean something other than chance comes first, since every figure below
-     * rests on it, and the runs' own after it. The line that the runs differ is last and one line
-     * however many names it lists: a mix can be meant, so it must not push out a warning that is not.
+     * rests on it, and the runs' own after it. The line that the runs differ is one line however many
+     * names it lists, and is in [Warnings.always].
      */
-    internal fun warnings(named: Boolean = false): List<String> {
+    internal fun warnings(named: Boolean = false): Warnings {
         val where = if (named) " in '$name'" else ""
         val mixed = mixedNames(tagMaps) + mixedNames(setupMaps)
-        return intervalWarnings(root(), where) + runWarnings(where) + if (mixed.isEmpty()) emptyList() else listOf(
-            "runs$where: they differ in ${mixed.joinToString(", ")} - " +
-                    "a folder is same code, same workload, same setup; move a run that differs out of it"
+        return Warnings(
+            intervalWarnings(root(), where) + runWarnings(where),
+            if (mixed.isEmpty()) emptyList() else listOf(
+                "runs$where: they differ in ${mixed.joinToString(", ")} - " +
+                        "a folder is same code, same workload, same setup; move a run that differs out of it"
+            ),
         )
     }
 

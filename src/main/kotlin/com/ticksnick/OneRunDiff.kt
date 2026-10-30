@@ -7,25 +7,25 @@ import kotlin.math.abs
 internal const val HEADER_DIFF_ROW = "%7s -> %7s  %9s %7s"
 
 /**
- * Two profiles side by side: what changed between a run and the one before it.
+ * Two runs side by side: what changed between a run and the one before it.
  *
  * Operations are matched by name and coarse nodes by path, and every figure is printed as
  * `before -> after` with the change beside it, because a diff tool on two rendered reports shows
  * that every number moved and leaves the arithmetic to the eye. Sorted by the size of the change
  * in thread-time, so what moved most is on top whether it went up or down.
  *
- * **Calls are the check.** A step that got faster at the same call count is a faster step; a step
+ * **Calls are the check.** An operation that got faster at the same call count is faster; one
  * with fewer calls did less work, which is a different finding, and the column says `=` when the
  * two agree so that the exception stands out.
  */
-internal class ProfileDiff(
-    val before: Profile,
-    val after: Profile,
+internal class OneRunDiff(
+    val before: Run,
+    val after: Run,
     val beforeName: String = "before",
     val afterName: String = "after",
 ) {
     /**
-     * Each run's coarse rows by wall time, as the report prints them (see [Profile.wallsOf]).
+     * Each run's coarse rows by wall time, as the report prints them (see [Run.wallsOf]).
      */
     private val wallBefore = before.wallsOf()
     private val wallAfter = after.wallsOf()
@@ -37,7 +37,7 @@ internal class ProfileDiff(
     private val fineRow = widened(FINE_DIFF_ROW, fineExtra)
 
     /** One operation on both sides; either side may be absent. */
-    private class Pair(val label: String, val a: Profile.OperationRow?, val b: Profile.OperationRow?)
+    private class Pair(val label: String, val a: Run.OperationRow?, val b: Run.OperationRow?)
 
     /** @param careful warnings from the caller, in the `CAREFUL` section under the title. */
     fun render(careful: List<String> = emptyList()): String = buildString {
@@ -143,7 +143,7 @@ internal class ProfileDiff(
     /**
      * The fine labels in a coarse row's own time, on either side, in the report's form: wall, calls,
      * and calls per execution of the row. Totals of two runs that did different amounts of work cannot
-     * be compared; calls per execution can, and `340 =` says the step did the same work.
+     * be compared; calls per execution can, and `340 =` says the row did the same work.
      */
     private fun StringBuilder.ownRows(indent: String, a: CoarseNode?, b: CoarseNode?) {
         val ra = a?.let { before.ownRowsOf(it) }.orEmpty()
@@ -170,7 +170,7 @@ internal class ProfileDiff(
     }
 
     /** [r]'s calls on [n]: 0 for a label not there on a path that counted calls; null where they were not counted. */
-    private fun ownCalls(r: Profile.OwnRow?, n: CoarseNode?): Long? {
+    private fun ownCalls(r: Run.OwnRow?, n: CoarseNode?): Long? {
         if (n == null) return null
         val calls = r?.calls ?: if (n.calls.isNotEmpty()) 0L else -1L
         return calls.takeIf { it >= 0 }
@@ -207,14 +207,14 @@ internal class ProfileDiff(
             .filter { (it.a?.hits ?: 0) > 0 || (it.b?.hits ?: 0) > 0 }
     }
 
-    private fun threadTime(p: Profile, r: Profile.OperationRow?): Double =
+    private fun threadTime(p: Run, r: Run.OperationRow?): Double =
         if (r == null) Double.NaN else r.hits * p.stepNanos
 
-    private fun long(p: Profile, r: Profile.OperationRow?): String =
+    private fun long(p: Run, r: Run.OperationRow?): String =
         if (r == null || !r.longShown) "-"
         else String.format(Locale.ROOT, "%,d / %s", r.stuckInstances, threadTime(r.stuckHits * p.stepNanos))
 
-    private fun calls(a: Profile.OperationRow?, b: Profile.OperationRow?): String = counts(a?.calls, b?.calls)
+    private fun calls(a: Run.OperationRow?, b: Run.OperationRow?): String = counts(a?.calls, b?.calls)
 
     private fun counts(a: Long?, b: Long?): String = when {
         a == null && b == null -> "-"

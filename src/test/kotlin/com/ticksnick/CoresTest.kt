@@ -7,7 +7,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * The `Cores` line and the clock on real sessions: the arithmetic is tested in ProfileTest and
+ * The `Cores` line and the clock on real sessions: the arithmetic is tested in RunTest and
  * DutyBoundTest, the plumbing from the clocks to the line only here.
  */
 class CoresTest {

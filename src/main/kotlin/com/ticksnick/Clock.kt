@@ -89,7 +89,7 @@ internal class ClockReport internal constructor(
     private fun unit(): String = if (ofBase) " of base" else ""
 
     internal companion object {
-        /** A profile with no clock in it, or built by hand: nothing to say. */
+        /** A run with no clock in it, or built by hand: nothing to say. */
         val NOT_RECORDED = ClockReport(DoubleArray(0), ofBase = true, notMeasured = null)
 
         /**

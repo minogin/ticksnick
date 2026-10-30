@@ -46,7 +46,7 @@ class TreeTest {
         Profiler.start(stepMillis = 1.0, strict = false)
     }
 
-    private fun Profile.root(name: String): CoarseNode? = coarseTree.firstOrNull { it.name == name }
+    private fun Run.root(name: String): CoarseNode? = coarseTree.firstOrNull { it.name == name }
     private fun CoarseNode.child(name: String): CoarseNode? = children.firstOrNull { it.name == name }
 
     /** Runs [body] on a thread of its own and gives its slot back, as a caller is asked to. */
@@ -281,10 +281,10 @@ class TreeTest {
         val text = p.render()
         assertTrue(text.lines().any { it.trim().startsWith("slowest:") && node.slowest.first().key in it }, "no slowest line:\n$text")
 
-        val file = Files.createTempFile("tree-keyed", PROFILE_EXTENSION)
+        val file = Files.createTempFile("tree-keyed", RUN_EXTENSION)
         try {
-            ProfileStore.save(p, file)
-            val loaded = ProfileStore.load(file)
+            RunStore.save(p, file)
+            val loaded = RunStore.load(file)
             assertEquals(node.slowest, assertNotNull(assertNotNull(loaded.root("tree-keyed-outer")).child("tree-keyed")).slowest)
         } finally {
             Files.deleteIfExists(file)

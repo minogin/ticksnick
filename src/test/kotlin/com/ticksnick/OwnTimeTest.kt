@@ -59,13 +59,13 @@ class OwnTimeTest {
 
     private val ms = 1_000_000L
 
-    private fun nodeOf(p: Profile, name: String): CoarseNode =
+    private fun nodeOf(p: Run, name: String): CoarseNode =
         p.coarseTree.flatMap { it.flatten() }.first { it.name == name }
 
-    private fun ownOf(p: Profile, coarse: String, fine: String): Profile.OwnRow? =
+    private fun ownOf(p: Run, coarse: String, fine: String): Run.OwnRow? =
         p.ownRowsOf(nodeOf(p, coarse))!!.firstOrNull { it.name == fine }
 
-    private fun share(p: Profile, coarse: String, fine: String): Double = ownOf(p, coarse, fine)?.share ?: 0.0
+    private fun share(p: Run, coarse: String, fine: String): Double = ownOf(p, coarse, fine)?.share ?: 0.0
 
     private fun assertNear(expected: Double, actual: Double, tolerance: Double, what: String) =
         assertTrue(kotlin.math.abs(actual - expected) <= tolerance, "$what: expected $expected +/- $tolerance, was $actual")

@@ -15,12 +15,12 @@ internal const val RUNS_DIFF_COARSE_ROW = "%-40s | %-20s %-24s | %-28s | %-24s |
 internal const val RUNS_DIFF_ALLOCATED_ROW = "%-40s | %-20s %-24s | %-28s | %-24s | %-14s | %s"
 internal const val RUNS_DIFF_FINE_ROW = "%-26s | %-20s %-24s | %-20s %-24s | %s"
 
-/** The `CAREFUL` line of a diff of one run against one, which [ProfileDiff] renders. */
+/** The `CAREFUL` line of a diff of one run against one, which [OneRunDiff] renders. */
 internal const val ONE_RUN_DIFF_CAREFUL = "times: 1 run on each side, no interval - a change in time may be noise, a run goes faster or " +
         "slower as a whole; changes in share of the parent hold"
 
 /**
- * The change of one figure between two versions: after's mean of its runs minus before's, and the
+ * The change of one figure between two profiles: after's mean of its runs minus before's, and the
  * half-width of its 95% interval by Welch's t, which does not assume the two sides spread alike.
  *
  * **A verdict only where the interval is on one side of 0.** `-10% +-12%` is somewhere between -22%
@@ -84,29 +84,29 @@ private fun counts(c: List<Long>): String = when {
     else -> String.format(Locale.ROOT, "~%,.0f", c.average())
 }
 
-/** `2 =` when both sides agree, `2 -> 3` when not: a step that did different work is a different finding. */
+/** `2 =` when both sides agree, `2 -> 3` when not: an operation that did different work is a different finding. */
 private fun countPair(b: List<Long>, a: List<Long>): String =
     if (b.isNotEmpty() && b.distinct().size == 1 && b.distinct() == a.distinct()) "${counts(b)} =" else "${counts(b)} -> ${counts(a)}"
 
 /**
- * **Two versions over their runs**: each side a folder of runs (see [ProfileRuns]), every
+ * **Two profiles compared**: each side a folder of runs (see [Profile]), every
  * figure the mean of its side's runs, and the change with its 95% interval and a verdict.
  *
- * One run on each side renders as a [ProfileDiff]. One run on one side only prints the
+ * One run on each side renders as a [OneRunDiff]. One run on one side only prints the
  * means and the change, with no interval, and says so.
  */
-internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
+internal class ProfileDiff(val before: Profile, val after: Profile) {
 
     fun render(): String =
         if (before.runs.size == 1 && after.runs.size == 1)
-            ProfileDiff(before.runs[0], after.runs[0], before.runName(0), after.runName(0)).render(careful = listOf(ONE_RUN_DIFF_CAREFUL))
+            OneRunDiff(before.runs[0], after.runs[0], before.runName(0), after.runName(0)).render(careful = listOf(ONE_RUN_DIFF_CAREFUL))
         else across()
 
-    private fun ProfileRuns.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
-    private fun ProfileRuns.active() = Estimate(runs.map { it.activeNanos.toDouble() })
-    private fun ProfileRuns.paused() = Estimate(runs.map { it.pause.confirmedPausedIn(it.samplingSpanNanos).toDouble() })
-    private fun ProfileRuns.tree() = runs.map { it.coarseTree }
-    private fun ProfileRuns.described() = if (runs.size == 1) "1 run" else "${runs.size} runs"
+    private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
+    private fun Profile.active() = Estimate(runs.map { it.activeNanos.toDouble() })
+    private fun Profile.paused() = Estimate(runs.map { it.pause.confirmedPausedIn(it.samplingSpanNanos).toDouble() })
+    private fun Profile.tree() = runs.map { it.coarseTree }
+    private fun Profile.described() = if (runs.size == 1) "1 run" else "${runs.size} runs"
 
     private fun header(key: String, b: Estimate, a: Estimate, suffix: String = ""): String {
         val c = Change(b, a)
@@ -146,7 +146,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
         appendLine("=".repeat(RUNS_DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
     }
 
-    private fun clockMean(r: ProfileRuns) = r.runs.map { it.clock.mean }.filter { !it.isNaN() }.let { if (it.isEmpty()) Double.NaN else it.average() }
+    private fun clockMean(r: Profile) = r.runs.map { it.clock.mean }.filter { !it.isNaN() }.let { if (it.isEmpty()) Double.NaN else it.average() }
 
     private fun StringBuilder.clock() {
         val b = clockMean(before)
@@ -172,7 +172,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
             lines += side.carefulLines(root, where = " in '${side.name}'")
         }
         if (rootName != null) {
-            fun countsOf(side: ProfileRuns) = side.matched(side.tree(), rootName).let { m -> m.present.map { m.nodes[it]!!.count } }.distinct()
+            fun countsOf(side: Profile) = side.matched(side.tree(), rootName).let { m -> m.present.map { m.nodes[it]!!.count } }.distinct()
             val cb = countsOf(before)
             val ca = countsOf(after)
             if (cb.size == 1 && ca.size == 1 && ca != cb)
@@ -186,7 +186,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
     private val coarseRows: List<List<String>> by lazy {
         val rows = ArrayList<List<String>>()
         fun walk(bLevel: List<List<CoarseNode>>, aLevel: List<List<CoarseNode>>, bParents: List<CoarseNode?>, aParents: List<CoarseNode?>, depth: Int) {
-            // The later version's order, then the paths only the earlier one had, so a removed row is not silently gone.
+            // After's order, then the paths only before had, so a removed row is not silently gone.
             val names = after.childrenOf(aLevel).map { it.name }.let { seen -> seen + before.childrenOf(bLevel).map { it.name }.filter { it !in seen } }
             for (name in names) {
                 val b = before.matched(bLevel, name)
@@ -239,16 +239,16 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
      * row, and their calls per execution of it, which can be compared between runs that did different
      * amounts of work. A run with the row and not the label counts at 0.
      */
-    private fun ownRows(rows: MutableList<List<String>>, b: ProfileRuns.Matched, a: ProfileRuns.Matched, depth: Int) {
+    private fun ownRows(rows: MutableList<List<String>>, b: Profile.Matched, a: Profile.Matched, depth: Int) {
         val ob = before.ownOf(b)
         val oa = after.ownOf(a)
         for (label in (oa.keys + ob.keys).distinct()) {
             anyOwn = true
             // Over the runs with the coarse row, 0 where one has it and not the label; a side caught in
             // none of them has no figure rather than a 0.
-            fun over(m: ProfileRuns.Matched, f: (Int) -> Double) = Estimate(m.present.map(f).takeIf { v -> v.any { it > 0 } } ?: emptyList())
-            fun wall(m: ProfileRuns.Matched, rows: List<Profile.OwnRow?>?) = over(m) { rows?.get(it)?.wallNanos ?: 0.0 }
-            fun share(m: ProfileRuns.Matched, rows: List<Profile.OwnRow?>?) =
+            fun over(m: Profile.Matched, f: (Int) -> Double) = Estimate(m.present.map(f).takeIf { v -> v.any { it > 0 } } ?: emptyList())
+            fun wall(m: Profile.Matched, rows: List<Run.OwnRow?>?) = over(m) { rows?.get(it)?.wallNanos ?: 0.0 }
+            fun share(m: Profile.Matched, rows: List<Run.OwnRow?>?) =
                 over(m) { rows?.get(it)?.share?.takeIf { s -> !s.isNaN() }?.times(100) ?: 0.0 }
             val wb = wall(b, ob[label])
             val wa = wall(a, oa[label])

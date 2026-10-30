@@ -399,7 +399,7 @@ object Profiler {
      * [ceiling], which is how far the indexes have ever reached.
      *
      * **What it costs:** a thread that arrives past the ceiling has no index and is not in the walk
-     * at all, and the report says how many such threads there were — see [Profile.untrackedSlots].
+     * at all, and the report says how many such threads there were — see [Run.untrackedSlots].
      * A bounded, stated blind spot in place of an unbounded walk, which would corrupt every number
      * rather than one.
      */
@@ -925,7 +925,7 @@ object Profiler {
      * Labels left open at a point the caller said should be quiescent. See [expectBalanced].
      *
      * For the life of the process, because [expectBalanced] is a check a caller may make with no
-     * session running at all. What a [Profile] carries is this minus [imbalancesAtStart], for the
+     * session running at all. What a [Run] carries is this minus [imbalancesAtStart], for the
      * same reason `Sampler.callsAtStart` exists: every number in a report is about one session.
      */
     private val imbalances = AtomicInteger(0)
@@ -941,7 +941,7 @@ object Profiler {
      */
     private var imbalancesAtStart = 0
 
-    /** [untrackedSlots] as it stood when the current session began. See [Profile.untrackedSlots]. */
+    /** [untrackedSlots] as it stood when the current session began. See [Run.untrackedSlots]. */
     private var untrackedAtStart = 0
 
     /** [reclaimedSlots] as it stood when the current session began. */
@@ -1114,7 +1114,7 @@ object Profiler {
 
     /** Stops sampling and returns what was collected. */
     @JvmStatic
-    fun stop(): Profile {
+    fun stop(): Run {
         Logo.once()
         val s = checkNotNull(sampler) { "not sampling" }
         s.shutdown()
@@ -1179,7 +1179,7 @@ object Profiler {
             spanMinNanos = if (n.count == 0L) 0L else n.minNanos, spanMaxNanos = n.maxNanos,
             spans = n.spans, inclusiveHits = n.inclusiveHits, runningInclusiveHits = n.runningInclusiveHits,
             instanceTicks = n.instanceTicks, coveredTicks = n.coveredTicks,
-            // Zeros rather than empty for a path never caught in its own time: empty means a profile
+            // Zeros rather than empty for a path never caught in its own time: empty means a run
             // saved without these, and such a path still has its calls to show.
             ownFine = n.ownFine ?: LongArray(MAX_OPERATIONS + 1), ownFineCovered = n.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1),
             calls = n.calls ?: LongArray(MAX_OPERATIONS),
@@ -1190,7 +1190,7 @@ object Profiler {
             slowest = n.slowest(),
         )
         val coarseTree = tree.below().filter { !it.isEmpty() }.map { nodeOf(it) }
-        return Profile(
+        return Run(
             stats, s.counters[NO_OP_INDEX], s.ticks, s.span, duration, s.maxSlots, s.duty(), s.failure,
             imbalances = imbalances.get() - imbalancesAtStart, openAtEnd = openSpans(), stateSampled = s.sampleState,
             untrackedSlots = (untrackedSlots() - untrackedAtStart).coerceAtLeast(0),

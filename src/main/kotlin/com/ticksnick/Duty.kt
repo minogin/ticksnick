@@ -748,7 +748,7 @@ internal class DutyReport internal constructor(
     val pausedProcessCpuNanos: Long = 0,
     /**
      * The profiled threads' CPU over the same windows, read ten times a second so a thread's start and
-     * end are not lost (see `DutyCycle.coresLatest`); -1 in a saved profile that lacks it, where
+     * end are not lost (see `DutyCycle.coresLatest`); -1 in a saved run that lacks it, where
      * [cpuNanos] stands in.
      */
     val profiledCpuNanos: Long = -1,
@@ -790,7 +790,7 @@ internal class DutyReport internal constructor(
      * aggregate where it does not.
      *
      * Everything that judges a *share* uses this. Everything that describes what the *machine* was
-     * doing to every thread at once — [Profile.machineFloor], [Profile.offCpuSamples] — keeps using
+     * doing to every thread at once — [Run.machineFloor], [Run.offCpuSamples] — keeps using
      * [duty], because there the whole process is the subject and an idle thread belongs in it.
      */
     val shareDuty: Double get() = if (labelledDuty.isNaN()) activeDuty else labelledDuty

@@ -56,7 +56,7 @@ class CallsPerParentTest {
     private val rare = Profiler.registerFine("rare")
 
     /** One batch of [plans] plans, each followed by a cleanup. About 115 ms per plan. */
-    private fun run(plans: Int): Profile {
+    private fun run(plans: Int): Run {
         Profiler.start(strict = false)
         op(batch) {
             repeat(plans) {
@@ -161,7 +161,7 @@ class CallsPerParentTest {
     fun `a diff of one run shows the same as the report`() {
         val before = run(plans = 4)
         val after = run(plans = 2)
-        checkDiff(ProfileDiff(before, after).render())
+        checkDiff(OneRunDiff(before, after).render())
     }
 
     @Test

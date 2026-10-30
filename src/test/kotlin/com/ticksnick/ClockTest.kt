@@ -80,15 +80,15 @@ class ClockTest {
         val until = System.nanoTime() + 50_000_000
         while (System.nanoTime() < until) op(id) { Thread.onSpinWait() }
         val profile = Profiler.stop()
-        val file = Files.createTempFile("clock", PROFILE_EXTENSION)
+        val file = Files.createTempFile("clock", RUN_EXTENSION)
         try {
-            ProfileStore.save(profile, file)
+            RunStore.save(profile, file)
             val without = Files.readAllLines(file).filterNot { it.startsWith("clock.") }
             Files.write(file, without)
-            assertEquals(0, ProfileStore.load(file).clock.samples.size)
+            assertEquals(0, RunStore.load(file).clock.samples.size)
 
             Files.write(file, without + listOf("clock.ofBase\ttrue", "clock.notMeasured\t\\0", "clock.samples\t205.0 - 135.0"))
-            val clock = ProfileStore.load(file).clock
+            val clock = RunStore.load(file).clock
             assertEquals(3, clock.samples.size)
             assertEquals(205.0, clock.samples[0])
             assertTrue(clock.samples[1].isNaN())

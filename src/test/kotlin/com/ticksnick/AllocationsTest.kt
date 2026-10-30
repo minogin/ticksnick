@@ -55,7 +55,7 @@ class AllocationsTest {
     private val outer = Profiler.registerCoarse("alloc.outer")
     private val inner = Profiler.registerCoarse("alloc.inner")
 
-    private fun Profile.node(name: String): CoarseNode = coarseTree.flatMap { it.flatten() }.first { it.name == name }
+    private fun Run.node(name: String): CoarseNode = coarseTree.flatMap { it.flatten() }.first { it.name == name }
 
     private fun assertBytes(want: Double, got: Double, what: String) {
         assertTrue(got >= want && got <= want + SLACK, "$what: $got bytes, want $want to ${want + SLACK}")
@@ -144,13 +144,13 @@ class AllocationsTest {
         assertEquals("3.00 MB", row.substring(end - 7, end), row)
 
         val folder = Files.createTempDirectory("alloc")
-        val loaded = Profile.load(a.save(folder))
+        val loaded = Run.load(a.save(folder))
         assertTrue(loaded.allocations)
         assertEquals(a.node("alloc.outer").allocated, loaded.node("alloc.outer").allocated)
 
-        val both = ProfileDiff(a, a).render()
+        val both = OneRunDiff(a, a).render()
         assertTrue("3.00 MB -> 3.00 MB" in both, both)
-        val oneSide = ProfileDiff(off, a).render()
+        val oneSide = OneRunDiff(off, a).render()
         assertTrue("CAREFUL" in oneSide && "allocations: counted on one side only" in oneSide, oneSide)
         assertTrue("- -> 3.00 MB" in oneSide, oneSide)
     }
@@ -252,7 +252,7 @@ class AllocationsTest {
             assertFalse("Allocated" in text.lines().first { it.startsWith("Coarse operation") }, text)
         }
         checked(p.render())
-        val loaded = Profile.load(p.save(Files.createTempDirectory("alloc-missing")))
+        val loaded = Run.load(p.save(Files.createTempDirectory("alloc-missing")))
         assertTrue(loaded.allocationsMissing, "lost on saving")
         checked(loaded.render())
     }
@@ -410,7 +410,7 @@ class AllocationsTest {
 
     // --- comparing ----------------------------------------------------------------------------
 
-    private fun session(allocations: Boolean, body: () -> Unit = { nested() }): Profile {
+    private fun session(allocations: Boolean, body: () -> Unit = { nested() }): Run {
         Profiler.start(strict = false, allocations = allocations)
         body()
         return Profiler.stop()
@@ -457,7 +457,7 @@ class AllocationsTest {
         val with = { session(true) { nested(); repeat(2) { op(gone) { sink = ByteArray(MB) } } } }
         with()
         val without = { session(true) }
-        val one = ProfileDiff(with(), without()).render()
+        val one = OneRunDiff(with(), without()).render()
         assertTrue(one.lines().any { it.startsWith("alloc.gone") && "1.00 MB -> -" in it }, one)
 
         val before = Files.createTempDirectory("alloc-gone-a")
@@ -477,7 +477,7 @@ class AllocationsTest {
         val stale = Regex("^(allocations|node\\.\\d+\\.allocated)\t")
         Files.write(path, Files.readAllLines(path).filterNot { stale.containsMatchIn(it) })
 
-        val loaded = Profile.load(path)
+        val loaded = Run.load(path)
         assertFalse(loaded.allocations)
         assertFalse("Allocated" in loaded.render())
     }
@@ -498,8 +498,8 @@ class AllocationsTest {
 
     @Test
     fun `counting them raises the coarse floor`() {
-        val base = Profile.load(emptySave(false)).coarseContextNanos
-        val counted = Profile.load(emptySave(true)).coarseContextNanos
+        val base = Run.load(emptySave(false)).coarseContextNanos
+        val counted = Run.load(emptySave(true)).coarseContextNanos
         assertEquals(COARSE_ALLOCATIONS_NANOS, counted - base, 1e-9)
     }
 

@@ -239,7 +239,7 @@ class RegistryTest {
     /**
      * A session reports its own leaks and nobody else's.
      *
-     * Every other number in a `Profile` is per session, and deliberately so: `callsAtStart` exists
+     * Every other number in a `Run` is per session, and deliberately so: `callsAtStart` exists
      * because call counts that span a warm-up inflate implied durations by a tenth, which shows as
      * an upper bound coming out *below* the truth, an arithmetic impossibility. An imbalance count
      * kept for the process has no such tell. It fails quietly, in the direction of over-reporting,
@@ -564,6 +564,6 @@ class RegistryTest {
     }
 
     /** The row for one operation by name, since ids are shared with every other test in the JVM. */
-    private fun Profile.threadsOf(name: String): Int =
+    private fun Run.threadsOf(name: String): Int =
         operations.first { it.name == name }.threads
 }

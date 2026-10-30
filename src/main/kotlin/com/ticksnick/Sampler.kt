@@ -236,7 +236,7 @@ internal class Sampler(
     /** Ticks at which at least one thread was doing this type's own work. */
     internal val coarseSelfActiveTicks = LongArray(MAX_COARSE_TYPES)
 
-    /** The most threads seen doing this type's own work at one tick. See `Profile.workersOf`. */
+    /** The most threads seen doing this type's own work at one tick. See `Run.workersOf`. */
     internal val coarseSelfPeak = IntArray(MAX_COARSE_TYPES)
 
     /** As `seenAt`, for [coarseSelfActiveTicks]. */
@@ -910,7 +910,7 @@ internal class Sampler(
      *
      * Two conditions reach here: a leaked label — see [Profiler.expectBalanced] — and work billed
      * to finished executions, from [checkStaleContexts]. A label under the timing floor does not:
-     * its number is too imprecise to rank, not false, and it is listed in [Profile.tooSmall].
+     * its number is too imprecise to rank, not false, and it is listed in [Run.tooSmall].
      *
      * Stops sampling rather than the application: this is somebody else's process.
      */

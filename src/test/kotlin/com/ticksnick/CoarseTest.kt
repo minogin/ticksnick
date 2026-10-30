@@ -259,7 +259,7 @@ class CoarseTest {
         // 6.64 x 0.9640 = 6.40096 — the point is that `working` of 6.40 sits *on* that, not that
         // the two are bit-identical.
         assertEquals(6.40, r.workingCeilingOf(c), 0.01)
-        assertTrue(c.working <= r.workingCeilingOf(c) * Profile.WORKING_CEILING_SLACK)
+        assertTrue(c.working <= r.workingCeilingOf(c) * Run.WORKING_CEILING_SLACK)
         assertTrue(!r.workingIsContradicted(c), "an operation at its ceiling was accused")
     }
 
@@ -278,7 +278,7 @@ class CoarseTest {
             return report(listOf(c), labelledDuty = duty).workingIsContradicted(c)
         }
         // inside is 1.0 here, so the ceiling is the duty and the threshold is duty x slack.
-        val threshold = duty * Profile.WORKING_CEILING_SLACK
+        val threshold = duty * Run.WORKING_CEILING_SLACK
         assertTrue(!contradictedAt(threshold * 0.9), "just inside the slack and was accused")
         assertTrue(contradictedAt(threshold * 1.1), "just outside the slack and was believed")
     }
@@ -425,7 +425,7 @@ class CoarseTest {
         tree: List<CoarseNode> = coarse.map { node(it) },
         fineName: String = "fine",
         allocations: Boolean = false,
-    ) = Profile(
+    ) = Run(
         operations = listOf(OperationStat(0, fineName, labelled, labelled, 0, 0, 0, 0, labelled)),
         idleHits = 0,
         ticks = 1_000_001,
@@ -632,7 +632,7 @@ class CoarseTest {
     @Test
     fun `labelled work outside every span is measured and its operations named`() {
         val fanned = OperationStat(0, "fine", 1000, 1000, 0, 0, 0, 0, 1000)
-        val r = Profile(
+        val r = Run(
             operations = listOf(fanned),
             idleHits = 0, ticks = 1_000_001, samplingSpanNanos = 1_000_000_000_000,
             durationNanos = 1_000_000_000_000, threads = 8,

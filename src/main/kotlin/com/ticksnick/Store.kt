@@ -7,18 +7,18 @@ import java.nio.file.StandardOpenOption
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-/** The first line of a profile file, with the format's version. */
-internal const val PROFILE_FORMAT = "ticksnick-profile 2"
+/** The first line of a run file, with the format's version. */
+internal const val RUN_FORMAT = "ticksnick-run 3"
 
-/** The file extension a saved profile gets, and the one a folder of runs is read by. */
-internal const val PROFILE_EXTENSION = ".tsp"
+/** The file extension a saved run gets, and the one a folder of runs is read by. */
+internal const val RUN_EXTENSION = ".tsr"
 
 /** The length of the time in a run's file name, `2026-10-27T12-00-00`; a clash number may follow it. */
 private const val STAMP_LENGTH = 19
 
 /**
- * A [Profile] as a file: the data of one session, so that it can be rendered again later and
- * compared with another.
+ * A [Run] as a file: what one session left, so that it can be rendered again later and compared
+ * with another.
  *
  * **Text, one figure per line, `key<TAB>value`.** Readable, diffable with any tool, and written
  * without a dependency - the library has none and keeps none. A twenty-operation session is a few
@@ -32,15 +32,15 @@ private const val STAMP_LENGTH = 19
  * Every field of every constructor is here and nothing derived is: a newer renderer re-renders an
  * old file with whatever it has learned since.
  */
-internal object ProfileStore {
+internal object RunStore {
     private val STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH-mm-ss")
 
-    fun save(p: Profile, path: Path) {
+    fun save(p: Run, path: Path) {
         path.parent?.let { Files.createDirectories(it) }
         Files.writeString(path, text(p))
     }
 
-    private fun text(p: Profile): String {
+    private fun text(p: Run): String {
         val out = StringBuilder()
         fun line(key: String, value: Any) = out.append(key).append('\t').append(value.toString()).append('\n')
         fun text(key: String, value: String?) = line(key, escape(value))
@@ -51,7 +51,7 @@ internal object ProfileStore {
             if (e != null) line(key + "exact", e.joinToString(" ")) else sparse(key + "hist", s.histogram()!!)
         }
 
-        out.append(PROFILE_FORMAT).append('\n')
+        out.append(RUN_FORMAT).append('\n')
         line("idleHits", p.idleHits)
         line("ticks", p.ticks)
         line("samplingSpanNanos", p.samplingSpanNanos)
@@ -203,10 +203,10 @@ internal object ProfileStore {
         return out.toString()
     }
 
-    fun load(path: Path): Profile {
+    fun load(path: Path): Run {
         val lines = Files.readAllLines(path)
-        require(lines.isNotEmpty() && lines[0].startsWith("ticksnick-profile ")) { "$path is not a TickSnick profile" }
-        require(lines[0] == PROFILE_FORMAT) { "$path is format '${lines[0]}', this build reads '$PROFILE_FORMAT'" }
+        require(lines.isNotEmpty() && lines[0].startsWith("ticksnick-")) { "$path is not a TickSnick run" }
+        require(lines[0] == RUN_FORMAT) { "$path is format '${lines[0]}', this build reads '$RUN_FORMAT'" }
         val m = HashMap<String, String>()
         for (l in lines.drop(1)) {
             if (l.isEmpty()) continue
@@ -309,10 +309,10 @@ internal object ProfileStore {
                 // Optional: a file without them reads as never sampled - every row at a parallelism
                 // of 1, so its Wall is its Total.
                 instanceTicks = m[k + "instanceTicks"]?.toLong() ?: 0L, coveredTicks = m[k + "coveredTicks"]?.toLong() ?: 0L,
-                // Optional: without them a node has no own fine rows (see Profile.ownRowsOf).
+                // Optional: without them a node has no own fine rows (see Run.ownRowsOf).
                 ownFine = if (k + "ownFine" in m) sparse(k + "ownFine", MAX_OPERATIONS + 1) else LongArray(0),
                 ownFineCovered = if (k + "ownFineCovered" in m) sparse(k + "ownFineCovered", MAX_OPERATIONS + 1) else LongArray(0),
-                // Optional: without them a fine row under a coarse one has no calls (see Profile.ownRowsOf).
+                // Optional: without them a fine row under a coarse one has no calls (see Run.ownRowsOf).
                 calls = if (k + "calls" in m) sparse(k + "calls", MAX_OPERATIONS) else LongArray(0),
                 // Optional: only a session that counted them has any.
                 allocated = m[k + "allocated"]?.toLong() ?: 0L,
@@ -324,7 +324,7 @@ internal object ProfileStore {
         }
         val tree = (childrenOf[-1] ?: emptyList<Int>()).map { build(it) }
 
-        return Profile(
+        return Run(
             operations = operations, idleHits = long("idleHits"), ticks = long("ticks"),
             samplingSpanNanos = long("samplingSpanNanos"), durationNanos = long("durationNanos"),
             threads = int("threads"), duty = duty, failure = text("failure"), imbalances = int("imbalances"),
@@ -346,18 +346,18 @@ internal object ProfileStore {
      * when two threads or two JVMs save at once: a name is taken by creating its file, which only one
      * of them can do.
      *
-     * **One folder per version of the code, one file per run.** Every file in a folder is a run of
-     * that version, which is what a report across runs reads - so keeping the folder to one version
-     * is the user's part: a run of changed code goes into a new folder, and a run not to count is
-     * moved out.
+     * **One folder per profile, one file per run.** Every file in a folder is a run of that profile,
+     * which is what a report across runs reads - so keeping the folder to same code, same workload,
+     * same setup is the user's part: a run that differs goes into a new folder, and a run not to
+     * count is moved out.
      */
-    fun saveNew(p: Profile, folder: Path, now: LocalDateTime = LocalDateTime.now()): Path {
+    fun saveNew(p: Run, folder: Path, now: LocalDateTime = LocalDateTime.now()): Path {
         val text = text(p)
         Files.createDirectories(folder)
         val stamp = now.format(STAMP)
         var n = 1
         while (true) {
-            val file = folder.resolve((if (n == 1) stamp else "$stamp-$n") + PROFILE_EXTENSION)
+            val file = folder.resolve((if (n == 1) stamp else "$stamp-$n") + RUN_EXTENSION)
             try {
                 Files.writeString(file, text, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
                 return file
@@ -371,11 +371,11 @@ internal object ProfileStore {
     fun runs(folder: Path): List<Path> {
         if (!Files.isDirectory(folder)) return emptyList()
         // By the time in the name, then by its clash number: `-2` after the run it follows, `-10` after `-9`.
-        fun stem(p: Path): String = p.fileName.toString().removeSuffix(PROFILE_EXTENSION)
+        fun stem(p: Path): String = p.fileName.toString().removeSuffix(RUN_EXTENSION)
         fun stamp(p: Path): String = stem(p).take(STAMP_LENGTH)
         fun clash(p: Path): Int = stem(p).drop(STAMP_LENGTH).removePrefix("-").toIntOrNull() ?: 1
         return Files.list(folder).use { s ->
-            s.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(PROFILE_EXTENSION) }
+            s.filter { Files.isRegularFile(it) && it.fileName.toString().endsWith(RUN_EXTENSION) }
                 .sorted(compareBy<Path>({ stamp(it) }, { clash(it) }, { stem(it) })).toList()
         }
     }

@@ -220,10 +220,10 @@ every figure is the mean of the runs with its 95% interval:
 ```
 Runs          4 runs of 'naive', one JVM each: every figure below is their mean, +- its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
               run  file                               wall    clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsp           117 s      99%   27.6 s  27.4 s  27.0 s
-              2    2026-10-26T18-23-49.tsp           117 s      99%   27.4 s  27.1 s  27.5 s
-              3    2026-10-26T18-30-57.tsp           117 s      99%   27.8 s  27.1 s  28.1 s
-              4    2026-10-26T18-38-06.tsp           117 s      99%   27.5 s  27.4 s  27.6 s
+              1    2026-10-26T18-16-43.tsr           117 s      99%   27.6 s  27.4 s  27.0 s
+              2    2026-10-26T18-23-49.tsr           117 s      99%   27.4 s  27.1 s  27.5 s
+              3    2026-10-26T18-30-57.tsr           117 s      99%   27.8 s  27.1 s  28.1 s
+              4    2026-10-26T18-38-06.tsr           117 s      99%   27.5 s  27.4 s  27.6 s
 Wall time     117 s +- 444 ms (0.4%) = 104 s +-0.3% active + 13.2 s +-2.4% paused
 runBatch      27.5 s +- 260 ms (0.9%) per execution
 

@@ -21,7 +21,7 @@ internal const val MAX_COARSE_DEPTH = 16
 
 /**
  * How many of its slowest executions a coarse operation opened with a key keeps, per path. They
- * are printed under its row, longest first, and saved with the profile.
+ * are printed under its row, longest first, and saved with the run.
  */
 internal const val SLOWEST_KEPT = 5
 
@@ -286,14 +286,14 @@ internal class Spans internal constructor() {
         return sorted[minOf(rank, sorted.size) - 1].toDouble()
     }
 
-    /** For [ProfileStore]: the exact durations, or null once they are a histogram. */
+    /** For [RunStore]: the exact durations, or null once they are a histogram. */
     internal fun exactDurations(): LongArray? {
         val e = exact
         val k = kept
         return if (hist != null) null else e?.copyOf(minOf(k, e.size)) ?: LongArray(0)
     }
 
-    /** For [ProfileStore]: the histogram, or null while the durations are exact. */
+    /** For [RunStore]: the histogram, or null while the durations are exact. */
     internal fun histogram(): LongArray? = hist
 
     /** Moves the exact durations into a new histogram, and frees them. */
@@ -313,7 +313,7 @@ internal class Spans internal constructor() {
         /** A node's durations from a list, for tests and for putting timings of your own through the same rounding. */
         fun of(values: Iterable<Long>): Spans = Spans().also { s -> values.forEach { s.record(it) } }
 
-        /** A node's durations as a saved histogram. See [ProfileStore]. */
+        /** A node's durations as a saved histogram. See [RunStore]. */
         internal fun ofHistogram(counts: LongArray): Spans = Spans().also { it.hist = counts }
     }
 }

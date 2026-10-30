@@ -24,7 +24,7 @@ public final class JavaCaller {
     }
 
     /** One session through every Java form, {@code plans} times over. */
-    static Profile run(int plans) {
+    static Run run(int plans) {
         Profiler.start(1.0, WaitStrategy.PARK);
         for (int i = 0; i < plans; i++) {
             try (var plan = Profiler.coarse(PLAN)) {
@@ -60,7 +60,7 @@ public final class JavaCaller {
     }
 
     /** The setting from Java, through a scope and a pair: 1 MB in the plan and 2 MB in a level inside it. */
-    static Profile allocating(int plans) {
+    static Run allocating(int plans) {
         Profiler.start(1.0, WaitStrategy.PARK, 0.25, false, true, true);
         for (int i = 0; i < plans; i++) {
             try (var plan = Profiler.coarse(PLAN)) {
@@ -74,9 +74,9 @@ public final class JavaCaller {
     }
 
     /** Saves {@code profile} into {@code folder} and renders the folder, alone and against itself. */
-    static String report(Profile profile, Path folder) {
+    static String report(Run profile, Path folder) {
         profile.save(folder);
-        ProfileRuns runs = TickSnick.load(folder);
+        Profile runs = TickSnick.load(folder);
         return runs.render() + TickSnick.diff(runs, runs);
     }
 }

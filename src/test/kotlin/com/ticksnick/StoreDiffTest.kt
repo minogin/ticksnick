@@ -47,7 +47,7 @@ class StoreDiffTest {
      * 300 ms of short calls, then one call of 60 ms, then a few short ones so the run of stuck
      * ticks is closed and lands in the histogram.
      */
-    private fun session(): Profile {
+    private fun session(): Run {
         val req = Profiler.registerCoarse("store-req")
         val step = Profiler.registerCoarse("store-step")
         val stalls = Profiler.registerFine("store-stalls")
@@ -86,10 +86,10 @@ class StoreDiffTest {
     fun `a real profile with a tree and long runs survives the file`() {
         val p = session()
         val dir = Files.createTempDirectory("ticksnick")
-        val path = dir.resolve("one$PROFILE_EXTENSION")
+        val path = dir.resolve("one$RUN_EXTENSION")
         try {
-            ProfileStore.save(p, path)
-            val back = Profile.load(path)
+            RunStore.save(p, path)
+            val back = Run.load(path)
             assertEquals(p.render(legend = true), back.render(legend = true), "the file lost something")
             assertEquals(p.coarseTree.single().children.single().name, back.coarseTree.single().children.single().name)
             assertEquals(
@@ -108,10 +108,10 @@ class StoreDiffTest {
         Profiler.start(stepMillis = 1.0, strict = false)
         op(odd) { spinFor(20_000_000) }
         val p = Profiler.stop()
-        val path = Files.createTempFile("ticksnick", PROFILE_EXTENSION)
+        val path = Files.createTempFile("ticksnick", RUN_EXTENSION)
         try {
-            ProfileStore.save(p, path)
-            assertTrue(Profile.load(path).operations.any { it.name == "store\todd\nname" }, "the name was mangled")
+            RunStore.save(p, path)
+            assertTrue(Run.load(path).operations.any { it.name == "store\todd\nname" }, "the name was mangled")
         } finally {
             Files.delete(path)
         }
@@ -123,15 +123,15 @@ class StoreDiffTest {
         try {
             for (n in listOf("x/2026-01-01T00-00-03", "x/2026-01-01T00-00-01", "x/2026-01-01T00-00-01-2", "y/2026-01-01T00-00-02")) {
                 Files.createDirectories(dir.resolve(n).parent)
-                Files.writeString(dir.resolve(n + PROFILE_EXTENSION), "")
+                Files.writeString(dir.resolve(n + RUN_EXTENSION), "")
             }
             Files.writeString(dir.resolve("x/notes.txt"), "")
             assertEquals(
-                listOf("2026-01-01T00-00-01", "2026-01-01T00-00-01-2", "2026-01-01T00-00-03").map { it + PROFILE_EXTENSION },
-                ProfileStore.runs(dir.resolve("x")).map { it.fileName.toString() },
+                listOf("2026-01-01T00-00-01", "2026-01-01T00-00-01-2", "2026-01-01T00-00-03").map { it + RUN_EXTENSION },
+                RunStore.runs(dir.resolve("x")).map { it.fileName.toString() },
             )
-            assertEquals(0, ProfileStore.runs(dir.resolve("y/2026-01-01T00-00-02$PROFILE_EXTENSION")).size, "a file is not a folder")
-            assertEquals(0, ProfileStore.runs(dir.resolve("missing")).size)
+            assertEquals(0, RunStore.runs(dir.resolve("y/2026-01-01T00-00-02$RUN_EXTENSION")).size, "a file is not a folder")
+            assertEquals(0, RunStore.runs(dir.resolve("missing")).size)
         } finally {
             dir.toFile().deleteRecursively()
         }
@@ -142,24 +142,24 @@ class StoreDiffTest {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             val now = java.time.LocalDateTime.of(2026, 10, 27, 12, 0, 0)
-            repeat(10) { ProfileStore.saveNew(profile(emptyList()), dir, now) }
+            repeat(10) { RunStore.saveNew(profile(emptyList()), dir, now) }
             assertEquals(
                 listOf("2026-10-27T12-00-00") + (2..10).map { "2026-10-27T12-00-00-$it" },
-                ProfileStore.runs(dir).map { it.fileName.toString().removeSuffix(PROFILE_EXTENSION) },
+                RunStore.runs(dir).map { it.fileName.toString().removeSuffix(RUN_EXTENSION) },
             )
             // Saved at once from several threads, in the same second: every run gets its own file.
             val other = dir.resolve("other")
-            val threads = (1..8).map { Thread { ProfileStore.saveNew(profile(emptyList()), other, now) } }
+            val threads = (1..8).map { Thread { RunStore.saveNew(profile(emptyList()), other, now) } }
             threads.forEach { it.start() }
             threads.forEach { it.join() }
-            assertEquals(8, ProfileStore.runs(other).size)
-            ProfileStore.runs(other).forEach { ProfileStore.load(it) }
+            assertEquals(8, RunStore.runs(other).size)
+            RunStore.runs(other).forEach { RunStore.load(it) }
         } finally {
             dir.toFile().deleteRecursively()
         }
     }
 
-    private fun profile(ops: List<OperationStat>, tree: List<CoarseNode> = emptyList(), coarse: List<CoarseStat> = emptyList()) = Profile(
+    private fun profile(ops: List<OperationStat>, tree: List<CoarseNode> = emptyList(), coarse: List<CoarseStat> = emptyList()) = Run(
         operations = ops, idleHits = 0, ticks = 1_001, samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000,
         threads = 1,
         duty = DutyReport(
@@ -180,10 +180,10 @@ class StoreDiffTest {
             LongArray(MAX_OPERATIONS + 1), 0, children,
         )
         val tree = listOf(nodeOf("batch", few, listOf(nodeOf("root", many))))
-        val path = Files.createTempFile("ticksnick", PROFILE_EXTENSION)
+        val path = Files.createTempFile("ticksnick", RUN_EXTENSION)
         try {
-            ProfileStore.save(profile(listOf(stat("a", 10, 10)), tree), path)
-            val back = Profile.load(path).coarseTree.single()
+            RunStore.save(profile(listOf(stat("a", 10, 10)), tree), path)
+            val back = Run.load(path).coarseTree.single()
             assertTrue(back.spans.isExact)
             assertEquals(few, back.spans.exactDurations()!!.toList(), "the exact durations, in their order")
             assertEquals(few.size.toLong(), back.spans.count)
@@ -198,8 +198,8 @@ class StoreDiffTest {
 
             // Exactly as many as are kept one by one: still exact after the file.
             val full = (1..EXACT_SPANS).map { it * 977L }
-            ProfileStore.save(profile(listOf(stat("a", 10, 10)), listOf(nodeOf("full", full))), path)
-            val fullBack = Profile.load(path).coarseTree.single()
+            RunStore.save(profile(listOf(stat("a", 10, 10)), listOf(nodeOf("full", full))), path)
+            val fullBack = Run.load(path).coarseTree.single()
             assertTrue(fullBack.spans.isExact)
             assertEquals(full.size.toLong(), fullBack.spans.count)
             assertEquals(nodeOf("full", full).percentileNanos(0.99), fullBack.percentileNanos(0.99))
@@ -215,15 +215,15 @@ class StoreDiffTest {
         try {
             fun folderWith(name: String, text: String): Path = dir.resolve(name).also {
                 Files.createDirectories(it)
-                Files.writeString(it.resolve("2026-01-01T00-00-00$PROFILE_EXTENSION"), text)
+                Files.writeString(it.resolve("2026-01-01T00-00-00$RUN_EXTENSION"), text)
             }
             val old = folderWith("old", "ticksnick-profile 1\nidleHits\t0\n")
             val e = assertFailsWith<IllegalArgumentException> { TickSnick.load(old) }
-            assertTrue("ticksnick-profile 1" in e.message!! && PROFILE_FORMAT in e.message!!, e.message)
+            assertTrue("ticksnick-profile 1" in e.message!! && RUN_FORMAT in e.message!!, e.message)
             val junk = folderWith("junk", "garbage\n")
-            assertTrue("is not a TickSnick profile" in assertFailsWith<IllegalArgumentException> { TickSnick.load(junk) }.message!!)
+            assertTrue("is not a TickSnick run" in assertFailsWith<IllegalArgumentException> { TickSnick.load(junk) }.message!!)
             val empty = dir.resolve("empty").also { Files.createDirectories(it) }
-            assertTrue("no profile in" in assertFailsWith<IllegalArgumentException> { TickSnick.load(empty) }.message!!)
+            assertTrue("no run in" in assertFailsWith<IllegalArgumentException> { TickSnick.load(empty) }.message!!)
 
             // The command line: the message and the usage on stderr, code 2, no stack trace.
             val err = ByteArrayOutputStream()
@@ -237,7 +237,7 @@ class StoreDiffTest {
                 System.setErr(was)
             }
             val text = err.toString()
-            assertTrue("ticksnick-profile 1" in text && "no profile in" in text && USAGE in text, text)
+            assertTrue("ticksnick-profile 1" in text && "no run in" in text && USAGE in text, text)
             assertTrue("\tat " !in text, "a stack trace: $text")
         } finally {
             dir.toFile().deleteRecursively()
@@ -254,7 +254,7 @@ class StoreDiffTest {
     fun `a diff shows a side that is missing, calls that differ, and a node only the earlier run had`() {
         val before = profile(listOf(stat("only-before", 100, 1_000), stat("both", 200, 1_000)), tree = listOf(node("root", 1_000_000_000, listOf(node("gone", 500_000_000)))))
         val after = profile(listOf(stat("only-after", 100, 1_000), stat("both", 300, 2_000)), tree = listOf(node("root", 1_000_000_000)))
-        val text = ProfileDiff(before, after, "x", "y").render()
+        val text = OneRunDiff(before, after, "x", "y").render()
         val row = { name: String -> text.lines().first { it.trim().startsWith("$name ") } }
         assertTrue("-> -" in row("only-before"), "a row only the earlier run had: ${row("only-before")}")
         assertTrue("- ->" in row("only-after"), "a row only the later run had: ${row("only-after")}")
@@ -301,12 +301,12 @@ class StoreDiffTest {
     )
 
     /** [p] saved, then loaded again with every optional key taken out. */
-    private fun asOld(p: Profile, dir: Path): Profile {
-        val path = dir.resolve("old$PROFILE_EXTENSION")
-        ProfileStore.save(p, path)
+    private fun asOld(p: Run, dir: Path): Run {
+        val path = dir.resolve("old$RUN_EXTENSION")
+        RunStore.save(p, path)
         val lines = Files.readAllLines(path).filterNot { newKeys.containsMatchIn(it) }
         Files.write(path, lines)
-        return Profile.load(path)
+        return Run.load(path)
     }
 
     /**
@@ -342,7 +342,7 @@ class StoreDiffTest {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             val short = asOld(p, dir)
-            val diff = ProfileDiff(short, p, "short", "new").render()
+            val diff = OneRunDiff(short, p, "short", "new").render()
             assertTrue("saved before" !in diff && "summed durations" !in diff, diff)
             assertTrue(diff.lines().any { it.startsWith("store-req") }, diff)
         } finally {

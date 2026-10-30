@@ -8,7 +8,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /** Two versions over their runs: the interval on the change, its verdict, and the report over two folders. */
-class RunsDiffTest {
+class ProfileDiffTest {
 
     /**
      * 10, 11, 12 against 8, 9, 10: a variance of 1 on each side, Welch's 4 degrees of freedom, t 2.776,
@@ -69,13 +69,13 @@ class RunsDiffTest {
                 save(before, i, tree, listOf(stat("x", 10L + i, 100), stat("rare", listOf(0L, 2L, 3L)[i], 100)))
                 save(after, i, tree, listOf(stat("y", 20L + i, 100), stat("unused", 0, 0)))
             }
-            val runs = ProfileRuns.load(before)
+            val runs = Profile.load(before)
             val rare = runs.fineLines().getValue("rare")
             assertEquals(3, rare.present, "a run that called it and never sampled it is one of its runs")
             assertEquals(5.0 / 3 * runs.runs[0].stepNanos, rare.time.mean, 1e-6)
-            assertTrue("unused" !in ProfileRuns.load(after).fineLines(), "a label never called is in no run")
+            assertTrue("unused" !in Profile.load(after).fineLines(), "a label never called is in no run")
 
-            val text = RunsDiff(runs, ProfileRuns.load(after)).render()
+            val text = ProfileDiff(runs, Profile.load(after)).render()
             val x = text.lines().first { it.startsWith("x ") }
             val y = text.lines().first { it.startsWith("y ") }
             assertTrue(x.startsWith("x (3 -> 0)") && "faster" !in x && "slower" !in x && "unclear" !in x, x)
@@ -99,7 +99,7 @@ class RunsDiffTest {
             listOf(7_000_000_000L, 8_000_000_000L, 9_000_000_000L).forEachIndexed { i, t ->
                 save(after, i, listOf(node("runBatch", listOf(t, t), listOf(node("same", listOf(1_000_001L - i))))))
             }
-            val text = RunsDiff(ProfileRuns.load(before), ProfileRuns.load(after)).render()
+            val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
             assertTrue("11.0 s -> 8.00 s" in header && "faster" in header && "per execution" in header, header)
@@ -120,7 +120,7 @@ class RunsDiffTest {
             val after = dir.resolve("after").also { Files.createDirectories(it) }
             save(before, 0, listOf(node("runBatch", listOf(10L, 10L))))
             listOf(7L, 8L).forEachIndexed { i, t -> save(after, i, listOf(node("runBatch", listOf(t, t)))) }
-            val text = RunsDiff(ProfileRuns.load(before), ProfileRuns.load(after)).render()
+            val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             val lines = text.lines()
             assertTrue(lines[2].isEmpty() && lines[3].startsWith("CAREFUL       times: 1 run of 'before', no interval") && lines[4].isEmpty(), "a section of its own, right under the title: $text")
             val header = text.lines().first { it.startsWith("runBatch ") }
@@ -142,10 +142,10 @@ class RunsDiffTest {
             val before = dir.resolve("before").also { Files.createDirectories(it) }
             val after = dir.resolve("after").also { Files.createDirectories(it) }
             repeat(2) { save(before, it, tree, ops); save(after, it, tree, ops) }
-            val b = ProfileRuns.load(before)
-            val a = ProfileRuns.load(after)
-            assertInLine(RunsDiff(b, a).render())
-            assertInLine(ProfileDiff(b.runs[0], a.runs[0]).render())
+            val b = Profile.load(before)
+            val a = Profile.load(after)
+            assertInLine(ProfileDiff(b, a).render())
+            assertInLine(OneRunDiff(b.runs[0], a.runs[0]).render())
             assertInLine(b.render())
         } finally {
             dir.toFile().deleteRecursively()
@@ -164,7 +164,7 @@ class RunsDiffTest {
     }
 
     private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
-        ProfileStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$PROFILE_EXTENSION"))
+        RunStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
 
     private fun stat(name: String, hits: Long, calls: Long) = OperationStat(0, name, hits, calls, 0, 0, 0, 0, hits)
 
@@ -173,7 +173,7 @@ class RunsDiffTest {
         10, 10, LongArray(MAX_OPERATIONS + 1), 0, children,
     )
 
-    private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>) = Profile(
+    private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>) = Run(
         operations = ops, idleHits = 0, ticks = 1_001,
         samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 1,
         duty = DutyReport(

@@ -207,6 +207,10 @@ In a clone of this repository: `./gradlew cli --args="render profiles/baseline"`
 - The CPU clock is recorded on Windows and Linux. On macOS it needs root, so the report says it was
   not measured.
 
+## Contribution
+
+Pull requests are not accepted. Bug reports and ideas are welcome in Issues.
+
 ## Licence
 
 Apache License 2.0. See [LICENSE](LICENSE).

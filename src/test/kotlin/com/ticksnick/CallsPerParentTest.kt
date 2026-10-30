@@ -3,6 +3,7 @@ package com.ticksnick
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.fail
 
 /**
@@ -116,6 +117,30 @@ class CallsPerParentTest {
                 else -> null
             }
         }
+    }
+
+    /** Two runs a side go through the diff over runs, which is not the diff of one run against one. */
+    @Test
+    fun `a diff over several runs shows the calls per execution of every fine row`() {
+        val before = Files.createTempDirectory("calls-before")
+        val after = Files.createTempDirectory("calls-after")
+        repeat(2) { run(plans = 4).save(before) }
+        repeat(2) { run(plans = 2).save(after) }
+        val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
+        println(diff)
+
+        val rows = HashMap<Pair<String, String>, String>()
+        var coarse = ""
+        for (line in diff.lines().takeWhile { !it.startsWith("COARSE AND FINE") }) {
+            val name = line.substringBefore("|").trim()
+            if (name.startsWith("- ")) rows[coarse to name.removePrefix("- ")] = line.substringAfterLast("|").trim()
+            else if ("|" in line) coarse = name
+        }
+        val wanted = mapOf(
+            ("plan" to "rule") to "x340 =", ("plan" to "visit") to "x100 =", ("plan" to "rare") to "x50 =",
+            ("cleanup" to "visit") to "x10 =", ("cleanup" to "rare") to "x1 =",
+        )
+        for ((row, want) in wanted) assertEquals(want, rows[row], "$row in:\n$diff")
     }
 
     @Test

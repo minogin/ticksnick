@@ -31,7 +31,8 @@ internal class ProfileDiff(
     private val wallAfter = after.wallsOf()
 
     private val coarseExtra = nameOverflow(COARSE_DIFF_ROW, before.coarseRowNames() + after.coarseRowNames())
-    private val coarseRow = widened(COARSE_DIFF_ROW, coarseExtra)
+    private val allocations = before.allocations || after.allocations
+    private val coarseRow = widened(COARSE_DIFF_ROW, coarseExtra) + if (allocations) " | %21s" else ""
     private val fineExtra = nameOverflow(FINE_DIFF_ROW, matched().map { it.label })
     private val fineRow = widened(FINE_DIFF_ROW, fineExtra)
 
@@ -43,7 +44,7 @@ internal class ProfileDiff(
         appendLine("=".repeat(DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
         appendLine(row("Diff", "$beforeName -> $afterName"))
         carefulBlock(
-            careful + ClockReport.diffCareful(before.clock, after.clock)
+            careful + ClockReport.diffCareful(before.clock, after.clock) + allocationsCareful(listOf(before), listOf(after))
         )
         // Three lines and not one `wall = active + paused`, so that each carries its change, as every
         // row below does.
@@ -65,7 +66,7 @@ internal class ProfileDiff(
             appendLine(
                 String.format(
                     Locale.ROOT, coarseRow,
-                    "Coarse operation", "Wall", "change", "Paused", "Executions"
+                    "Coarse operation", "Wall", "change", "Paused", "Executions", "Allocated"
                 )
             )
             appendLine("-".repeat(DIFF_WIDTH + coarseExtra))
@@ -155,7 +156,7 @@ internal class ProfileDiff(
                 String.format(
                     Locale.ROOT, coarseRow, "$indent  $SPLIT_MARK $name",
                     pair(ta, tb, ta > 0, tb > 0), change(ta, tb, ta > 0 && tb > 0), "",
-                    perExecutionPair(perExecution(x, a), perExecution(y, b)),
+                    perExecutionPair(perExecution(x, a), perExecution(y, b)), "",
                 ).trimEnd()
             )
         }
@@ -179,7 +180,11 @@ internal class ProfileDiff(
                 change(ta, tb, a != null && b != null && a.count > 0 && b.count > 0),
                 pair(a?.pausedNanos?.toDouble() ?: 0.0, b?.pausedNanos?.toDouble() ?: 0.0, a != null && a.pausedNanos > 0, b != null && b.pausedNanos > 0),
                 counts(a?.count, b?.count),
-            )
+                bytesPair(
+                    a?.takeIf { before.allocations }?.let { before.allocatedPerExecution(it) } ?: Double.NaN,
+                    b?.takeIf { after.allocations }?.let { after.allocatedPerExecution(it) } ?: Double.NaN,
+                ),
+            ).trimEnd()
         )
     }
 

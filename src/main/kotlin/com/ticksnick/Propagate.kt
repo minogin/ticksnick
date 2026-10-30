@@ -57,12 +57,12 @@ fun captureCoarse(): CoarseContext? = Profiler.slot().contextOpaque()
 inline fun <T> withCoarse(ctx: CoarseContext?, body: () -> T): T {
     val slot = Profiler.slot()
     val prev = slot.contextOpaque()
-    slot.flushCalls(prev)
+    slot.flushCounts(prev)
     slot.setContextOpaque(ctx)
     try {
         return body()
     } finally {
-        slot.flushCalls(ctx)
+        slot.flushCounts(ctx)
         slot.setContextOpaque(prev)
     }
 }

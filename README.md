@@ -141,6 +141,9 @@ you cannot fix. The leaks are still counted and reported.
   in step with a loop in the program.
 - `strict` (true): stop at the first leaked label, see above.
 - `sampleState` (true): record whether each sampled thread was running or waiting.
+- `allocations` (false): count the bytes allocated under each coarse operation, for the report's
+  `Allocated` column. It adds about 30 ns to each coarse execution. It needs a JVM that reports
+  them, as HotSpot does; on one that does not, the session runs without and the report says so.
 
 ### From Java
 

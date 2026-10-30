@@ -10,6 +10,9 @@ internal const val RUNS_DIFF_WIDTH = 165
 /** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative, the verdict. */
 internal const val RUNS_DIFF_HEADER = "%7s -> %-7s  %-22s %-15s %s"
 internal const val RUNS_DIFF_COARSE_ROW = "%-40s | %-20s %-24s | %-28s | %s"
+
+/** The same with the `Allocated` column, for a diff where a side counted them. */
+internal const val RUNS_DIFF_ALLOCATED_ROW = "%-40s | %-20s %-24s | %-28s | %-16s | %s"
 internal const val RUNS_DIFF_FINE_ROW = "%-26s | %-20s %-24s | %-20s %-24s | %s"
 
 /** The `CAREFUL` line of a diff of one run against one, which [ProfileDiff] renders. */
@@ -175,6 +178,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
             if (cb.size == 1 && ca.size == 1 && ca != cb)
                 lines += "$rootName: run ${cb[0]} times before, ${ca[0]} after - compare per execution"
         }
+        lines += allocationsCareful(before.runs, after.runs)
         return lines
     }
 
@@ -196,6 +200,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
                     "  ".repeat(depth) + name + where,
                     pair(wb, wa), changeCell(Change(wb, wa)), share,
                     countPair(b.present.map { b.nodes[it]!!.count }, a.present.map { a.nodes[it]!!.count }),
+                    bytesPair(before.allocated(b).mean, after.allocated(a).mean),
                 )
                 ownRows(rows, b, a, depth)
                 walk(b.nodes.map { it?.children ?: emptyList() }, a.nodes.map { it?.children ?: emptyList() }, b.nodes, a.nodes, depth + 1)
@@ -210,10 +215,11 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
 
     private fun StringBuilder.coarse() {
         if (before.runs.all { it.coarseTree.isEmpty() } && after.runs.all { it.coarseTree.isEmpty() }) return
-        val format = widened(RUNS_DIFF_COARSE_ROW, coarseExtra)
+        val allocations = before.allocations || after.allocations
+        val format = widened(if (allocations) RUNS_DIFF_ALLOCATED_ROW else RUNS_DIFF_COARSE_ROW, coarseExtra)
         appendLine()
         appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%")
-        appendLine(String.format(Locale.ROOT, format, "Coarse operation", "Wall", "change", "% parent", "Executions"))
+        appendLine(String.format(Locale.ROOT, format, "Coarse operation", "Wall", "change", "% parent", "Executions", "Allocated"))
         appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
         for (r in coarseRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
         appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
@@ -248,7 +254,7 @@ internal class RunsDiff(val before: ProfileRuns, val after: ProfileRuns) {
             rows += listOf(
                 "  ".repeat(depth) + "  $SPLIT_MARK $label",
                 pair(wb, wa), changeCell(Change(wb, wa)), shareCell(share(b, ob[label]), share(a, oa[label])),
-                perExecutionPair(before.perExecution(b, ob[label]), after.perExecution(a, oa[label])),
+                perExecutionPair(before.perExecution(b, ob[label]), after.perExecution(a, oa[label])), "",
             )
         }
     }

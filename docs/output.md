@@ -136,11 +136,18 @@ batch                                    1                       1.16 s         
   fit within six rows.
 
 A diff shows the `-` rows too, with calls per execution on both sides: `x340 =` is the same work
-per plan.
+per plan. It shows `Allocated` when a side counted it, and warns when only one did.
 
 Counting the calls per path adds to each coarse execution a little for every registered fine
 label, so the shortest operation a coarse label suits rises with them: about 1 us with 20 fine
 labels, 1.7 us with 250. The report's floor check uses the run's own number.
+
+**`Allocated`** appears only in a run started with `allocations = true`: the bytes allocated per
+execution, with its coarse children and every thread that ran under it. It is counted, not sampled.
+It sits beside `Mean` and is per execution for the same reason: it can be compared between runs of
+different sizes. It is bytes allocated, not memory held: an operation can allocate gigabytes and
+hold none of it. Each execution includes about 100 bytes of the label's own, and the first execution
+on a path a few KB more, which matters only for an operation that allocates very little.
 
 **`slowest:`** appears under an operation registered with a key (`op(X, key = { id }) { }`): its
 longest executions on that path, with their keys.

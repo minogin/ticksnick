@@ -210,6 +210,13 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
         return if (texts.size == 1) texts[0] else String.format(Locale.ROOT, "~x%.1f", per.map { (c, n) -> c.toDouble() / n }.average())
     }
 
+    /** Whether any run here counted allocated bytes. */
+    internal val allocations: Boolean get() = runs.any { it.allocations }
+
+    /** Bytes per execution of [m], over the runs that counted them. See [Profile.allocatedPerExecution]. */
+    internal fun allocated(m: Matched): Estimate =
+        Estimate(m.present.filter { runs[it].allocations }.map { runs[it].allocatedPerExecution(m.nodes[it]!!) }.filter { !it.isNaN() })
+
     /** The heaviest root row, a benchmark's batch: the number an article quotes. */
     internal fun root(): Matched? = childrenOf(runs.map { it.coarseTree }).firstOrNull()
 
@@ -340,6 +347,7 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
                     d(wall), pm(wall),
                     if (share.n == 0) "" else String.format(Locale.ROOT, "%.0f%%", share.mean), plusMinusPoints(share),
                     d(mean), pm(mean), d(pct[0]), d(pct[1]), d(pct[2]),
+                    allocated(m).let { if (it.n == 0) "-" else bytes(it.mean) },
                 )
                 walk(m.nodes.map { it?.children ?: emptyList() }, m.nodes, depth + 1)
             }
@@ -370,20 +378,22 @@ class ProfileRuns internal constructor(internal val name: String, internal val f
 
     private fun StringBuilder.coarseAcross() {
         if (runs.all { it.coarseTree.isEmpty() }) return
-        val format = widened(RUNS_COARSE_ROW, coarseExtra)
+        val format = widened(RUNS_COARSE_ROW, coarseExtra) + if (allocations) " %10s" else ""
+        val rule = RUNS_WIDTH + coarseExtra + if (allocations) ALLOCATED_COLUMN else 0
         appendLine()
         appendLine("COARSE OPERATIONS ACROSS RUNS - wall time, inclusive, matched by path; each figure the mean of the runs +- 95%")
         appendLine(
             String.format(
                 Locale.ROOT, format, "Coarse operation", "Executions", "Wall v", "", "% parent", "",
-                "Mean", "", "p50", "p90", "p99"
+                "Mean", "", "p50", "p90", "p99", "Allocated"
             )
         )
-        appendLine("-".repeat(RUNS_WIDTH + coarseExtra))
+        appendLine("-".repeat(rule))
         for (r in coarseRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
-        appendLine("-".repeat(RUNS_WIDTH + coarseExtra))
+        appendLine("-".repeat(rule))
         appendLine("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")
         appendLine("  a percentile is the mean of the runs' percentiles, with no interval; - where a run had too few executions for it")
+        if (allocations) appendLine("  Allocated: bytes per execution, its coarse children and every thread under it included; the mean of the runs that counted them")
     }
 
     private fun StringBuilder.fineAcross() {

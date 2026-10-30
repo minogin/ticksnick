@@ -116,6 +116,8 @@ internal object ProfileStore {
         // Only when recorded; a file without them has no `Sampling` line.
         p.wait?.let { line("sampler.wait", it.name) }
         line("sampler.askedStepNanos", p.askedStepNanos)
+        if (p.allocations) line("allocations", true)
+        if (p.allocationsMissing) line("allocationsMissing", true)
 
         line("operations", p.operations.size)
         p.operations.forEachIndexed { i, o ->
@@ -188,6 +190,7 @@ internal object ProfileStore {
             if (n.ownFine.isNotEmpty()) sparse(k + "ownFine", n.ownFine)
             if (n.ownFineCovered.isNotEmpty()) sparse(k + "ownFineCovered", n.ownFineCovered)
             if (n.calls.isNotEmpty()) sparse(k + "calls", n.calls)
+            if (n.allocated != 0L) line(k + "allocated", n.allocated)
             // Only where there are any; a node without these lines loads with none.
             if (n.slowest.isNotEmpty()) {
                 line(k + "slowest", n.slowest.size)
@@ -311,6 +314,8 @@ internal object ProfileStore {
                 ownFineCovered = if (k + "ownFineCovered" in m) sparse(k + "ownFineCovered", MAX_OPERATIONS + 1) else LongArray(0),
                 // Optional: without them a fine row under a coarse one has no calls (see Profile.ownRowsOf).
                 calls = if (k + "calls" in m) sparse(k + "calls", MAX_OPERATIONS) else LongArray(0),
+                // Optional: only a session that counted them has any.
+                allocated = m[k + "allocated"]?.toLong() ?: 0L,
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
                 slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
                     SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))
@@ -330,6 +335,8 @@ internal object ProfileStore {
             coarseSampleHits = long("coarseSampleHits"), pause = pause, coarseTree = tree, clock = clock,
             wait = m["sampler.wait"]?.let { WaitStrategy.valueOf(it) },
             askedStepNanos = m["sampler.askedStepNanos"]?.toLong() ?: 0L,
+            allocations = m["allocations"]?.toBoolean() ?: false,
+            allocationsMissing = m["allocationsMissing"]?.toBoolean() ?: false,
         )
     }
 

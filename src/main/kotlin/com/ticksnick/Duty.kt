@@ -130,6 +130,35 @@ internal object ProcessCpuClock {
 }
 
 /**
+ * The bytes the calling thread has allocated in its life, a running total, where the JVM offers it.
+ * `com.sun.management` is not part of the Java platform, so its absence is an answer and not a
+ * failure, and supported is not enough: as with [ThreadCpuClock], it can be switched off.
+ */
+internal object AllocationClock {
+    private val bean: com.sun.management.ThreadMXBean? = try {
+        ManagementFactory.getThreadMXBean() as? com.sun.management.ThreadMXBean
+    } catch (_: LinkageError) {
+        null
+    }
+
+    val available: Boolean = bean != null && bean.isThreadAllocatedMemorySupported && enable(bean)
+
+    private fun enable(b: com.sun.management.ThreadMXBean): Boolean {
+        if (!b.isThreadAllocatedMemoryEnabled) {
+            try {
+                b.isThreadAllocatedMemoryEnabled = true
+            } catch (_: Exception) {
+                // Left to the check below. An unsupported operation here is simply "no".
+            }
+        }
+        return b.isThreadAllocatedMemoryEnabled
+    }
+
+    /** Call only where [available]. */
+    fun currentBytes(): Long = bean!!.currentThreadAllocatedBytes
+}
+
+/**
  * Time the JIT spent compiling, summed over its threads, in nanoseconds; -1 where the JVM does not
  * keep it. Elapsed rather than CPU - the platform offers nothing closer - so it is high by however
  * long a compiler thread waited for a core while compiling.

@@ -55,6 +55,12 @@ internal const val COARSE_PER_FINE_LABEL_NANOS = 0.17
  */
 internal const val COARSE_MAX_OVERHEAD = 0.05
 
+/** What counting allocated bytes adds to a coarse execution, when a session asks for it: two reads of the thread's total. */
+internal const val COARSE_ALLOCATIONS_NANOS = 27.0
+
+/** The width of the `Allocated` column of a coarse table, its separating space included. */
+internal const val ALLOCATED_COLUMN = 11
+
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01
 
@@ -76,6 +82,33 @@ internal fun nameOverflow(format: String, names: Iterable<String>): Int =
 /** [format] with its name column wider by [extra]. See [nameOverflow]. */
 internal fun widened(format: String, extra: Int): String =
     NAME_COLUMN.replace(format) { "%-${it.groupValues[1].toInt() + extra}s" }
+
+/** Bytes to three significant digits, as [duration] prints a time: `48 B`, `2.10 MB`. Powers of 1,024. */
+internal fun bytes(v: Double): String {
+    if (v.isNaN()) return "-"
+    val units = listOf("B", "KB", "MB", "GB", "TB")
+    var x = v
+    var u = 0
+    while (x >= 1024 && u < units.size - 1) {
+        x /= 1024
+        u++
+    }
+    val digits = if (u == 0 || x >= 100) 0 else if (x >= 10) 1 else 2
+    return String.format(Locale.ROOT, "%.${digits}f %s", x, units[u])
+}
+
+/** `before -> after` of two byte figures, a dash on a side that has none. */
+internal fun bytesPair(a: Double, b: Double): String = bytes(a) + " -> " + bytes(b)
+
+/** The `CAREFUL` line of a comparison where only one side counted allocated bytes. */
+internal fun allocationsCareful(before: List<Profile>, after: List<Profile>): List<String> {
+    val b = before.any { it.allocations }
+    val a = after.any { it.allocations }
+    return if (b == a) emptyList() else listOf(
+        "allocations: counted on one side only - each coarse execution there cost about " +
+                "${COARSE_ALLOCATIONS_NANOS.toInt()} ns more, which a short operation shows in its time"
+    )
+}
 
 /** See [Profile.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
 internal fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
@@ -479,6 +512,8 @@ internal class CoarseNode internal constructor(
      * Empty in a profile saved without them.
      */
     internal val calls: LongArray = LongArray(0),
+    /** Bytes allocated directly under executions at this path, outside its coarse children, on every thread. Counted. */
+    val allocated: Long = 0,
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -700,6 +735,10 @@ class Profile internal constructor(
     internal val wait: WaitStrategy? = null,
     /** The step asked for at `start()`, in nanoseconds; 0 for a profile saved before it was recorded. */
     internal val askedStepNanos: Long = 0,
+    /** Whether this session counted the bytes allocated under each coarse path. */
+    internal val allocations: Boolean = false,
+    /** Whether it was asked to on a JVM that cannot say. */
+    internal val allocationsMissing: Boolean = false,
 ) {
     /** False when a fatal finding stopped the session. */
     internal val ok: Boolean get() = failure == null
@@ -1362,7 +1401,9 @@ class Profile internal constructor(
     private val fineColumns by lazy { FINE_COLUMNS.copyOf().also { it[0] += fineExtra } }
 
     /** The report-level rules and banners: the widest table on this page. */
-    private val pageWidth by lazy { maxOf(WIDTH + fineExtra, COARSE_WIDTH + coarseExtra) }
+    private val pageWidth by lazy { maxOf(WIDTH + fineExtra, coarseRuleWidth) }
+
+    private val coarseRuleWidth by lazy { COARSE_WIDTH + coarseExtra + if (allocations) ALLOCATED_COLUMN else 0 }
 
     /**
      * Which of [own] are drawn as rows, the rest being one `and N more` line: the heaviest, up to
@@ -1396,7 +1437,16 @@ class Profile internal constructor(
     }
 
     /** What one coarse execution cost in this run, which rises with the fine labels registered. See [coarseContextNanos]. */
-    internal val coarseContextNanos: Double get() = coarseContextNanos(operations.size)
+    internal val coarseContextNanos: Double
+        get() = coarseContextNanos(operations.size) + if (allocations) COARSE_ALLOCATIONS_NANOS else 0.0
+
+    /**
+     * Bytes allocated per execution of [n], its coarse children included, on every thread that ran
+     * under it. Per execution, so it can be set against another run of a different size; a fork's
+     * bytes count, since each thread's lands on the path it ran on and the rows add up here.
+     */
+    internal fun allocatedPerExecution(n: CoarseNode): Double =
+        if (n.count == 0L) Double.NaN else n.flatten().sumOf { it.allocated }.toDouble() / n.count
 
     /**
      * Coarse labels on something too small to carry a context.
@@ -1583,6 +1633,7 @@ class Profile internal constructor(
         appendLine(
             String.format(
                 Locale.ROOT, coarseRow.replace("%,11d", "%11s"), "Coarse operation", "Executions", "x parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
+                if (allocations) String.format(Locale.ROOT, "%${ALLOCATED_COLUMN}s", "Allocated") else "",
                 "p50", "p90", "p99", "Max", "Runnable / Waiting"
             )
         )
@@ -1593,6 +1644,10 @@ class Profile internal constructor(
         fun wall(n: CoarseNode): Double = walls[n] ?: n.spanSumNanos.toDouble()
         // The tree's order: heaviest wall first, so the row to read next is the top one.
         val heaviest = compareByDescending<CoarseNode> { wall(it) }.thenByDescending { it.inclusiveHits }
+
+        // Only in a session that asked for it: a table nobody asked to be wider stays as it is.
+        fun allocatedCell(text: String): String =
+            if (allocations) String.format(Locale.ROOT, "%${ALLOCATED_COLUMN}s", text) else ""
 
         fun waitSplit(inclusive: Long, running: Long): String =
             runnableSplit(if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive)
@@ -1662,7 +1717,7 @@ class Profile internal constructor(
                         Locale.ROOT, coarseRow.replace("%,11d", "%11s"),
                         "$indent  $SPLIT_MARK $name", "own", "", "",
                         if (timed) duration(wall(n) * share) else "-",
-                        shareText(share * 100), "", "", "", "", "", "", ""
+                        shareText(share * 100), "", "", allocatedCell(""), "", "", "", "", ""
                     ).trimEnd()
                 )
             }
@@ -1685,6 +1740,7 @@ class Profile internal constructor(
                     shareOfParent(n, parent),
                     if (n.pausedNanos > 0) duration(n.pausedNanos.toDouble()) else "-",
                     if (timed) duration(n.meanSpanNanos) else "-",
+                    allocatedCell(bytes(allocatedPerExecution(n))),
                     if (timed) duration(n.percentileNanos(0.50)) else "-",
                     if (timed) duration(n.percentileNanos(0.90)) else "-",
                     if (timed) duration(n.percentileNanos(0.99)) else "-",
@@ -1731,7 +1787,7 @@ class Profile internal constructor(
                                 if (r.parallel >= PARALLEL_SHOWN) String.format(Locale.ROOT, "%.1f", r.parallel) else "",
                                 if (timed && caught) duration(r.wallNanos) else "-",
                                 if (r.share.isNaN() || !caught) "" else shareText(r.share * 100), "",
-                                if (r.perCallNanos.isNaN()) "" else duration(r.perCallNanos), "", "", "", "", ""
+                                if (r.perCallNanos.isNaN()) "" else duration(r.perCallNanos), allocatedCell(""), "", "", "", "", ""
                             ).trimEnd() + (noteAt[n to r.name]?.let { " ".repeat(NOTE_MARGIN) + it } ?: "")
                         )
                     }
@@ -1761,6 +1817,9 @@ class Profile internal constructor(
             "  on a $SPLIT_MARK row, Executions is its calls on that path and x parent per execution of the row above, both counted;" +
                     " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
         )
+        if (allocations) appendLine(
+            "  Allocated: bytes per execution, its coarse children and every thread under it included; counted, not sampled"
+        )
         if (noteAt.isNotEmpty()) appendLine(
             "  'in all, under N operations' beside a fine row: that label's time, and calls where counted, under every row it is under, on its largest"
         )
@@ -1780,7 +1839,9 @@ class Profile internal constructor(
                         "  " + c.name, c.count, "", "",
                         duration(wallOf(c)), "",
                         if (paused > 0) duration(paused.toDouble()) else "-",
-                        duration(c.meanSpanNanos), duration(c.percentileNanos(0.50)),
+                        duration(c.meanSpanNanos),
+                        allocatedCell(bytes(nodesOf[c.type]!!.sumOf { n -> n.flatten().sumOf { it.allocated } }.toDouble() / c.count)),
+                        duration(c.percentileNanos(0.50)),
                         duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
                         duration(c.spanMaxNanos.toDouble()),
                         waitSplit(c.inclusiveHits, c.runningInclusiveHits)
@@ -1975,6 +2036,7 @@ class Profile internal constructor(
                 "labels: $openAtEnd threads were still inside a hand-placed one when sampling stopped - " +
                         "nothing can close it now\n" + NO_FINALLY
             )
+            if (allocationsMissing) add("allocations: this JVM cannot report allocated bytes, so there is no Allocated column")
             if (untrackedSlots > 0) add(
                 "threads: $untrackedSlots arrived past the $MAX_SLOTS-slot ceiling and were NOT SAMPLED - " +
                         "their thread-time is missing from every number, including the denominators"
@@ -2345,8 +2407,12 @@ class Profile internal constructor(
         /** The coarse table alone, drawn to the table rather than to a round number. */
         internal const val COARSE_WIDTH = 165
 
-        /** One row of the coarse table: name, executions, per parent and parallel, wall and its share of the parent, paused, five durations, the split. */
-        internal const val COARSE_ROW = "%-30s %,11d %8s %8s %10s %8s %10s %10s %10s %10s %10s %10s %18s"
+        /**
+         * One row of the coarse table: name, executions, per parent and parallel, wall and its share of
+         * the parent, paused, mean, the `Allocated` cell - padded by the caller, and empty unless asked
+         * for - four durations, the split.
+         */
+        internal const val COARSE_ROW = "%-30s %,11d %8s %8s %10s %8s %10s %10s%s %10s %10s %10s %10s %18s"
 
         /** One row of the fine table, heading and data. The widths are [FINE_COLUMNS]. */
         internal const val FINE_ROW = "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s"

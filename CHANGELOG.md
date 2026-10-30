@@ -34,6 +34,16 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - Each coarse execution costs a little more for every registered fine label, and the coarse floor
   check takes the number of fine labels into account.
 
+### Bytes allocated per coarse execution
+
+- `Profiler.start(allocations = true)` counts the bytes allocated under each coarse path, on every
+  thread that runs under it. Off by default.
+- The report, the report over runs and both diffs gain an `Allocated` column, bytes per execution
+  with coarse children included. Without the setting the tables are unchanged.
+- Each coarse execution costs more with it on, and the coarse floor check takes that into account.
+  A diff warns when only one side counted.
+- On a JVM that cannot report allocated bytes the session runs without them and the report says so.
+
 ### Fixed
 
 - Calls made right after `Profiler.start()` are counted. `start()` returns once the sampler has

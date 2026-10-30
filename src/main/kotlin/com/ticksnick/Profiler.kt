@@ -150,7 +150,7 @@ internal class OpSlot(
     @JvmField
     val counts = LongArray(MAX_OPERATIONS + 2 * COUNT_PAD)
 
-    /** [counts] as they stood at this thread's last coarse boundary. See [flushCalls]. */
+    /** [counts] as they stood at this thread's last coarse boundary. See [flushCounts]. */
     @JvmField
     val countsAtBoundary = LongArray(MAX_OPERATIONS)
 
@@ -166,11 +166,15 @@ internal class OpSlot(
      * with it: the same bargain the span makes. See `Profiler.resetCoarse`.
      */
     @PublishedApi
-    internal fun flushCalls(ctx: CoarseContext?) {
+    internal fun flushCounts(ctx: CoarseContext?) {
         val n = Profiler.registeredCount()
         val counts = counts
         val last = countsAtBoundary
+        // Read before the node, which may be made here: its bytes are not the operation's.
+        val session = Profiler.allocationSession
+        val allocated = if (session != 0) AllocationClock.currentBytes() else 0L
         val node = if (ctx == null) null else nodeOf(ctx)
+        if (session != 0) flushAllocated(node, session, allocated)
         if (node == null) {
             System.arraycopy(counts, COUNT_PAD, last, 0, n)
             return
@@ -182,6 +186,22 @@ internal class OpSlot(
             calls[id] += c - last[id]
             last[id] = c
         }
+    }
+
+    /** The thread's allocated bytes at its last coarse boundary. */
+    private var allocatedAtBoundary = 0L
+
+    /** The session [allocatedAtBoundary] was read in, so a new one starts from there and not from the thread's birth. */
+    private var allocatedSession = 0
+
+    /** Moves the bytes this thread allocated since its last coarse boundary onto [node]. See [flushCounts]. */
+    private fun flushAllocated(node: CoarsePath?, session: Int, now: Long) {
+        if (allocatedSession == session) {
+            if (node != null) node.allocated += now - allocatedAtBoundary
+        } else {
+            allocatedSession = session
+        }
+        allocatedAtBoundary = now
     }
 
     fun count(id: Int) {
@@ -448,6 +468,15 @@ object Profiler {
 
     @Volatile
     private var sampler: Sampler? = null
+    /** This session's number if it counts allocated bytes, else 0. Read at every coarse boundary. */
+    @Volatile
+    @JvmField
+    internal var allocationSession = 0
+
+    private var sessions = 0
+
+    private var allocationsMissing = false
+
     private var startedAt: Long = 0
     /** The CPU clock over the session. See [ClockReport]. */
     private var clock: ClockProbe? = null
@@ -782,7 +811,7 @@ object Profiler {
     fun enter(op: CoarseOp) {
         val s = local.get()
         val parent = s.contextOpaque()
-        s.flushCalls(parent)
+        s.flushCounts(parent)
         s.setContextOpaque(CoarseContext(op.id, parent, System.nanoTime(), s.pathFor(parent, op.id)))
     }
 
@@ -806,7 +835,7 @@ object Profiler {
         s.setContextOpaque(ctx.parent)
         ctx.markClosed()
         s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
-        s.flushCalls(ctx)
+        s.flushCounts(ctx)
     }
 
     /** One scope per operation, made once, so opening one allocates nothing. */
@@ -877,7 +906,7 @@ object Profiler {
             else -> return true
         }
         imbalances.incrementAndGet()
-        s.flushCalls(ctx)
+        s.flushCounts(ctx)
         s.setContextOpaque(null)
         s.depth = 0
         s.setOpaque(NO_OP)
@@ -1048,6 +1077,10 @@ object Profiler {
      *
      * [wait] is [WaitStrategy.SPIN] from [SPIN_MIN_PROCESSORS] processors and [WaitStrategy.PARK]
      * below, unless given.
+     *
+     * [allocations] counts the bytes allocated under each coarse path, for the report's `Allocated`
+     * column. Off by default: it adds two reads to every coarse execution. Where the JVM cannot
+     * report them the session runs without, and the report says so.
      */
     @JvmStatic
     @JvmOverloads
@@ -1057,9 +1090,12 @@ object Profiler {
         jitter: Double = 0.25,
         strict: Boolean = true,
         sampleState: Boolean = true,
+        allocations: Boolean = false,
     ) {
         Logo.once()
         check(sampler == null) { "already sampling" }
+        allocationSession = if (allocations && AllocationClock.available) ++sessions else 0
+        allocationsMissing = allocations && !AllocationClock.available
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()
@@ -1077,6 +1113,8 @@ object Profiler {
         val s = checkNotNull(sampler) { "not sampling" }
         s.shutdown()
         sampler = null
+        val allocations = allocationSession != 0
+        allocationSession = 0
         val clockReport = clock?.stop() ?: ClockReport.NOT_RECORDED
         clock = null
         val duration = System.nanoTime() - startedAt
@@ -1139,6 +1177,7 @@ object Profiler {
             // saved without these, and such a path still has its calls to show.
             ownFine = n.ownFine ?: LongArray(MAX_OPERATIONS + 1), ownFineCovered = n.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1),
             calls = n.calls ?: LongArray(MAX_OPERATIONS),
+            allocated = n.allocated,
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),
@@ -1161,6 +1200,8 @@ object Profiler {
             clock = clockReport,
             wait = s.wait,
             askedStepNanos = s.stepNanos,
+            allocations = allocations,
+            allocationsMissing = allocationsMissing,
         )
     }
 }

@@ -297,7 +297,7 @@ class StoreDiffTest {
     /** The optional keys: a file written without any of them must still load. */
     private val newKeys = Regex(
         "^(duty\\.(runnableDuty|processCpuNanos|samplerCpuNanos|jitNanos|pausedProcessCpuNanos|profiledCpuNanos|" +
-                "hiddenWhenFull|hiddenWhenSpare|spanNanos|processors)|node\\.\\d+\\.(instanceTicks|coveredTicks|ownFine|ownFineCovered)|clock\\.)"
+                "hiddenWhenFull|hiddenWhenSpare|spanNanos|processors)|node\\.\\d+\\.(instanceTicks|coveredTicks|ownFine|ownFineCovered|calls|allocated)|allocations|clock\\.)"
     )
 
     /** [p] saved, then loaded again with every optional key taken out. */

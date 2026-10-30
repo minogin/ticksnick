@@ -218,7 +218,7 @@ class RegistryTest {
     fun `a leak stops the session under strict and only under strict`() {
         val id = Profiler.registerFine("test:fatal")
 
-        Profiler.start(stepMillis = 1.0, strict = true)
+        Profiler.start(tickMillis = 1.0, strict = true)
         onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
         val strict = Profiler.stop()
         assertTrue(strict.failure != null, "a leak did not stop a strict session")
@@ -228,7 +228,7 @@ class RegistryTest {
         )
         assertFalse(strict.ok)
 
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
         val lenient = Profiler.stop()
         assertNull(lenient.failure, "a leak stopped a non-strict session")
@@ -250,11 +250,11 @@ class RegistryTest {
     fun `a clean session does not inherit an earlier session's leaks`() {
         val id = Profiler.registerFine("test:inherited")
 
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
         assertEquals(1, Profiler.stop().imbalances, "the leak was not counted at all")
 
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         onOwnThread { op(id) { } }
         val clean = Profiler.stop()
         assertEquals(0, clean.imbalances, "a session with no leak reported ${clean.imbalances}")
@@ -272,7 +272,7 @@ class RegistryTest {
     fun `closing the wrong operation is counted and named`() {
         val a = Profiler.registerFine("test:crossed-a")
         val b = Profiler.registerFine("test:crossed-b")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
@@ -288,7 +288,7 @@ class RegistryTest {
     fun `a crossed exit stops the session under strict and names both operations`() {
         val a = Profiler.registerFine("test:strict-open")
         val b = Profiler.registerFine("test:strict-closed")
-        Profiler.start(stepMillis = 1.0, strict = true)
+        Profiler.start(tickMillis = 1.0, strict = true)
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
@@ -304,7 +304,7 @@ class RegistryTest {
     fun `closing a coarse execution that is not the one open is caught too`() {
         val a = Profiler.registerCoarse("test:coarse-open")
         val b = Profiler.registerCoarse("test:coarse-closed")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
@@ -491,7 +491,7 @@ class RegistryTest {
             }, "threads-worker-$i")
         }
 
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         workers.forEach { it.start() }
         called.await()
         val r = Profiler.stop()
@@ -514,7 +514,7 @@ class RegistryTest {
     fun `threads that have exited are still counted`() {
         val id = Profiler.registerFine("test:threads-retired")
 
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         repeat(3) { i ->
             onOwnThread("retired-worker-$i") {
                 repeat(5) { op(id) { } }
@@ -541,7 +541,7 @@ class RegistryTest {
 
         repeat(3) { i -> onOwnThread("warmup-worker-$i") { op(id) { }; Profiler.release() } }
 
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         onOwnThread("measured-worker") { op(id) { }; Profiler.release() }
         val r = Profiler.stop()
 
@@ -556,7 +556,7 @@ class RegistryTest {
     @Test
     fun `a call made right after start is counted`() {
         val id = Profiler.registerFine("test:right-after-start")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         op(id) { }
         val r = Profiler.stop()
 

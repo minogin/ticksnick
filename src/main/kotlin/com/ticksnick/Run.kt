@@ -1580,10 +1580,10 @@ class Run internal constructor(
         appendLine("  time and '(no operation)' is the rest; the absolute one is the column to compare between")
         appendLine("  two runs")
         appendLine("wall time = active + paused. Paused is time every thread was stopped: ticks the sampler ran")
-        appendLine("  a whole step late, as far as the JVM's own count of its collections confirms them. A late")
+        appendLine("  a whole tick late, as far as the JVM's own count of its collections confirms them. A late")
         appendLine("  tick nobody confirmed stays in active time - the sampler may have been stopped alone. No")
         appendLine("  sample is taken in a pause, so the fine table is ACTIVE time throughout: a pause does not")
-        appendLine("  move a share, and thread-time and time per call are scaled to the active step. The coarse")
+        appendLine("  move a share, and thread-time and time per call are scaled to the active tick. The coarse")
         appendLine("  table is WALL time, two timestamps per execution, so a span includes the pauses inside it")
         appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
         appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
@@ -1595,7 +1595,7 @@ class Run internal constructor(
         appendLine("  which thread-time is. Not latency either: it is every execution's interval unioned, so it")
         appendLine("  says nothing about any single one of them")
         appendLine("concurrency is thread-time / wall-time: the MEAN number of threads inside this operation")
-        appendLine("  while anybody was. The step cancels - thread-ticks over ticks - so the ratio is a count. It")
+        appendLine("  while anybody was. The tick cancels - thread-ticks over ticks - so the ratio is a count. It")
         appendLine("  is what turns a big thread-time back into real cost: 100 s of waiting is a convoy to break")
         appendLine("  up at 15 and steady contention to design out at 1.7. NOT parallelism: threads inside are")
         appendLine("  not threads executing, and two threads asleep in the same label is a concurrency of 2 with")
@@ -1608,7 +1608,7 @@ class Run internal constructor(
         appendLine("  workers 1 with pool 8 is eight threads queueing through one at a time, which the warnings")
         appendLine("  above say out loud")
         appendLine("noise is 1/sqrt(hits), the error chance alone gives")
-        appendLine("implied/call is hits x step / calls; 'over 1 tick' is thread-time inside executions that")
+        appendLine("implied/call is hits x tick / calls; 'over 1 tick' is thread-time inside executions that")
         appendLine("  outlived a tick")
         if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
             appendLine()
@@ -2248,7 +2248,7 @@ class Run internal constructor(
         // A table with no rows is two rules around nothing. Say what happened instead: an empty
         // table is nearly always a run too short for the sampler to catch, and that is worth
         // naming rather than leaving the reader to infer from a blank.
-        // It says "run for longer" and not "or lower stepMillis": below
+        // It says "run for longer" and not "or lower tickMillis": below
         // MIN_TICKS_FOR_A_TABLE there is no step that rescues the run. Two ticks would need a step
         // of 0.04 ms to reach fifty, which measures the sampler rather than the program, and fifty
         // samples still says nothing. Lowering the step is real advice for an operation that is

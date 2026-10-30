@@ -43,7 +43,7 @@ class TreeTest {
     }
 
     private fun start() {
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
     }
 
     private fun Run.root(name: String): CoarseNode? = coarseTree.firstOrNull { it.name == name }

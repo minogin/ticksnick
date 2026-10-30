@@ -52,7 +52,7 @@ class StoreDiffTest {
         val step = Profiler.registerCoarse("store-step")
         val stalls = Profiler.registerFine("store-stalls")
         val smooth = Profiler.registerFine("store-smooth")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         op(req) {
             op(step) {
                 val until = System.nanoTime() + 300_000_000
@@ -105,7 +105,7 @@ class StoreDiffTest {
     @Test
     fun `a name with a tab and a newline survives the file`() {
         val odd = Profiler.registerFine("store\todd\nname")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
         op(odd) { spinFor(20_000_000) }
         val p = Profiler.stop()
         val path = Files.createTempFile("ticksnick", RUN_EXTENSION)

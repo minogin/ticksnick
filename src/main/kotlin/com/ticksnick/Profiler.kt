@@ -1100,7 +1100,7 @@ object Profiler {
     @JvmStatic
     @JvmOverloads
     fun start(
-        stepMillis: Double = 1.0,
+        tickMillis: Double = 1.0,
         wait: WaitStrategy = defaultWait(),
         jitter: Double = 0.25,
         strict: Boolean = true,
@@ -1122,7 +1122,7 @@ object Profiler {
         imbalancesAtStart = imbalances.get()
         untrackedAtStart = untrackedSlots()
         reclaimedAtStart = reclaimedSlots()
-        sampler = Sampler((stepMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
+        sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
             .also { it.start() }
         clock = ClockProbe().also { it.start() }
     }

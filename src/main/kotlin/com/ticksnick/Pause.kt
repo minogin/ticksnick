@@ -239,7 +239,7 @@ internal class Pauses internal constructor(
             // Collections the sampler could not see, each shorter than a step. Real pauses, and left
             // in active time all the same: nothing here measured them but the JVM's word for it.
             return if (gcNanos > 0) listOf(
-                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC in pauses under one step - the " +
+                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC in pauses under one tick - the " +
                         "sampler cannot see them, so they are inside active"
             ) else emptyList()
         }
@@ -261,7 +261,7 @@ internal class Pauses internal constructor(
             )
             gcNanos - pausedNanos > slack(gcNanos) -> listOf(
                 "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC, more than the sampler saw - pauses under " +
-                        "one step are not resolved, and are inside active"
+                        "one tick are not resolved, and are inside active"
             )
             else -> emptyList()
         }

@@ -69,7 +69,7 @@ value for a name shows `-`.
 ### The header
 
 **Wall time** is the length of the session: **active** time plus **paused** time. Paused time is
-when every thread was stopped, mostly by GC: ticks where the sampler woke a whole interval late and
+when every thread was stopped, mostly by GC: ticks where the sampler woke a whole tick late and
 the JVM confirms a collection. No samples are taken in a pause, so the fine table covers active time
 only. The coarse table is timed, so an execution's time includes any pause inside it.
 
@@ -228,8 +228,8 @@ error that sampling alone gives the share. 96 hits is 10%; 100,000 is 0.3%.
 Sampled       414,466 samples - 103,684 ticks at 1.001 ms mean (jittered) x 5 threads, one sample per thread per tick
 ```
 
-How many samples the fine table is made of: the ticks, their mean interval, and the threads read on
-each.
+How many samples the fine table is made of: the ticks, the mean time between them, and the threads
+read on each.
 
 ## Several runs
 

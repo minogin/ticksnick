@@ -132,8 +132,9 @@ you cannot fix. The leaks are still counted and reported.
 
 `Profiler.start()` takes:
 
-- `stepMillis` (1.0): the sampling interval. Sampling every thread takes a few microseconds, so the
-  interval is set by how many threads there are, not by the resolution you want.
+- `tickMillis` (1.0): the time between ticks, a tick being one wake-up of the sampler. Sampling every
+  thread takes a few microseconds, so it is set by how many threads there are, not by the resolution
+  you want.
 - `wait` (`SPIN` with 4 or more processors, `PARK` below): how the sampler waits between samples.
   `SPIN` takes a core and keeps the interval exact. `PARK` and `SLEEP` leave the core free, and the
   interval grows longer and less regular. The report's `Sampling` line says which one ran.

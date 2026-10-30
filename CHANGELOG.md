@@ -9,6 +9,7 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - `Profiler.stop()` returns a `Run`, which was `Profile`. `TickSnick.load(folder)` returns a `Profile`,
   which was `ProfileRuns`. A profile is how a program behaves, and a run is one measurement of it.
 - Saved runs are `.tsr` files and start with `ticksnick-run 3`. Older files are refused.
+- `Profiler.start(stepMillis = ...)` is now `tickMillis`.
 
 ### Tags and setup
 

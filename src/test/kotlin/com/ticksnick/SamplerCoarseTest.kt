@@ -90,7 +90,7 @@ class SamplerCoarseTest {
     fun `work under a closed execution is counted stale and kept out of the type's totals`() {
         val t = Profiler.registerCoarse("sampler-stale")
         val fine = Profiler.registerFine("sampler-stale-work")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
 
         // Closed the moment the block ends, and captured on the way out.
         val ctx = assertNotNull(op(t) { captureCoarse() })
@@ -137,7 +137,7 @@ class SamplerCoarseTest {
     fun `opening and closing executions on one thread never looks stale`() {
         val t = Profiler.registerCoarse("sampler-churn")
         val fine = Profiler.registerFine("sampler-churn-work")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
 
         val worker = onThread("churn-worker") {
             val until = System.nanoTime() + holdNanos
@@ -179,7 +179,7 @@ class SamplerCoarseTest {
     fun `two threads inside one execution read as two threads inside`() {
         val t = Profiler.registerCoarse("sampler-shared")
         val fine = Profiler.registerFine("sampler-shared-work")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
 
         val stop = AtomicBoolean(false)
         val ctx = assertNotNull(run {
@@ -227,7 +227,7 @@ class SamplerCoarseTest {
         val outer = Profiler.registerCoarse("sampler-outer")
         val inner = Profiler.registerCoarse("sampler-inner")
         val fine = Profiler.registerFine("sampler-nested-work")
-        Profiler.start(stepMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0, strict = false)
 
         Profiler.enter(outer)
         val ctx = assertNotNull(captureCoarse())

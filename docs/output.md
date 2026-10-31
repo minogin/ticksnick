@@ -14,9 +14,14 @@ graph. It runs on four threads in three batches of about 27 s each. Its coarse l
 ## One run
 
 ```
+Runs          1 run of 'naive', one JVM: no interval
+
 CAREFUL       times: 1 run of 'naive', no interval - the next JVM can run faster or slower as a whole; shares of all but the smallest rows hold
 
+              run  file                               wall    clock   runBatch, each execution
+              1    2026-10-26T18-16-43.tsr           117 s      99%   27.6 s  27.4 s  27.0 s
 Wall time     117 s = 104 s active + 13.0 s paused (11.1%) in 57 pauses, longest 1.98 s
+runBatch      27.3 s per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
 Sampling      every 1.0 ms: the sampler keeps one of the 14 processors busy to hold the interval
 ```
@@ -139,7 +144,7 @@ batch                                    1                         1.16 s       
     - rule                           3,400        340              710 ms      70%                209 us
     - visit                          1,000        100              201 ms      20%                201 us      300 ms and 1,100 calls in all, under 2 operations
     - rare                             500         50             99.2 ms      10%                198 us
-    - and 1 more, <1% between them
+    - and 1 more                                                              <1%
   cleanup                               10         10              150 ms      13%          -    15.0 ms
     - visit                            100         10             98.2 ms      65%                982 us
     - unlabelled                       own                        49.6 ms      33%
@@ -155,7 +160,7 @@ batch                                    1                         1.16 s       
   `rare` ran once per `cleanup`, too briefly to be caught.
 - `unlabelled` is time under no fine label. `300 ms and 1,100 calls in all, under 2 operations` is
   the label's total under every row it appears in, printed on its largest row.
-- `and 1 more, <1% between them` folds the small rows. Small rows with calls are drawn while they
+- `and 1 more` folds the small rows into one row, with their calls and time in the same columns. Small rows with calls are drawn while they
   fit within six rows.
 
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns
@@ -236,7 +241,7 @@ samples is 10%, 100,000 is 0.3%. With two runs or more the `+-` includes it.
 ## Several runs
 
 A folder is one profile: same code, same workload, same setup. Each file in it is one run, one JVM.
-One run is a folder of one, so the tables have the same columns however many runs are behind them.
+One run is a folder of one, so a report prints the same lines however many runs are behind it.
 With two runs or more, each figure is the mean of the runs, and what says how much has a 95% interval:
 
 ```
@@ -246,8 +251,9 @@ Runs          4 runs of 'naive', one JVM each: every figure below is their mean,
               2    2026-10-26T18-23-49.tsr           117 s      99%   27.4 s  27.1 s  27.5 s
               3    2026-10-26T18-30-57.tsr           117 s      99%   27.8 s  27.1 s  28.1 s
               4    2026-10-26T18-38-06.tsr           117 s      99%   27.5 s  27.4 s  27.6 s
-Wall time     117 s +- 444 ms (0.4%) = 104 s +-0.3% active + 13.2 s +-2.4% paused
+Wall time     117 s +- 444 ms (0.4%) = 104 s +-0.3% active + 13.2 s +-2.4% paused (11.3%) in 59 pauses, longest 2.01 s
 runBatch      27.5 s +- 260 ms (0.9%) per execution
+Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
 
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs +- 95%
                                |                                                                   Load                                                                    |                    Long
@@ -320,8 +326,10 @@ merge                      |          14.2% +-0.2 pp      59.0 s +-2.1%         
                            |        +5.9 pp +-0.4 pp      +1.1%? +-3.2 pp                  =                      =               +1.1%? +-3.2 pp |       -56%     -66%     -22% |      -12%        +15%       =     =
 ```
 
-A diff has every column of the report, with the same names and forms, so a row is three lines: before,
-after, and the change. It is as wide as a report, and every number sits above the one it compares with.
+A diff has everything a report has, with the same names and forms. A row is three lines: before, after,
+and the change, so a diff is as wide as a report and every number sits above the one it compares with.
+`Cores`, `Sampling` and `Sampled` are a line per side, `slowest:` is before's list and then after's, `in
+all` stands at the end of each side's line, and a note under a table that only one side has names it.
 
 - **The change** is a percentage, `pp` for what is itself a percentage, and `=` for no change. Its `+-`
   is in `pp`: `-22% +-2.2 pp` is between -24.2% and -19.8%.
@@ -330,7 +338,8 @@ after, and the change. It is as wide as a report, and every number sits above th
   diff of 80 such changes would show four that are not there. So each change is held to 5% divided by
   the number of changes with an interval (Bonferroni), and the whole diff has about a 5% chance of
   showing one false change. `?` does not mean no change: more runs can settle it. No `?` does not mean
-  the size is precise: that is what the `+-` says.
+  the size is precise: that is what the `+-` says. The note under the table repeats the first part, and
+  prints too when the only `?` is on a line over the tables.
 - **Calls and Executions are the check.** `=` means both sides did the same work, so a change in
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** reads `-` on the other and has no change: `onCentral (4 -> 0 runs)` was

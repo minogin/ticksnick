@@ -133,6 +133,13 @@ internal fun perParentText(count: Long, parentCount: Long): String = when {
     else -> String.format(Locale.ROOT, "%,.0f", count.toDouble() / parentCount)
 }
 
+/** The `Per parent` figure from its value. See [perParentText]. */
+internal fun perParentText(perParent: Double): String = when {
+    perParent == kotlin.math.floor(perParent) -> String.format(Locale.ROOT, "%,d", perParent.toLong())
+    perParent < 100 -> String.format(Locale.ROOT, "%.1f", perParent)
+    else -> String.format(Locale.ROOT, "%,.0f", perParent)
+}
+
 /** `Per parent` on both sides of a diff: `340 =` when they agree, `340 -> 68` when not, blank when neither has one. */
 internal fun perParentPair(before: String, after: String): String = when {
     before.isEmpty() && after.isEmpty() -> ""
@@ -849,75 +856,6 @@ class Run internal constructor(
      * the run's length. Occupancy moves only when this operation does, so a change in one clause
      * shows in that clause's row and nowhere else.
      */
-    /** Where each column starts, and where the group bars fall, given [FINE_COLUMNS]. */
-    private fun layout(widths: IntArray, breaks: IntArray): Pair<IntArray, IntArray> {
-        val starts = IntArray(widths.size)
-        val bars = ArrayList<Int>()
-        var pos = 0
-        for (i in widths.indices) {
-            starts[i] = pos
-            pos += widths[i] + 1
-            if (i in breaks && i < widths.size - 1) {
-                bars += pos
-                pos += 2
-            }
-        }
-        return starts to bars.toIntArray()
-    }
-
-    /** The full width of a table with these columns and these bars. */
-    private fun widthOf(widths: IntArray, breaks: IntArray): Int {
-        val (starts, _) = layout(widths, breaks)
-        return starts.last() + widths.last()
-    }
-
-    /** The rule under a grouped header: dashes, with a cross where each bar comes down. */
-    private fun rule(widths: IntArray, breaks: IntArray): String {
-        val (_, bars) = layout(widths, breaks)
-        val line = CharArray(widthOf(widths, breaks)) { '-' }
-        for (b in bars) line[b] = '+'
-        return String(line)
-    }
-
-    /**
-     * The band of group labels over a table's column heads.
-     *
-     * The labels are centred and unruled because the bars below them already say where each group
-     * starts and stops - dashes as well would be the same boundary drawn twice. A group whose label
-     * is empty still gets its bars: it says *these belong together* without naming why.
-     *
-     * Groups are given as column ranges into [widths], the widths of the **data** row, because the
-     * band has to sit over the numbers.
-     */
-    private fun band(widths: IntArray, breaks: IntArray, vararg groups: Pair<IntRange, String>): String {
-        val (starts, bars) = layout(widths, breaks)
-        val line = CharArray(widthOf(widths, breaks)) { ' ' }
-        for ((range, name) in groups) {
-            val from = starts[range.first]
-            val span = starts[range.last] + widths[range.last] - from
-            if (name.isEmpty() || span < name.length) continue
-            val pad = (span - name.length) / 2
-            for (i in name.indices) line[from + pad + i] = name[i]
-        }
-        for (b in bars) line[b] = '|'
-        return String(line).trimEnd()
-    }
-
-    /**
-     * The two halves of an operation's thread-time, as `7.2% / 92.8%`, summing to 100.
-     *
-     * Printed as a pair because a reader could not tell whether `waiting` was a part of the
-     * thread-time beside it or an addition to it, and no unit settles that - seconds against
-     * seconds is as ambiguous as a percentage. Two shares that add to the whole are not readable
-     * as an addition to it.
-     *
-     * The left half is **runnable**, which is not *working*: it counts a preempted thread and a
-     * thread stopped inside a native call, both of which the JVM reports as `RUNNABLE`. It is an
-     * upper bound on the work, and the time-on-CPU block is the only thing that bounds it in turn.
-     */
-    internal fun runnableSplit(waiting: Double): String =
-        percent((1 - waiting) * 100) + " / " + percent(waiting * 100)
-
     internal fun occupancyNanosOf(op: OperationStat): Double = op.hits * stepNanos
 
     /**
@@ -1320,7 +1258,7 @@ class Run internal constructor(
     }
 
     /** What a row's executions are divided by: its parallelism, or 1 where it is under [PARALLEL_SHOWN] or unknown. */
-    private fun factorOf(n: CoarseNode): Double = n.parallel.let { if (it.isFinite() && it >= PARALLEL_SHOWN) it else 1.0 }
+    internal fun factorOf(n: CoarseNode): Double = n.parallel.let { if (it.isFinite() && it >= PARALLEL_SHOWN) it else 1.0 }
 
     /**
      * **Each row's wall time: the part of its root's wall time the row accounts for.** Its measured
@@ -1399,35 +1337,35 @@ class Run internal constructor(
         }.sortedByDescending { it.wallNanos }
     }
 
-    /** Every name the coarse table draws in its first column, indents and marks included. See [nameOverflow]. */
-    internal fun coarseRowNames(): List<String> = buildList {
-        fun walk(n: CoarseNode, depth: Int) {
-            val indent = "  ".repeat(depth)
-            add(indent + n.name)
-            val own = ownRowsOf(n)
-            val fine = when {
-                own != null -> drawnOwnRows(own).map { it.name }
-                n.children.isEmpty() -> operations.filter { n.fine[it.id] > 0 }.map { it.name }
-                else -> emptyList()
+    /** This run as a folder of one: a run's report is its profile's. */
+    private val table: Profile by lazy { Profile("", listOf(java.nio.file.Path.of("")), listOf(this)) }
+
+    private val coarseAll: List<Row> by lazy {
+        buildList {
+            fun walk(r: Row) {
+                add(r)
+                r.children.forEach { walk(it) }
             }
-            for (f in fine) add("$indent  $SPLIT_MARK $f")
-            for (c in n.children) walk(c, depth + 1)
+            table.coarseTable.rows.forEach { walk(it) }
         }
-        for (r in coarseTree) walk(r, 0)
-        // The block of operations under more than one caller.
-        coarseTree.flatMap { it.flatten() }.groupBy { it.type }.values.filter { it.size > 1 }.forEach { add("  " + it[0].name) }
     }
 
-    private val coarseExtra by lazy { nameOverflow(COARSE_ROW, coarseRowNames()) }
-    private val coarseRow by lazy { widened(COARSE_ROW, coarseExtra) }
-    private val fineExtra by lazy { nameOverflow(FINE_ROW, rows().filter { it.hits > 0 }.map { it.label } + NO_OPERATION) }
-    private val fineRow by lazy { widened(FINE_ROW, fineExtra) }
-    private val fineColumns by lazy { FINE_COLUMNS.copyOf().also { it[0] += fineExtra } }
-
     /** The report-level rules and banners: the widest table on this page. */
-    private val pageWidth by lazy { maxOf(WIDTH + fineExtra, coarseRuleWidth) }
+    private val pageWidth by lazy { maxOf(WIDTH + table.fineText.nameExtra, table.coarseText.width) }
 
-    private val coarseRuleWidth by lazy { COARSE_WIDTH + coarseExtra + if (allocations) ALLOCATED_COLUMN else 0 }
+    /**
+     * A run saved without own time: a leaf's samples split by label and applied to its wall. See
+     * [ownRowsOf] for why that is only a fallback.
+     */
+    internal fun splitRowsOf(n: CoarseNode): List<OwnRow> {
+        if (n.children.isNotEmpty() || n.inclusiveHits <= 0) return emptyList()
+        val wall = wallsOf()[n] ?: n.spanSumNanos.toDouble()
+        return operations.map { it.name to n.fine[it.id] }
+            .plus("unlabelled" to n.fine[NO_OP_INDEX])
+            .filter { it.second > 0 }
+            .sortedByDescending { it.second }
+            .map { (name, hits) -> (hits.toDouble() / n.inclusiveHits).let { OwnRow(name, if (n.count > 0) wall * it else 0.0, Double.NaN, it) } }
+    }
 
     /**
      * Which of [own] are drawn as rows, the rest being one `and N more` line: the heaviest, up to
@@ -1654,222 +1592,36 @@ class Run internal constructor(
             "COARSE OPERATIONS - wall time, inclusive, nested as it ran" +
                     if (pausedInSpan > 0) "; a pause is charged to every operation it interrupted" else ""
         )
-        appendLine(
-            String.format(
-                Locale.ROOT, coarseRow.replace("%,11d", "%11s"), "Coarse operation", "Executions", "Per parent", "Parallel", "Wall v", "% parent", "Paused", "Mean",
-                if (allocations) String.format(Locale.ROOT, "%${ALLOCATED_COLUMN}s", "Allocated") else "",
-                "p50", "p90", "p99", "Max", "Runnable / Waiting"
-            )
-        )
-        appendLine("-".repeat(coarseRuleWidth))
-        val byType = coarse.associateBy { it.type }
+        val text = table.coarseText
+        with(text) { rows() }
         val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
-        val walls = wallsOf()
-        fun wall(n: CoarseNode): Double = walls[n] ?: n.spanSumNanos.toDouble()
-        // The tree's order: heaviest wall first, so the row to read next is the top one.
-        val heaviest = compareByDescending<CoarseNode> { wall(it) }.thenByDescending { it.inclusiveHits }
-
-        // Only in a session that asked for it: a table nobody asked to be wider stays as it is.
-        fun allocatedCell(text: String): String =
-            if (allocations) String.format(Locale.ROOT, "%${ALLOCATED_COLUMN}s", text) else ""
-
-        fun waitSplit(inclusive: Long, running: Long): String =
-            runnableSplit(if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive)
-
-        fun shareText(share: Double): String = if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
-
-        // Against the row above: how many executions per execution of the parent - the loop count -
-        // and what part of the parent's wall time this row is. Left blank where there is nothing to
-        // read: a root has no parent, and a child run exactly once per parent execution is 1. Under
-        // 100%, with the rest the parent's own time outside this child. Wall, not summed durations.
-        fun perParent(n: CoarseNode, parent: CoarseNode?): String = when {
-            parent == null || n.count == parent.count -> ""
-            else -> perParentText(n.count, parent.count)
-        }
-
-        fun shareOfParent(n: CoarseNode, parent: CoarseNode?): String = when {
-            parent == null || parent.spanSumNanos == 0L || n.count == 0L -> ""
-            else -> shareText(wall(n) * 100.0 / wall(parent))
-        }
-
-        // Beside `Per parent`, so the two read as one sentence: 4 per request, 2.0 at a time - more
-        // threads would help. Blank at 1, which is most rows. One decimal: the second of a sampled
-        // average is noise. On the row that runs in parallel, not on the forking row, which is not
-        // itself parallel.
-        fun parallelText(n: CoarseNode): String =
-            if (factorOf(n) > 1.0) String.format(Locale.ROOT, "%.1f", n.parallel) else ""
-
-        var anySplit = false
-        var anyOwn = false
-        var anyCalls = false
-
-        // A fine label under more than one row: each row is its time under that row alone, so the tree
-        // never shows its total, and a label spread over three walks reads smaller than one that leads
-        // a single walk: `merge` 1.08 s can lead a row while `check` is 2.11 s across three. The
-        // total goes once, beside the label's largest row. Unlabelled is
-        // not a label.
-        //
-        // With calls counted, every row the label was called under counts, sampled or not, so the
-        // number of operations is exact.
-        val spread = coarseTree.flatMap { it.flatten() }
-            .flatMap { n -> ownRowsOf(n).orEmpty().filter { it.name != "unlabelled" }.map { it.name to (n to it) } }
-            .groupBy({ it.first }, { it.second })
-            .filterValues { rows -> rows.size > 1 && rows.sumOf { it.second.wallNanos } >= NOTE_MIN_GAIN * rows.maxOf { it.second.wallNanos } }
-        val noteAt: Map<Pair<CoarseNode, String>, String> = spread.map { (name, rows) ->
-            val calls = if (rows.all { it.second.calls >= 0 }) String.format(Locale.ROOT, " and %,d calls", rows.sumOf { it.second.calls }) else ""
-            (rows.maxBy { it.second.wallNanos }.first to name) to
-                    "${duration(rows.sumOf { it.second.wallNanos })}$calls in all, under ${rows.size} operations"
-        }.toMap()
-
-        // A run saved without own time: a leaf's samples split by label and applied to its wall.
-        // See ownRowsOf for why that is only a fallback.
-        fun StringBuilder.legacySplit(n: CoarseNode, indent: String, timed: Boolean) {
-            if (n.children.isNotEmpty() || n.inclusiveHits <= 0) return
-            val parts = operations
-                .map { it.name to n.fine[it.id] }
-                .plus("unlabelled" to n.fine[NO_OP_INDEX])
-                .filter { it.second > 0 }
-                .sortedByDescending { it.second }
-            if (parts.isNotEmpty()) anySplit = true
-            for ((name, hits) in parts.take(FINE_ROWS_SHOWN)) {
-                val share = hits.toDouble() / n.inclusiveHits
-                appendLine(
-                    String.format(
-                        Locale.ROOT, coarseRow.replace("%,11d", "%11s"),
-                        "$indent  $SPLIT_MARK $name", "own", "", "",
-                        if (timed) duration(wall(n) * share) else "-",
-                        shareText(share * 100), "", "", allocatedCell(""), "", "", "", "", ""
-                    ).trimEnd()
-                )
-            }
-            val rest = parts.drop(FINE_ROWS_SHOWN)
-            if (rest.isNotEmpty()) appendLine(
-                "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.second } * 100.0 / n.inclusiveHits) + " between them"
-            )
-        }
-
-        fun StringBuilder.node(n: CoarseNode, depth: Int, parent: CoarseNode?) {
-            val indent = "  ".repeat(depth)
-            // An execution still open when the session ended has no span: its row keeps the
-            // samples and the children, and says `-` where the clock would go.
-            val timed = n.count > 0
-            appendLine(
-                String.format(
-                    Locale.ROOT, coarseRow,
-                    indent + n.name, n.count, perParent(n, parent), parallelText(n),
-                    if (timed) duration(wall(n)) else "-",
-                    shareOfParent(n, parent),
-                    if (n.pausedNanos > 0) duration(n.pausedNanos.toDouble()) else "-",
-                    if (timed) duration(n.meanSpanNanos) else "-",
-                    allocatedCell(bytes(allocatedPerExecution(n))),
-                    if (timed) duration(n.percentileNanos(0.50)) else "-",
-                    if (timed) duration(n.percentileNanos(0.90)) else "-",
-                    if (timed) duration(n.percentileNanos(0.99)) else "-",
-                    if (timed) duration(n.spanMaxNanos.toDouble()) else "-",
-                    waitSplit(n.inclusiveHits, n.runningInclusiveHits)
-                )
-            )
-            // Which executions were the slowest, when the operation was opened with a key: a
-            // percentile says how slow, and this says which, so the case can be run again.
-            n.slowest.forEachIndexed { i, slow ->
-                appendLine(
-                    indent + "  " + (if (i == 0) "slowest: " else "         ") +
-                            String.format(Locale.ROOT, "%9s  %s", duration(slow.nanos.toDouble()), slow.key)
-                )
-            }
-            // The row's own time by fine label, beside its coarse children and sorted with them, so
-            // the rows under a row are what it was made of: `request` is its branches and its merge.
-            // A fine label counts as a coarse child would - its wall once per execution however many
-            // threads ran it, its Parallel how many did - since fine and coarse rows answer the same
-            // question here. Rows under half a percent are counted, not drawn. See ownRowsOf.
-            val own = ownRowsOf(n)
-            if (own == null) {
-                legacySplit(n, indent, timed)
-                for (child in n.children.sortedWith(heaviest)) node(child, depth + 1, n)
-            } else {
-                val drawn = drawnOwnRows(own)
-                if (drawn.isNotEmpty()) anyOwn = true
-                if (drawn.any { it.calls >= 0 }) anyCalls = true
-                val items: List<Pair<Double, Any>> = n.children.map { wall(it) to it as Any } + drawn.map { it.wallNanos to it as Any }
-                for ((_, item) in items.sortedWith(compareByDescending<Pair<Double, Any>> { it.first })) {
-                    if (item is CoarseNode) node(item, depth + 1, n)
-                    else {
-                        val r = item as OwnRow
-                        // Counted where it can be: its calls on this path, and per execution of the
-                        // row, which holds whatever the size of the run. A row called and never
-                        // sampled has its calls and no time.
-                        val caught = r.wallNanos > 0
-                        appendLine(
-                            String.format(
-                                Locale.ROOT, coarseRow.replace("%,11d", "%11s"),
-                                "$indent  $SPLIT_MARK ${r.name}",
-                                if (r.calls >= 0) String.format(Locale.ROOT, "%,d", r.calls) else "own",
-                                if (r.calls >= 0) perParentText(r.calls, n.count) else "",
-                                if (r.parallel >= PARALLEL_SHOWN) String.format(Locale.ROOT, "%.1f", r.parallel) else "",
-                                if (timed && caught) duration(r.wallNanos) else "-",
-                                if (r.share.isNaN() || !caught) "" else shareText(r.share * 100), "",
-                                if (r.perCallNanos.isNaN()) "" else duration(r.perCallNanos), allocatedCell(""), "", "", "", "", ""
-                            ).trimEnd() + (noteAt[n to r.name]?.let { " ".repeat(NOTE_MARGIN) + it } ?: "")
-                        )
-                    }
-                }
-                val rest = own.filter { it !in drawn }
-                val restCalls = rest.sumOf { it.calls.coerceAtLeast(0) }
-                if (rest.isNotEmpty()) appendLine(
-                    "$indent  $SPLIT_MARK and ${rest.size} more, " + shareText(rest.sumOf { it.share.takeIf { s -> !s.isNaN() } ?: 0.0 } * 100) + " between them" +
-                            if (restCalls > 0) String.format(Locale.ROOT, ", %,d calls", restCalls) else ""
-                )
-            }
-        }
-        for (root in coarseTree.sortedWith(heaviest)) {
-            node(root, 0, null)
-        }
-        appendLine("-".repeat(coarseRuleWidth))
+        val anyOwn = coarseAll.any { it.own }
         // The key, once and next to the rows that need it, as the star's is under the own-time table.
-        if (anySplit) appendLine(
+        if (table.coarseTable.splitLeaves && anyOwn) appendLine(
             "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
                     " a fine label with labels inside it shows only its own part"
         )
-        if (anyOwn) appendLine(
+        if (!table.coarseTable.splitLeaves && anyOwn) appendLine(
             "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; Parallel on one is how many" +
                     " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
-        if (anyCalls) appendLine(
+        if (coarseAll.any { it.own && it.figures[EXECUTIONS]?.n != 0 }) appendLine(
             "  on a $SPLIT_MARK row, Executions is its calls on that path and Per parent per execution of the row above, both counted;" +
                     " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
         )
         if (allocations) appendLine(
             "  Allocated: bytes per execution, its coarse children and every thread under it included; counted, not sampled"
         )
-        if (noteAt.isNotEmpty()) appendLine(
+        if (coarseAll.any { it.inAll != null }) appendLine(
             "  'in all, under N operations' beside a fine row: that label's time, and calls where counted, under every row it is under, on its largest"
         )
         // An operation with more than one caller is a row under each, and those rows are its
         // figures under that caller alone. Its percentiles over everything are a different
         // question - "how long does a parse take" - and they are answered here, once, only when
         // the question exists.
-        fun wallOf(c: CoarseStat): Double = nodesOf[c.type]!!.sumOf { wall(it) }
-        val shared = seen.filter { (nodesOf[it.type]?.size ?: 0) > 1 }.sortedByDescending { wallOf(it) }
-        if (shared.isNotEmpty()) {
+        if (table.coarseTable.shared.isNotEmpty()) {
             appendLine("  Under more than one caller - all callers together:")
-            for (c in shared) {
-                val paused = nodesOf[c.type]!!.sumOf { it.pausedNanos }
-                appendLine(
-                    String.format(
-                        Locale.ROOT, coarseRow,
-                        "  " + c.name, c.count, "", "",
-                        duration(wallOf(c)), "",
-                        if (paused > 0) duration(paused.toDouble()) else "-",
-                        duration(c.meanSpanNanos),
-                        allocatedCell(bytes(nodesOf[c.type]!!.sumOf { n -> n.flatten().sumOf { it.allocated } }.toDouble() / c.count)),
-                        duration(c.percentileNanos(0.50)),
-                        duration(c.percentileNanos(0.90)), duration(c.percentileNanos(0.99)),
-                        duration(c.spanMaxNanos.toDouble()),
-                        waitSplit(c.inclusiveHits, c.runningInclusiveHits)
-                    )
-                )
-            }
-            appendLine("-".repeat(coarseRuleWidth))
+            with(text) { shared() }
         }
         // A context made by hand rather than by the hook has no path and is in no tree. Its type
         // still has its per-type figures; said here so it is not lost.
@@ -2036,6 +1788,20 @@ class Run internal constructor(
         }
 
     /**
+     * [rows], and time inside no label as a row rather than a `Coverage` line: it is the time the
+     * reader has no information about, and it belongs in the ranking with everything else. Its
+     * `Runnable / Waiting` is the first question about it - idle threads, or work nobody labelled -
+     * and the row answers it.
+     */
+    internal fun tableRows(): List<OperationRow> = rows() + if (unlabelledHits > 0) listOf(
+        OperationRow(
+            NO_OPERATION, coarse = false, hits = unlabelledHits, inclusiveHits = unlabelledHits,
+            runningHits = if (stateSampled) unlabelledHits - unlabelledWaitingHits else unlabelledHits,
+            activeTicks = 0, peakInside = 0, threads = 0, calls = 0, stuckShare = null,
+        )
+    ) else emptyList()
+
+    /**
      * Every warning of the report, for its `CAREFUL` section right under the first line (see
      * [carefulBlock]).
      *
@@ -2147,104 +1913,9 @@ class Run internal constructor(
         // thread-time is a sum over threads and `active` is the span it was summed in, and on one
         // thread the two figures match, which is the reader's check that they have understood it.
         appendLine("COARSE AND FINE OPERATIONS - own time, out of ${duration(activeNanos.toDouble())} active time")
-        // The band over the column heads. Eleven columns is more than anyone reads as a list, and
-        // the groups are the reading order: how much time went here, how it was spread over
-        // threads, and how far the row can be trusted.
-        // Both tiers, sorted together further down. Computed here because everything from the
-        // band downwards is printed only if some row survived, of either tier.
-        // A coarse operation with no own time is not a row: three rows of zeros at the bottom are
-        // not digits. It is one line under the table, worded for what happened - all of its time
-        // was inside other operations, which is the ordinary state of a span around labelled work -
-        // and not as "never sampled", which it was not: `query` inside `runBatch` inside `run`,
-        // each taking all of the time of the one around it.
-        val allRows = rows()
-        val contained = allRows.filter { it.coarse && it.hits == 0L && it.inclusiveHits > 0 }
-        val (seen, unseen) = allRows.filter { it !in contained }.partition { it.hits > 0 }
-        // Time inside no label, as a row rather than a `Coverage` line: it is the time the reader
-        // has no information about, and it belongs in the ranking with everything else. Its
-        // `Runnable / Waiting` is the first question about it - idle threads, or work nobody
-        // labelled - and the row answers it.
-        val outside = if (unlabelledHits > 0) listOf(
-            OperationRow(
-                NO_OPERATION, coarse = false, hits = unlabelledHits, inclusiveHits = unlabelledHits,
-                runningHits = if (stateSampled) unlabelledHits - unlabelledWaitingHits else unlabelledHits,
-                activeTicks = 0, peakInside = 0, threads = 0, calls = 0, stuckShare = null,
-            )
-        ) else emptyList()
-        val anyRow = seen.isNotEmpty() || outside.isNotEmpty()
-        if (anyRow) appendLine(
-            band(
-                // `Load` runs through the calls: thread-time, calls and per call are one line of
-                // arithmetic, and a band of their own would only repeat its first column. `Long`
-                // sits right after them so the sentence continues - so many calls at this much
-                // each, of which these ran long - and `Spread` follows, because how the time lay
-                // across threads is a different question and on one thread a column of ones.
-                fineColumns, FINE_BREAKS,
-                1..5 to "Load", 6..8 to "Long", 9..12 to "Spread", 13..14 to "Trust"
-            )
-        )
-        if (anyRow) appendLine(
-            String.format(
-                // `v` marks the column the table is sorted by: at two rows a reader cannot tell a
-                // sorted table from an unsorted one by looking. ASCII, not an arrow glyph: a Windows
-                // console is not UTF-8 by default.
-                //
-                // The header uses the same column widths as the data rows. Any difference is
-                // invisible until a bar is drawn through both, and then it comes out crooked.
-                Locale.ROOT, fineRow,
-                // `Thread-time%` and `Thread-time` are one quantity, relative and absolute, and
-                // neither is CPU. `Thread-time` against `Wall-time` is the point of having both:
-                // eight threads computing five seconds is forty thread-seconds and the sum is real;
-                // a hundred threads parked one second on a lock is also a hundred, and there the
-                // sum is fiction.
-                //
-                // Both halves of the split, summing to 100%, rather than the waiting half alone:
-                // two shares that add to the whole cannot be read as an addition to it.
-                //
-                // `Runnable`, not `Run` or `CPU`. The `-able` is the whole distinction: it means
-                // *not blocked*, not *executing*. A preempted thread reads runnable - 14-18% of
-                // wall time on a workload that never blocks - and so does a thread stopped in a
-                // native call, which can put the figure 55x above what the machine spent. The left
-                // half is an upper bound on work; only the time-on-CPU block above can say how much
-                // of it was real.
-                //
-                // `Concurrency` and not `Parallelism`: the number counts threads INSIDE the label
-                // whether they are running or parked, which is what concurrency means; parallelism
-                // needs them executing. Two threads inside a label at 7.2% runnable are concurrency
-                // 2.00 and a parallelism of about 0.14.
-                //
-                // `Concurrency`, `Workers`, `Pool` - three columns and no slash between them. A
-                // denominator on the concurrency answers a question about the deployment from
-                // inside a row about an operation: a pool of four that never runs more than three
-                // tasks at once would print `3.00 / 4`, where the 4 is a ThreadPoolExecutor detail
-                // - it opens a new core thread on every submit until the core size is reached. And
-                // `Concurrency / Peak` reads as the name of one quantity, when a fractional mean and
-                // an integer maximum are not two views of one whole the way `Runnable / Waiting` is.
-                //
-                // Each row is then read off its own headings with no arithmetic: *concurrency 1.1,
-                // so concurrency here is poor; workers 2, but I dispatched 3, so something is off;
-                // pool 4, which is what I configured.* `Max`, `Peak` and `Most` name a statistic and
-                // leave the reader to supply the noun; `Workers` names what was counted.
-                "Operation", "Thread-time% v", "Thread-time", "Runnable / Waiting",
-                // `Thread-time per call` sits beside `Calls` because it is hits x step / calls: both
-                // operands are columns on the same row, and it inherits the caveat `Thread-time`
-                // carries. Not "implied": every number in the table except `Calls` is sampled.
-                "Calls", "Thread-time per call",
-                // The long executions, read off the calls they are part of: how many ran over a
-                // tick, the thread-time inside them, and the longest. The count tells a resize
-                // from a lock; the time is what fixing it is worth; the longest tells two dozen
-                // of ten milliseconds from one of two seconds.
-                "Execs", "Time", "Longest",
-                "Wall-time", "Concurrency", "Workers", "Pool", "Hits", "Noise"
-            )
-        )
-        if (anyRow) appendLine(rule(fineColumns, FINE_BREAKS))
-        // Operations the sampler never caught are folded away rather than printed as a screen of
-        // zeroes. Folded, not dropped: the
-        // count says how many there were, and a *called* operation with no samples is a real
-        // finding, since it means the label is on something too small to see.
-        // Partitioned above the header rather than here, because whether the header prints at
-        // all depends on it. See where `seen` is declared.
+        val fine = table.fineTable
+        val anyRow = fine.rows.isNotEmpty()
+        if (anyRow) with(table.fineText) { rows() }
         // A table with no rows is two rules around nothing. Say what happened instead: an empty
         // table is nearly always a run too short for the sampler to catch, and that is worth
         // naming rather than leaving the reader to infer from a blank.
@@ -2261,56 +1932,31 @@ class Run internal constructor(
                 else "  nothing was sampled."
             )
         }
-        for (r in (seen + outside).sortedByDescending { it.hits }) {
+        if (fine.contained.isNotEmpty()) {
             appendLine(
-                String.format(
-                    Locale.ROOT, fineRow,
-                    r.label, percent(r.shareOf() * 100), threadTime(r.hits * stepNanos),
-                    runnableSplit(r.waitingShare),
-                    if (r.name == NO_OPERATION) "-" else String.format(Locale.ROOT, "%,d", r.calls),
-                    duration(r.perCallNanos()),
-                    // A dash for a coarse row rather than figures: the long-execution detector is
-                    // a fine-tier instrument, and a coarse operation has percentiles below, which
-                    // answer the same question exactly instead of by a threshold. And a dash at
-                    // or under the machine floor, where the figures would be preemption.
-                    if (r.longShown) String.format(Locale.ROOT, "%,d", r.stuckInstances) else "-",
-                    if (r.longShown) threadTime(r.stuckHits * stepNanos) else "-",
-                    if (r.longShown) duration(r.longestStuckTicks * stepNanos.toDouble()) else "-",
-                    // Nothing counts the ticks with some thread inside no label, so the row has no
-                    // wall time rather than a wall time of zero.
-                    if (r.name == NO_OPERATION) "-" else threadTime(r.activeTicks * stepNanos),
-                    r.concurrency(), r.workers(), r.pool(),
-                    r.hits.toString(), percent(r.noiseFloor() * 100),
-                )
+                "  " + fine.contained.joinToString() + ": coarse, with no own time - every sample inside " +
+                        (if (fine.contained.size == 1) "it" else "them") + " was in an operation above"
             )
         }
-        if (anyRow) appendLine(rule(fineColumns, FINE_BREAKS))
-        if (contained.isNotEmpty()) {
-            appendLine(
-                "  " + contained.sortedByDescending { it.inclusiveHits }.joinToString { it.label } +
-                        ": coarse, with no own time - every sample inside " +
-                        (if (contained.size == 1) "it" else "them") + " was in an operation above"
-            )
-        }
-        if (unseen.isNotEmpty()) {
-            val called = unseen.filter { it.calls > 0 }
+        if (fine.folded.isNotEmpty()) {
+            val called = fine.folded.filter { it.second > 0 }
             // Named, in both branches: "1 operation never sampled" leaves the reader to work out
             // which of their labels it was, and on a short run — where this line fires most — the
             // answer is usually the whole point. Capped at four, since a run can fold twenty-five.
-            fun names(ops: List<OperationRow>) =
-                ops.take(4).joinToString { it.label } + (if (ops.size > 4) ", ..." else "")
+            fun names(ops: List<Pair<String, Long>>) =
+                ops.take(4).joinToString { it.first } + (if (ops.size > 4) ", ..." else "")
             // "called anyway" rather than "N of them did run", which reads as nonsense at N = 1 —
             // and one is the common case on a short run, which is exactly when a reader is most
             // likely to be new to the report.
             appendLine(
-                "  ${plural(unseen.size.toLong(), "operation")} never sampled and folded away" +
-                        (if (called.isEmpty()) ", and never called: " + names(unseen)
-                        else "; called anyway: " + names(called.sortedByDescending { it.calls }))
+                "  ${plural(fine.folded.size.toLong(), "operation")} never sampled and folded away" +
+                        (if (called.isEmpty()) ", and never called: " + names(fine.folded)
+                        else "; called anyway: " + names(called.sortedByDescending { it.second }))
             )
         }
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.
-        if (seen.any { it.coarse } || contained.isNotEmpty()) {
+        if (fine.rows.any { it.name.endsWith(" *") } || fine.contained.isNotEmpty()) {
             appendLine("  * a coarse operation, showing its OWN work - its full span is in the table above")
         }
         // A note and not a warning: it is the threshold the `Long` group is printed against, so it
@@ -2421,34 +2067,7 @@ class Run internal constructor(
         internal const val MIN_TICKS_FOR_A_TABLE = 50
 
         // The report-level rules and the warning banners, matching the widest table on the page.
-        // The fine table has no width constant of its own - it is computed from its columns and
-        // bars, because a hand-kept number drifts and the rules come to print at different lengths
-        // on one page.
         internal const val WIDTH = 168
-
-        /** The coarse table alone, drawn to the table rather than to a round number. */
-        internal const val COARSE_WIDTH = 167
-
-        /**
-         * One row of the coarse table: name, executions, per parent and parallel, wall and its share of
-         * the parent, paused, mean, the `Allocated` cell - padded by the caller, and empty unless asked
-         * for - four durations, the split.
-         */
-        internal const val COARSE_ROW = "%-30s %,11d %10s %8s %10s %8s %10s %10s%s %10s %10s %10s %10s %18s"
-
-        /** One row of the fine table, heading and data. The widths are [FINE_COLUMNS]. */
-        internal const val FINE_ROW = "%-26s | %14s %11s %18s %13s %20s | %7s %8s %8s | %9s %11s %7s %5s | %8s %6s"
-
-        /**
-         * The fine table's data-row widths, in order, so the group band can be laid over them.
-         *
-         * Operation, thread-time% and thread-time, runnable/waiting, calls, thread-time per call,
-         * the three long-execution columns, wall-time, concurrency, workers, pool, hits, noise.
-         */
-        internal val FINE_COLUMNS = intArrayOf(26, 14, 11, 18, 13, 20, 7, 8, 8, 9, 11, 7, 5, 8, 6)
-
-        /** After which columns a group bar comes down. */
-        internal val FINE_BREAKS = intArrayOf(0, 5, 8, 12)
 
         /**
          * Hits below which `Peak 1` is not evidence of anything.

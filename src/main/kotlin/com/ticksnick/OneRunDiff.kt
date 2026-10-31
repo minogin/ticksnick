@@ -30,7 +30,23 @@ internal class OneRunDiff(
     private val wallBefore = before.wallsOf()
     private val wallAfter = after.wallsOf()
 
-    private val coarseExtra = nameOverflow(COARSE_DIFF_ROW, before.coarseRowNames() + after.coarseRowNames())
+    private fun names(r: Run): List<String> = buildList {
+        fun walk(n: CoarseNode, depth: Int) {
+            val indent = "  ".repeat(depth)
+            add(indent + n.name)
+            val own = r.ownRowsOf(n)
+            val fine = when {
+                own != null -> r.drawnOwnRows(own).map { it.name }
+                n.children.isEmpty() -> r.operations.filter { n.fine[it.id] > 0 }.map { it.name }
+                else -> emptyList()
+            }
+            for (f in fine) add("$indent  $SPLIT_MARK $f")
+            for (c in n.children) walk(c, depth + 1)
+        }
+        for (root in r.coarseTree) walk(root, 0)
+    }
+
+    private val coarseExtra = nameOverflow(COARSE_DIFF_ROW, names(before) + names(after))
     private val allocations = before.allocations || after.allocations
     private val coarseRow = widened(COARSE_DIFF_ROW, coarseExtra) + if (allocations) " | %21s" else ""
     private val fineExtra = nameOverflow(FINE_DIFF_ROW, matched().map { it.label })

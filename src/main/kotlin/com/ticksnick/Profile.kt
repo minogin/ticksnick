@@ -36,6 +36,10 @@ internal const val ONE_RUN_CAREFUL = "times: 1 run of '%s', no interval - the ne
 internal const val MAX_CAREFUL = 10
 
 internal const val RUNS_WIDTH = 165
+
+/** The name column's narrowest width, in the coarse and in the fine table. */
+internal const val COARSE_NAME_WIDTH = 30
+internal const val FINE_NAME_WIDTH = 26
 internal const val RUNS_COARSE_ROW = "%-40s %11s %10s %7s %8s %9s %10s %7s %10s %10s %10s"
 internal const val RUNS_FINE_ROW = "%-26s | %11s %7s | %11s %7s | %27s"
 
@@ -180,7 +184,10 @@ class Profile internal constructor(internal val name: String, internal val files
 
     internal fun childrenOf(level: List<List<CoarseNode>>): List<Matched> =
         level.flatten().map { it.name }.distinct().map { matched(level, it) }
-            .sortedByDescending { m -> wall(m).mean.let { if (it.isNaN()) 0.0 else it } }
+            .sortedWith(
+                compareByDescending<Matched> { m -> wall(m).mean.let { if (it.isNaN()) 0.0 else it } }
+                    .thenByDescending { m -> m.nodes.sumOf { it?.inclusiveHits ?: 0L } }
+            )
 
     internal fun wall(m: Matched): Estimate = estimateOf(m) { i, node -> wallOf(i, node) }
 
@@ -260,6 +267,193 @@ class Profile internal constructor(internal val name: String, internal val files
             )
         }
     }
+
+    /** One run's fine rows in the coarse row [n]'s own time. */
+    private fun ownOf(i: Int, n: CoarseNode): List<Run.OwnRow> = runs[i].ownRowsOf(n) ?: runs[i].splitRowsOf(n)
+
+    /** Which of [rows], those of [n], the run draws. */
+    private fun drawnOf(i: Int, n: CoarseNode, rows: List<Run.OwnRow>): List<Run.OwnRow> =
+        if (runs[i].ownRowsOf(n) != null) runs[i].drawnOwnRows(rows) else rows.take(FINE_ROWS_SHOWN)
+
+    /** The coarse row [m], and under it its children and the fine labels in its own time. [counted] collects every own row. */
+    private fun coarseRow(m: Matched, parents: List<CoarseNode?>, counted: MutableList<Row>): Row {
+        val nodes = m.nodes.indices.filter { m.nodes[it] != null }
+        fun overAll(f: (Int, CoarseNode) -> Double) = Estimate(nodes.map { f(it, m.nodes[it]!!) }.filter { !it.isNaN() })
+        fun timed(f: (CoarseNode) -> Double) = estimateOf(m) { _, n -> f(n) }
+        val (drawn, folded) = ownRows(m, nodes, counted)
+        val children = childrenOf(m.nodes.map { it?.children ?: emptyList() }).map { coarseRow(it, m.nodes, counted) }
+        return Row(
+            m.name,
+            mapOf(
+                EXECUTIONS to overAll { _, n -> n.count.toDouble() },
+                PER_PARENT to overAll { i, n -> parents[i]?.takeIf { it.count > 0 }?.let { n.count.toDouble() / it.count } ?: Double.NaN },
+                PARALLEL to overAll { i, n -> if (runs[i].factorOf(n) > 1.0) n.parallel else Double.NaN },
+                WALL to wall(m),
+                PARENT_SHARE to estimateOf(m) { i, n ->
+                    val parent = parents[i]
+                    if (parent == null || parent.spanSumNanos == 0L) Double.NaN else wallOf(i, n) * 100 / wallOf(i, parent)
+                },
+                PAUSED to overAll { _, n -> n.pausedNanos.toDouble() },
+                MEAN to meanSpan(m),
+                ALLOCATED to allocated(m),
+                P50 to timed { it.percentileNanos(0.50) },
+                P90 to timed { it.percentileNanos(0.90) },
+                P99 to timed { it.percentileNanos(0.99) },
+                MAX to timed { it.spanMaxNanos.toDouble() },
+                COARSE_WAITING to overAll { _, n -> waiting(n.inclusiveHits, n.runningInclusiveHits) },
+            ),
+            nodes.size,
+            children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 },
+            folded = folded,
+            slowest = m.nodes.flatMap { it?.slowest.orEmpty() }.sortedByDescending { it.nanos }.take(m.nodes.maxOf { it?.slowest?.size ?: 0 }),
+        )
+    }
+
+    private fun waiting(inclusive: Long, running: Long): Double = if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive
+
+    /**
+     * The fine labels in the own time of the row [m], in the runs [nodes]: those drawn in any run, and
+     * one line for the rest. A run with the coarse row and not the label counts at 0.
+     */
+    private fun ownRows(m: Matched, nodes: List<Int>, counted: MutableList<Row>): kotlin.Pair<List<Row>, FoldedRows?> {
+        val rows = nodes.associateWith { ownOf(it, m.nodes[it]!!) }
+        val drawn = nodes.flatMap { i -> drawnOf(i, m.nodes[i]!!, rows[i]!!).map { it.name } }.distinct()
+        val all = (drawn + nodes.flatMap { i -> rows[i]!!.map { it.name } }).distinct().map { name ->
+            val of = nodes.associateWith { i -> rows[i]!!.firstOrNull { it.name == name } }
+            fun anyOver0(v: List<Double>) = Estimate(v.takeIf { it.any { x -> x > 0 } } ?: emptyList())
+            val calls = nodes.mapNotNull { i ->
+                val c = of[i]?.calls ?: if (name != "unlabelled" && m.nodes[i]!!.calls.isNotEmpty()) 0L else -1L
+                c.takeIf { it >= 0 }?.let { i to it }
+            }
+            val ofTimed = m.present
+            val row = Row(
+                name,
+                mapOf(
+                    EXECUTIONS to Estimate(calls.map { it.second.toDouble() }),
+                    PER_PARENT to Estimate(
+                        calls.takeIf { it.size == nodes.size }.orEmpty().filter { m.nodes[it.first]!!.count > 0 }
+                            .map { (i, c) -> c.toDouble() / m.nodes[i]!!.count }
+                    ),
+                    PARALLEL to Estimate(nodes.mapNotNull { of[it]?.parallel }.filter { it >= PARALLEL_SHOWN }),
+                    WALL to anyOver0(ofTimed.map { of[it]?.wallNanos ?: 0.0 }),
+                    PARENT_SHARE to anyOver0(ofTimed.map { i -> of[i]?.share?.takeIf { !it.isNaN() }?.times(100) ?: 0.0 }),
+                    MEAN to Estimate(nodes.mapNotNull { of[it]?.perCallNanos }.filter { !it.isNaN() }),
+                ),
+                nodes.count { of[it] != null },
+                own = true,
+            )
+            if (name != "unlabelled" && nodes.any { runs[it].ownRowsOf(m.nodes[it]!!) != null }) counted += row
+            row
+        }
+        val rest = all.filter { it.name !in drawn }
+        fun mean(r: Row, c: Column) = r.figures[c]?.mean?.takeIf { !it.isNaN() } ?: 0.0
+        val folded = if (rest.isEmpty()) null else FoldedRows(
+            rest.size,
+            nodes.map { i -> rows[i]!!.filter { r -> r.name !in drawn }.sumOf { it.share.takeIf { s -> !s.isNaN() } ?: 0.0 } * 100 }.average(),
+            rest.sumOf { mean(it, EXECUTIONS) },
+        )
+        return all.filter { it.name in drawn } to folded
+    }
+
+    /** The coarse operations under more than one caller in any run: their figures over all callers. */
+    private fun sharedRows(): List<Row> {
+        val nodes = runs.map { r -> r.coarseTree.flatMap { it.flatten() }.groupBy { it.name } }
+        val names = nodes.flatMap { n -> n.filterValues { it.size > 1 }.keys }.distinct()
+        return names.map { name ->
+            val with = runs.indices.filter { nodes[it][name] != null }
+            fun of(f: (Int, CoarseStat, List<CoarseNode>) -> Double) =
+                Estimate(with.map { i -> f(i, runs[i].coarse.first { it.name == name }, nodes[i][name]!!) }.filter { !it.isNaN() })
+            Row(
+                name,
+                mapOf(
+                    EXECUTIONS to of { _, c, _ -> c.count.toDouble() },
+                    WALL to of { i, _, n -> n.sumOf { wallOf(i, it) } },
+                    PAUSED to of { _, _, n -> n.sumOf { it.pausedNanos }.toDouble() },
+                    MEAN to of { _, c, _ -> c.meanSpanNanos },
+                    ALLOCATED to Estimate(
+                        with.filter { runs[it].allocations }.map { i ->
+                            nodes[i][name]!!.sumOf { n -> n.flatten().sumOf { it.allocated } }.toDouble() / runs[i].coarse.first { it.name == name }.count
+                        }
+                    ),
+                    P50 to of { _, c, _ -> c.percentileNanos(0.50) },
+                    P90 to of { _, c, _ -> c.percentileNanos(0.90) },
+                    P99 to of { _, c, _ -> c.percentileNanos(0.99) },
+                    MAX to of { _, c, _ -> c.spanMaxNanos.toDouble() },
+                    COARSE_WAITING to of { _, c, _ -> waiting(c.inclusiveHits, c.runningInclusiveHits) },
+                ),
+                with.size,
+            )
+        }.sortedByDescending { r -> r.figures[WALL]!!.mean }
+    }
+
+    /** **The coarse table**: one row per path, over the runs. */
+    internal val coarseTable: Table by lazy {
+        val own = ArrayList<Row>()
+        val rows = childrenOf(runs.map { it.coarseTree }).map { coarseRow(it, runs.map { null }, own) }
+        // A fine label under more than one row: each row is its time under that row alone, so the tree
+        // never shows its total, and a label spread over three walks reads smaller than one that leads
+        // a single walk. The total goes once, beside the label's largest row. With calls counted, every
+        // row the label was called under counts, sampled or not, so the number of operations is exact.
+        for ((_, under) in own.groupBy { it.name }) {
+            fun wall(r: Row) = r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0
+            if (under.size < 2 || under.sumOf { wall(it) } < NOTE_MIN_GAIN * under.maxOf { wall(it) }) continue
+            val calls = under.map { it.figures[EXECUTIONS]?.mean?.takeIf { c -> !c.isNaN() } }
+            under.maxBy { wall(it) }.inAll = InAll(under.sumOf { wall(it) }, calls.takeIf { null !in it }?.sumOf { it!! }, under.size)
+        }
+        val split = runs.any { r -> r.coarseTree.any { t -> t.flatten().any { r.ownRowsOf(it) == null && r.splitRowsOf(it).isNotEmpty() } } }
+        Table(COARSE_COLUMNS.filter { it !== ALLOCATED || allocations }, rows, runs.size, WALL, sharedRows(), splitLeaves = split)
+    }
+
+    /** **The fine table**: fine and coarse operations together, each by its own time, heaviest first. */
+    internal val fineTable: Table by lazy {
+        val rows = runs.map { r -> r.tableRows().associateBy { it.label } }
+        val labels = rows.flatMap { it.keys }.distinct()
+        fun inRuns(label: String) = rows.mapNotNull { it[label] }
+        // A coarse operation with no own time is not a row: three rows of zeros at the bottom are not
+        // digits. It is one line under the table, worded for what happened - all of its time was inside
+        // other operations, which is the ordinary state of a span around labelled work.
+        val contained = labels.filter { l -> inRuns(l).let { r -> r.all { it.coarse && it.hits == 0L } && r.any { it.inclusiveHits > 0 } } }
+        // Operations the sampler never caught are folded away rather than printed as a screen of
+        // zeroes. Folded, not dropped: a *called* operation with no samples is a real finding, since it
+        // means the label is on something too small to see.
+        val (seen, unseen) = labels.filter { it !in contained }.partition { l -> inRuns(l).any { it.hits > 0 } }
+        val table = seen.map { label ->
+            // A label called but never sampled in a run is in it, at 0: a draw of a sampled count like
+            // any other. Left out, only the runs it was lucky in remain, and the mean reads high.
+            val present = runs.indices.filter { i -> rows[i][label]?.let { it.hits > 0 || it.calls > 0 } == true }
+            fun of(f: (Run, Run.OperationRow) -> Double) = Estimate(present.map { f(runs[it], rows[it][label]!!) }.filter { !it.isNaN() })
+            fun long(f: (Run, Run.OperationRow) -> Double) = of { p, r -> if (r.longShown) f(p, r) else Double.NaN }
+            fun named(f: (Run, Run.OperationRow) -> Double) = of { p, r -> if (r.name == Run.NO_OPERATION) Double.NaN else f(p, r) }
+            Row(
+                label,
+                mapOf(
+                    THREAD_SHARE to of { _, r -> r.shareOf() * 100 },
+                    THREAD_TIME to of { p, r -> r.hits * p.stepNanos },
+                    FINE_WAITING to of { _, r -> r.waitingShare },
+                    CALLS to named { _, r -> r.calls.toDouble() },
+                    PER_CALL to of { _, r -> r.perCallNanos() },
+                    LONG_CALLS to long { _, r -> r.stuckInstances.toDouble() },
+                    LONG_TIME to long { p, r -> r.stuckHits * p.stepNanos },
+                    LONGEST to long { p, r -> r.longestStuckTicks * p.stepNanos },
+                    WALL_TIME to named { p, r -> r.activeTicks * p.stepNanos },
+                    CONCURRENCY to of { _, r -> if (r.activeTicks == 0L) Double.NaN else r.hits.toDouble() / r.activeTicks },
+                    WORKERS to of { _, r -> if (r.peakInside <= 0) Double.NaN else r.peakInside.toDouble() },
+                    POOL to of { _, r -> if (r.threads <= 0) Double.NaN else r.threads.toDouble() },
+                    HITS to of { _, r -> r.hits.toDouble() },
+                    NOISE to of { _, r -> r.noiseFloor() * 100 },
+                ),
+                present.size,
+            )
+        }
+        Table(
+            FINE_COLUMNS, table.sortedByDescending { it.figures[THREAD_SHARE]!!.mean }, runs.size, THREAD_SHARE,
+            contained = contained.sortedByDescending { l -> inRuns(l).sumOf { it.inclusiveHits } },
+            folded = unseen.map { l -> l to inRuns(l).maxOf { it.calls } },
+        )
+    }
+
+    internal val coarseText: TableText by lazy { TableText(coarseTable, "Coarse operation", COARSE_NAME_WIDTH, bars = false) }
+    internal val fineText: TableText by lazy { TableText(fineTable, "Operation", FINE_NAME_WIDTH, bars = true) }
 
     private fun across(): String = buildString {
         val n = runs.size

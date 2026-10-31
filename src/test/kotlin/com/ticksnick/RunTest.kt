@@ -444,10 +444,11 @@ class RunTest {
 
     @Test
     fun `a diff matches operations by name and marks unchanged calls`() {
-        val text = OneRunDiff(loadedRun(), loadedRun(), "a", "b").render()
-        assertTrue("work" in text, "the fine operation is missing: $text")
-        assertTrue("1,000,000 =" in text, "equal calls should read as =: $text")
-        assertTrue("a -> b" in text, "the names are missing: $text")
+        val text = diffOf(loadedRun(), loadedRun(), "a", "b")
+        val row = diffRow(text, "work")
+        assertTrue("1,000,000" in row[0] && "1,000,000" in row[1], row.toString())
+        assertTrue(row[2].split("|")[1].trim().split(Regex(" +")).all { it == "=" }, "equal figures should read as =: ${row[2]}")
+        assertTrue("a (1 run) -> b (1 run)" in text, "the names are missing: $text")
     }
 
     // ---------------------------------------------------------------- the Sampling line

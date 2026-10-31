@@ -22,6 +22,23 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - A folder whose runs differ in a tag, the setup, the sampling interval, the wait strategy or
   `allocations` gets one `CAREFUL` line, last, and runs of one JVM get another.
 
+### One set of tables
+
+- A report and a diff have the same columns, names and forms, however many runs are behind them. The
+  report over runs gains `Per parent`, `Parallel`, `Paused`, `Max`, `Runnable / Waiting`, the `-` rows
+  under coarse rows, and the fine table's other columns.
+- A diff has every column of the report. A row is three lines: before, after, and the change.
+- The coarse table has groups, `Load` and `Long`, as the fine table has. `Runnable / Waiting` moved into
+  `Load`, before `Mean`.
+- The fine table has no `Trust` group: `Hits` and `Noise` are gone. The `+-` includes sampling noise, and
+  the `Sampled` line says how many samples there are.
+- `Execs` is `Long calls`, and `Per call` is `Thread-time per call` in every table.
+- `+-` is on what says how much, `Runnable / Waiting` and `Allocated` included, and not on percentiles,
+  `Max`, or the `Long` and `Spread` groups.
+- A change's interval is in percentage points: `-22% +-2.2 pp`.
+- `faster`, `slower` and `unclear` are gone. A change that could be noise is marked `?`, held to 5%
+  divided by the number of changes in the diff, with a note under the table.
+
 ### Warnings
 
 - The report over runs and both diffs show each run's own warnings, which only the report of one run

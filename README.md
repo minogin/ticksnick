@@ -186,9 +186,9 @@ runs, and on disk it is a folder of them.
   If a run should not count, move it out of the folder. Each run should come from its own JVM.
 - `TickSnick.load(folder).render()` reports the profile: every figure is the mean of the runs, with
   its 95% interval.
-- `TickSnick.diff(before, after)` compares two profiles and gives each change its 95% interval. It
-  says `faster` or `slower` only when the whole interval is on one side of zero. Which of code,
-  workload or setup differs between the two is the question it answers.
+- `TickSnick.diff(before, after)` compares two profiles and gives each change its 95% interval. A
+  change that could be noise is marked `?`. Which of code, workload or setup differs between the two
+  is the question it answers.
 
 A single run renders as a report of its own. It warns that its times have no interval. Its shares of
 the parent are still reliable.

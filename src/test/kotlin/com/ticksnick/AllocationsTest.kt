@@ -140,7 +140,7 @@ class AllocationsTest {
         val head = lines.first { it.startsWith("Coarse operation") }
         val end = head.indexOf("Allocated") + "Allocated".length
         assertEquals(' ', head[head.indexOf("Allocated") - 1])
-        val row = lines.first { it.startsWith("alloc.outer ") && "|" !in it }
+        val row = lines.first { it.startsWith("alloc.outer ") }
         assertEquals("3.00 MB", row.substring(end - 7, end), row)
 
         val folder = Files.createTempDirectory("alloc")
@@ -148,11 +148,12 @@ class AllocationsTest {
         assertTrue(loaded.allocations)
         assertEquals(a.node("alloc.outer").allocated, loaded.node("alloc.outer").allocated)
 
-        val both = OneRunDiff(a, a).render()
-        assertTrue("3.00 MB -> 3.00 MB" in both, both)
-        val oneSide = OneRunDiff(off, a).render()
+        val both = diffRow(diffOf(a, a), "alloc.outer")
+        assertTrue("3.00 MB" in both[0] && "3.00 MB" in both[1], both.toString())
+        val oneSide = diffOf(off, a)
         assertTrue("CAREFUL" in oneSide && "allocations: counted on one side only" in oneSide, oneSide)
-        assertTrue("- -> 3.00 MB" in oneSide, oneSide)
+        val outer = diffRow(oneSide, "alloc.outer")
+        assertTrue("MB" !in outer[0] && "3.00 MB" in outer[1], outer.toString())
     }
 
     /** With two runs a side a diff goes through a different table, and so does the report over runs. */
@@ -170,9 +171,9 @@ class AllocationsTest {
         }
         val runs = TickSnick.load(before)
         val across = runs.render()
-        assertTrue(across.lines().any { it.startsWith("alloc.outer") && it.endsWith("3.00 MB") }, across)
-        val diff = TickSnick.diff(runs, TickSnick.load(after))
-        assertTrue(diff.lines().any { it.startsWith("alloc.outer") && "3.00 MB -> 3.00 MB" in it }, diff)
+        assertTrue(across.lines().any { it.startsWith("alloc.outer") && "3.00 MB +-" in it }, across)
+        val row = diffRow(TickSnick.diff(runs, TickSnick.load(after)), "alloc.outer")
+        assertTrue("3.00 MB +-" in row[0] && "3.00 MB +-" in row[1], row.toString())
     }
 
     // --- the other ways into a coarse execution ------------------------------------------
@@ -305,7 +306,7 @@ class AllocationsTest {
         val lines = Profiler.stop().render().lines()
 
         val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
-        val row = lines.first { it.startsWith("alloc.outer ") && "|" !in it }
+        val row = lines.first { it.startsWith("alloc.outer ") }
         assertEquals(row.length, lines[head + 1].length, "the rule and its table")
     }
 
@@ -426,7 +427,8 @@ class AllocationsTest {
         }
         val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         assertTrue("allocations: counted on one side only" in diff, diff)
-        assertTrue(diff.lines().any { it.startsWith("alloc.outer") && "3.00 MB -> -" in it }, diff)
+        val row = diffRow(diff, "alloc.outer")
+        assertTrue("3.00 MB" in row[0] && "MB" !in row[1], row.toString())
     }
 
     @Test
@@ -448,7 +450,7 @@ class AllocationsTest {
         session(true).save(folder)
         session(false).save(folder)
         val text = TickSnick.load(folder).render()
-        assertTrue(text.lines().any { it.startsWith("alloc.outer") && it.endsWith("3.00 MB") }, text)
+        assertTrue(text.lines().any { it.startsWith("alloc.outer") && "3.00 MB" in it }, text)
     }
 
     @Test
@@ -457,8 +459,8 @@ class AllocationsTest {
         val with = { session(true) { nested(); repeat(2) { op(gone) { sink = ByteArray(MB) } } } }
         with()
         val without = { session(true) }
-        val one = OneRunDiff(with(), without()).render()
-        assertTrue(one.lines().any { it.startsWith("alloc.gone") && "1.00 MB -> -" in it }, one)
+        val one = diffRow(diffOf(with(), without()), "alloc.gone")
+        assertTrue("1.00 MB" in one[0] && "MB" !in one[1], one.toString())
 
         val before = Files.createTempDirectory("alloc-gone-a")
         val after = Files.createTempDirectory("alloc-gone-b")
@@ -466,8 +468,8 @@ class AllocationsTest {
             with().save(before)
             without().save(after)
         }
-        val two = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
-        assertTrue(two.lines().any { it.startsWith("alloc.gone") && "1.00 MB -> -" in it }, two)
+        val two = diffRow(TickSnick.diff(TickSnick.load(before), TickSnick.load(after)), "alloc.gone")
+        assertTrue("1.00 MB" in two[0] && "MB" !in two[1], two.toString())
     }
 
     /** A file from before this, or a run that did not ask: the keys are written only when there is something to say. */

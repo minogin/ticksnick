@@ -254,14 +254,16 @@ class StoreDiffTest {
     fun `a diff shows a side that is missing, calls that differ, and a node only the earlier run had`() {
         val before = profile(listOf(stat("only-before", 100, 1_000), stat("both", 200, 1_000)), tree = listOf(node("root", 1_000_000_000, listOf(node("gone", 500_000_000)))))
         val after = profile(listOf(stat("only-after", 100, 1_000), stat("both", 300, 2_000)), tree = listOf(node("root", 1_000_000_000)))
-        val text = OneRunDiff(before, after, "x", "y").render()
-        val row = { name: String -> text.lines().first { it.trim().startsWith("$name ") } }
-        assertTrue("-> -" in row("only-before"), "a row only the earlier run had: ${row("only-before")}")
-        assertTrue("- ->" in row("only-after"), "a row only the later run had: ${row("only-after")}")
-        assertTrue("1,000 -> 2,000" in row("both"), "calls that differ should both print: ${row("both")}")
-        assertTrue("+50.0%" in row("both"), "the change is missing: ${row("both")}")
-        assertTrue("-> -" in row("gone"), "a coarse node only the earlier run had is gone: $text")
-        assertTrue("Diff          x -> y" in text, text)
+        val text = diffOf(before, after, "x", "y")
+        val onlyBefore = diffRow(text, "only-before")
+        assertTrue("100" in onlyBefore[0] && " - " in onlyBefore[1], "a row only the earlier run had: $onlyBefore")
+        val onlyAfter = diffRow(text, "only-after")
+        assertTrue(" - " in onlyAfter[0] && "100" in onlyAfter[1], "a row only the later run had: $onlyAfter")
+        val both = diffRow(text, "both")
+        assertTrue("1,000" in both[0] && "2,000" in both[1], "calls that differ should both print: $both")
+        assertTrue("+50%" in both[2], "the change is missing: $both")
+        assertTrue(diffRow(text, "gone")[0].startsWith("  gone"), "a coarse node only the earlier run had is gone: $text")
+        assertTrue("Diff          x (1 run) -> y (1 run)" in text, text)
     }
 
     @Test
@@ -275,7 +277,7 @@ class StoreDiffTest {
         try {
             assertTrue("Wall time" in capture { Cli.main(arrayOf("render", a.toString())) }, "render printed no report")
             val diff = capture { Cli.main(arrayOf("diff", a.toString(), b.toString())) }
-            assertTrue("Diff          a/${fileA.fileName} -> b/${fileB.fileName}" in diff, diff)
+            assertTrue("Diff          a (1 run) -> b (1 run)" in diff, diff)
             assertTrue(ONE_RUN_DIFF_CAREFUL in diff, diff)
         } finally {
             dir.toFile().deleteRecursively()
@@ -342,7 +344,7 @@ class StoreDiffTest {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             val short = asOld(p, dir)
-            val diff = OneRunDiff(short, p, "short", "new").render()
+            val diff = diffOf(short, p, "short", "new")
             assertTrue("saved before" !in diff && "summed durations" !in diff, diff)
             assertTrue(diff.lines().any { it.startsWith("store-req") }, diff)
         } finally {

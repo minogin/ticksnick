@@ -358,7 +358,7 @@ class CoarseTest {
         val c = stat(count = 10, sumNanos = 10_000_000, hits = 100, running = 100, instanceTicks = 100)
         val text = report(listOf(c)).render(legend = true)
         assertTrue("NOT CPU" in text, "the traps went missing")
-        assertTrue("noise is 1/sqrt(hits)" in text, "the full legend was not printed")
+        assertTrue("Long is the calls that outlived a tick" in text, "the full legend was not printed")
         assertTrue("create work for everything else" in text, "the counterfactual argument was not printed")
         assertTrue("the coarse table is a tree" in text, "the coarse half was not printed")
     }
@@ -406,8 +406,8 @@ class CoarseTest {
         assertEquals(12e9 / 3.4, walls.getValue(branch), 1.0)
         assertEquals(8.4e9 / 3.4, walls.getValue(leaf), 1.0)
         val text = r.render()
-        assertTrue(Regex("""branch\s+800\s+4\s+3\.4\s+3\.53 s\s+88%""").containsMatchIn(text), text)
-        assertTrue(Regex("""leaf\s+2,400\s+3\s+2\.47 s\s+70%""").containsMatchIn(text), text)
+        assertTrue(Regex("""branch\s+\|\s+800\s+4\s+3\.4\s+3\.53 s\s+88%""").containsMatchIn(text), text)
+        assertTrue(Regex("""leaf\s+\|\s+2,400\s+3\s+2\.47 s\s+70%""").containsMatchIn(text), text)
     }
 
     /**
@@ -603,15 +603,16 @@ class CoarseTest {
         val text = report(listOf(a, b), labelled = 2000, fineName = long).render()
         val lines = text.lines()
 
-        val fine = lines.filter { it.startsWith("Operation") || (it.startsWith(long) && "|" in it) }
+        val fineTable = lines.indexOfFirst { it.startsWith("COARSE AND FINE") }
+        val fine = lines.drop(fineTable).filter { it.startsWith("Operation") || it.startsWith(long) }
         assertEquals(2, fine.size, text)
         assertEquals(1, fine.map { it.indexOf('|') }.distinct().size, text)
-        val cross = lines.first { "+" in it && it.startsWith("-") }.indexOf('+')
+        val cross = lines.drop(fineTable).first { "+" in it && it.startsWith("-") }.indexOf('+')
         assertEquals(fine[0].indexOf('|'), cross, "the bar and the rule's cross part: $text")
 
         val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
         val executionsEnd = lines[head].indexOf("Executions") + "Executions".length
-        val rows = lines.filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" !in it }
+        val rows = lines.take(fineTable).filter { it.startsWith("$long ") || it.startsWith("short ") }
         assertEquals(2, rows.size, text)
         for (r in rows) assertTrue(r[executionsEnd - 1].isDigit() && r[executionsEnd] == ' ', "out of line: $r")
 
@@ -704,7 +705,7 @@ class CoarseTest {
         val iQuery = lines.indexOfFirst { it.startsWith("    query ") }
         assertTrue(iRun in 0 until iBatch && iBatch < iQuery, "the tree is not drawn in order: $text")
         assertEquals(1, lines.count { it.trim().startsWith("query ") }, "an operation is printed more than once: $text")
-        val fineRow = lines[iQuery + 1].split(Regex(" +")).filter { it.isNotEmpty() }
+        val fineRow = lines[iQuery + 1].split(Regex(" +")).filter { it.isNotEmpty() && it != "|" }
         assertEquals(listOf("-", "fine", "own", "3.00", "s", "100%"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
         assertTrue(text.contains("- rows split a leaf's time by the innermost label"), "the split rows have no key: $text")
         assertFalse(lines[iQuery].trim().startsWith("fine "), "the fine row is not under its leaf")

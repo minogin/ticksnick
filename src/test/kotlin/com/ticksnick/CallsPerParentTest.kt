@@ -97,7 +97,7 @@ class CallsPerParentTest {
         for (line in lines.drop(start + 2)) {
             if (line.isBlank() || line.startsWith("-")) break
             val indent = line.length - line.trimStart().length
-            val cells = line.trim().split(Regex(" +"))
+            val cells = line.replace("|", " ").trim().split(Regex(" +"))
             if (cells[0] == "-") {
                 if (cells[1] == "and") continue
                 out[stack.take(indent / 2) + cells[1]] = cells[2] to cells.getOrNull(3)?.takeIf { it.matches(Regex("[0-9,.]+")) }
@@ -134,23 +134,31 @@ class CallsPerParentTest {
         checkDiff(diff)
     }
 
-    /** A diff of 4 plans a run against 2: each row in the report's form, the calls and their figure per parent. */
+    /**
+     * A diff of 4 plans a run against 2: each row three lines in the report's columns, read here as
+     * `Executions` before, after, its change, and `Per parent` the same.
+     */
     private fun checkDiff(diff: String) {
+        val lines = diff.lines().takeWhile { !it.startsWith("COARSE AND FINE") }
+        val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val executions = lines[head].indexOf("Executions") + "Executions".length
+        val perParent = lines[head].indexOf("Per parent") + "Per parent".length
+        fun cell(line: String, end: Int, width: Int) = line.padEnd(end).substring(end - width, end).trim()
         val rows = HashMap<Pair<String, String>, List<String>>()
         var coarse = ""
-        for (line in diff.lines().takeWhile { !it.startsWith("COARSE AND FINE") }) {
-            val cells = line.split("|").map { it.trim() }
-            if (cells.size < 5 || cells[0] == "Coarse operation") continue
-            val name = cells[0]
+        for (i in head + 2 until lines.size step 3) {
+            if (lines[i].startsWith("-")) break
+            val name = lines[i].substringBefore("|").trim()
             if (!name.startsWith("- ")) coarse = name
-            rows[coarse to name.removePrefix("- ")] = cells.takeLast(2)
+            rows[coarse to name.removePrefix("- ")] =
+                (i..i + 2).map { cell(lines[it], executions, 11) } + (i..i + 2).map { cell(lines[it], perParent, 10) }
         }
         val wanted = mapOf(
-            ("plan" to "plan") to listOf("4 -> 2", "4 -> 2"), ("cleanup" to "cleanup") to listOf("4 -> 2", "4 -> 2"),
-            ("plan" to "rule") to listOf("1,360 -> 680", "340 ="), ("plan" to "visit") to listOf("400 -> 200", "100 ="),
-            ("plan" to "rare") to listOf("200 -> 100", "50 ="),
-            ("cleanup" to "visit") to listOf("40 -> 20", "10 ="), ("cleanup" to "rare") to listOf("4 -> 2", "1 ="),
-            ("cleanup" to "unlabelled") to listOf("own", ""),
+            ("plan" to "plan") to listOf("4", "2", "-50%", "4", "2", "-50%"), ("cleanup" to "cleanup") to listOf("4", "2", "-50%", "4", "2", "-50%"),
+            ("plan" to "rule") to listOf("1,360", "680", "-50%", "340", "340", "="), ("plan" to "visit") to listOf("400", "200", "-50%", "100", "100", "="),
+            ("plan" to "rare") to listOf("200", "100", "-50%", "50", "50", "="),
+            ("cleanup" to "visit") to listOf("40", "20", "-50%", "10", "10", "="), ("cleanup" to "rare") to listOf("4", "2", "-50%", "1", "1", "="),
+            ("cleanup" to "unlabelled") to listOf("own", "own", "", "", "", ""),
         )
         for ((row, want) in wanted) assertEquals(want, rows[row], "$row in:\n$diff")
         assertTrue(diff.lines().any { it.contains("Per parent") }, diff)
@@ -161,7 +169,7 @@ class CallsPerParentTest {
     fun `a diff of one run shows the same as the report`() {
         val before = run(plans = 4)
         val after = run(plans = 2)
-        checkDiff(OneRunDiff(before, after).render())
+        checkDiff(diffOf(before, after))
     }
 
     @Test

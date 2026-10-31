@@ -5,103 +5,103 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.sqrt
 
-internal const val RUNS_DIFF_WIDTH = 165
+/** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative. */
+internal const val RUNS_DIFF_HEADER = "%7s -> %-7s  %-22s %-16s %s"
 
-/** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative, the verdict. */
-internal const val RUNS_DIFF_HEADER = "%7s -> %-7s  %-22s %-15s %s"
-internal const val RUNS_DIFF_COARSE_ROW = "%-40s | %-20s %-24s | %-28s | %-24s | %s"
+/** The chance a diff may run of showing one false change, across all of it. */
+internal const val FALSE_CHANGE = 0.05
 
-/** The same with the `Allocated` column, for a diff where a side counted them. */
-internal const val RUNS_DIFF_ALLOCATED_ROW = "%-40s | %-20s %-24s | %-28s | %-24s | %-14s | %s"
-internal const val RUNS_DIFF_FINE_ROW = "%-26s | %-20s %-24s | %-20s %-24s | %s"
+/** Under a diff's table that has a change marked `?`: what it means, and what to do about it. */
+internal const val NOISE_NOTE = "  ? the change could be noise: the runs differ too much to tell, given how many changes this diff shows; " +
+        "more runs of each profile can settle it"
 
-/** The `CAREFUL` line of a diff of one run against one, which [OneRunDiff] renders. */
+/** The `CAREFUL` line of a diff of one run against one. */
 internal const val ONE_RUN_DIFF_CAREFUL = "times: 1 run on each side, no interval - a change in time may be noise, a run goes faster or " +
         "slower as a whole; changes in share of the parent hold"
 
 /**
  * The change of one figure between two profiles: after's mean of its runs minus before's, and the
- * half-width of its 95% interval by Welch's t, which does not assume the two sides spread alike.
- *
- * **A verdict only where the interval is on one side of 0.** `-10% +-12%` is somewhere between -22%
- * and +2%: it leans faster, but saying so would be wrong more often than one time in twenty, so it
- * reads `unclear`, not `faster` and not "the same" - the runs cannot tell yet. A side with one run
- * has no spread, so the change has no interval and no verdict.
+ * half-width of its 95% interval by Welch's t, which does not assume the two sides spread alike. A
+ * side with one run has no spread, so the change has no interval.
  */
 internal class Change(val before: Estimate, val after: Estimate) {
     val delta: Double = after.mean - before.mean
 
-    val half: Double = if (before.n < 2 || after.n < 2) Double.NaN else {
-        val a = before.variance / before.n
-        val b = after.variance / after.n
-        if (a + b == 0.0) 0.0 else {
-            // Welch-Satterthwaite, rounded down: fewer degrees of freedom, a wider interval.
-            val df = (a + b) * (a + b) / (a * a / (before.n - 1) + b * b / (after.n - 1))
-            t95(floor(df).toInt().coerceAtLeast(1)) * sqrt(a + b)
-        }
+    private val a = before.variance / before.n
+    private val b = after.variance / after.n
+
+    /** Welch-Satterthwaite, rounded down: fewer degrees of freedom, a wider interval. */
+    private val degrees: Int = if (a + b == 0.0) 0 else floor((a + b) * (a + b) / (a * a / (before.n - 1) + b * b / (after.n - 1))).toInt().coerceAtLeast(1)
+
+    val half: Double = when {
+        before.n < 2 || after.n < 2 -> Double.NaN
+        a + b == 0.0 -> 0.0
+        else -> t95(degrees) * sqrt(a + b)
     }
 
     val relative: Double get() = if (before.mean == 0.0) Double.NaN else delta / before.mean
     val relativeHalf: Double get() = if (before.mean == 0.0) Double.NaN else half / before.mean
 
-    val verdict: String
-        get() = when {
-            half.isNaN() || delta.isNaN() -> ""
-            delta + half < 0 -> "faster"
-            delta - half > 0 -> "slower"
-            else -> "unclear"
-        }
+    /**
+     * **Whether this change could be noise, in a diff of [changes] changes.** A 95% interval misses
+     * zero one time in twenty when nothing changed, so a diff of 80 of them would show four changes
+     * that are not there, looking much like `+10% +-9 pp`. So each is held to 5% divided by [changes]
+     * (Bonferroni), and the whole diff has about a 5% chance of showing one false change. Changes that
+     * move together, as Wall and Mean do, make it cautious.
+     *
+     * This asks whether the change is real. How well its size is known is the `+-`, whatever this says.
+     */
+    fun isNoise(changes: Int): Boolean {
+        if (half.isNaN() || delta.isNaN() || delta == 0.0) return false
+        if (a + b == 0.0) return false
+        return studentTail(abs(delta) / sqrt(a + b), degrees) > FALSE_CHANGE / changes
+    }
 }
 
 /** A fraction as a signed percentage, `-21%`, `+2.4%`. */
-private fun signedPercent(f: Double): String {
+internal fun signedPercent(f: Double): String {
     if (f.isNaN()) return ""
     val p = f * 100
     val sign = if (p < 0) "-" else "+"
     return if (abs(p) < 9.95) String.format(Locale.ROOT, "%s%.1f%%", sign, abs(p)) else String.format(Locale.ROOT, "%s%.0f%%", sign, abs(p))
 }
 
-/** A fraction as `+-3.5%`, nothing where there is no interval. */
-private fun percentHalf(f: Double): String = when {
-    f.isNaN() -> ""
-    f * 100 < 9.95 -> String.format(Locale.ROOT, "+-%.1f%%", f * 100)
-    else -> String.format(Locale.ROOT, "+-%.0f%%", f * 100)
+/** A change's interval, in percentage points: `+-2.2 pp`, nothing where there is none. */
+internal fun pointsHalf(points: Double): String = when {
+    points.isNaN() -> ""
+    points < 9.95 -> String.format(Locale.ROOT, "+-%.1f pp", points)
+    else -> String.format(Locale.ROOT, "+-%.0f pp", points)
 }
-
-/** `-21% +-3.5%  faster`, or the change alone when there is no interval, or nothing when a side lacks the row. */
-private fun changeCell(c: Change): String =
-    if (c.before.n == 0 || c.after.n == 0 || c.delta.isNaN()) ""
-    else String.format(Locale.ROOT, "%-6s %-7s %s", signedPercent(c.relative), percentHalf(c.relativeHalf), c.verdict).trimEnd()
-
-/** `before -> after` of two means, a dash on a side that has none. */
-private fun pair(b: Estimate, a: Estimate): String =
-    (if (b.n == 0) "-" else duration(b.mean)) + " -> " + (if (a.n == 0) "-" else duration(a.mean))
-
-/** One side's counts over its runs: the count when every run agrees, `~` their mean when not. */
-private fun counts(c: List<Long>): String = when {
-    c.isEmpty() -> "-"
-    c.distinct().size == 1 -> String.format(Locale.ROOT, "%,d", c[0])
-    else -> String.format(Locale.ROOT, "~%,.0f", c.average())
-}
-
-/** `2 =` when both sides agree, `2 -> 3` when not: an operation that did different work is a different finding. */
-private fun countPair(b: List<Long>, a: List<Long>): String =
-    if (b.isNotEmpty() && b.distinct().size == 1 && b.distinct() == a.distinct()) "${counts(b)} =" else "${counts(b)} -> ${counts(a)}"
 
 /**
- * **Two profiles compared**: each side a folder of runs (see [Profile]), every
- * figure the mean of its side's runs, and the change with its 95% interval and a verdict.
+ * **Two profiles compared**: each side a folder of runs (see [Profile]), each figure the mean of its
+ * side's runs, and the change, with its 95% interval once both sides have two. Operations are matched
+ * by name and coarse rows by path.
  *
- * One run on each side renders as a [OneRunDiff]. One run on one side only prints the
- * means and the change, with no interval, and says so.
+ * **Calls are the check.** An operation that got faster at the same call count is faster; one with
+ * fewer calls did less work, which is a different finding, and the column says `=` when the two agree
+ * so that the exception stands out.
  */
 internal class ProfileDiff(val before: Profile, val after: Profile) {
+    private val coarseRows = paired(before.coarseTable.rows, after.coarseTable.rows)
 
-    fun render(): String =
-        if (before.runs.size == 1 && after.runs.size == 1)
-            OneRunDiff(before.runs[0], after.runs[0], before.runName(0), after.runName(0))
-                .render(careful = Warnings(listOf(ONE_RUN_DIFF_CAREFUL)) + before.warnings(named = true) + after.warnings(named = true))
-        else across()
+    /** What moved most on top, whether it went up or down. */
+    private val fineRows = paired(before.fineTable.rows, after.fineTable.rows).sortedByDescending { r ->
+        fun time(row: Row?) = row?.figures?.get(THREAD_TIME)?.mean?.takeIf { !it.isNaN() } ?: 0.0
+        abs(time(r.after) - time(r.before))
+    }
+
+    /** How many changes this diff shows with an interval, in either table. See [Change.isNoise]. */
+    private val changes: Int by lazy {
+        fun count(r: DiffRow, columns: List<Column>): Int =
+            columns.count { c -> c.interval && r.change(c)?.half?.isNaN() == false } + r.children.sumOf { count(it, columns) }
+        coarseRows.sumOf { count(it, COARSE_COLUMNS) } + fineRows.sumOf { count(it, FINE_COLUMNS) }
+    }
+
+    private val coarseText = DiffText(before.coarseTable, after.coarseTable, coarseRows, "Coarse operation", COARSE_NAME_WIDTH, WALL) { it.isNoise(changes) }
+    private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, "Operation", FINE_NAME_WIDTH, null) { it.isNoise(changes) }
+    private val width = maxOf(coarseText.width, fineText.width)
+    private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change +- 95%" else ""
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
     private fun Profile.active() = Estimate(runs.map { it.activeNanos.toDouble() })
@@ -113,22 +113,17 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val c = Change(b, a)
         val sign = if (c.delta < 0) "-" else "+"
         val absolute = sign + duration(abs(c.delta)) + if (c.half.isNaN()) "" else " +- " + duration(c.half)
-        val relative = (signedPercent(c.relative) + " " + percentHalf(c.relativeHalf)).trimEnd()
-        return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, c.verdict + suffix).trimEnd())
+        val relative = (signedPercent(c.relative) + (if (c.isNoise(changes)) "?" else "") + " " + pointsHalf(c.relativeHalf * 100)).trimEnd()
+        return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 
-    private fun across(): String = buildString {
-        appendLine("=".repeat(RUNS_DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
+    fun render(): String = buildString {
+        appendLine("=".repeat(width))
         appendLine(row("Diff", "${before.name} (${before.described()}) -> ${after.name} (${after.described()})"))
         val rootName = (after.root() ?: before.root())?.name
         carefulBlock(careful(rootName))
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
-        appendLine(
-            row(
-                "", "each side the mean of its runs, one JVM each; the change +- its 95% interval (Welch's t); " +
-                        "faster or slower only where the whole interval is on one side of 0"
-            )
-        )
+        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change +- its 95% interval (Welch's t)"))
         with(before) { runList("before") }
         with(after) { runList("after", header = false) }
         appendLine(header("Wall time", before.wallTime(), after.wallTime()))
@@ -138,15 +133,27 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             val b = before.matched(before.tree(), rootName)
             val a = after.matched(after.tree(), rootName)
             if (b.present.isNotEmpty() && a.present.isNotEmpty())
-                appendLine(header(rootName, before.meanSpan(b), after.meanSpan(a), "   per execution"))
+                appendLine(header(rootName, before.meanSpan(b), after.meanSpan(a), "per execution"))
         }
         clock()
-        coarse()
-        fine()
+        // The tree first, as in the report: the shape, then the own-time detail.
+        if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
+            appendLine()
+            appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path$overRuns")
+            with(coarseText) { rows() }
+            if (coarseRows.any { anyOwn(it) }) appendLine(
+                "  $SPLIT_MARK rows are fine labels in a row's own time; Per parent on one is its calls per execution of the row, " +
+                        "counted, which holds whatever the size of each run"
+            )
+            if (overRuns.isNotEmpty()) appendLine("  % parent is each run's share of its own parent, its change in percentage points: the run's speed cancels out of it")
+        }
         appendLine()
-        appendLine("  faster / slower: the whole 95% interval of the change is below / above 0; unclear: it includes 0 - more runs on both sides narrow it")
-        appendLine("=".repeat(RUNS_DIFF_WIDTH + maxOf(coarseExtra, fineExtra)))
+        appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change$overRuns")
+        with(fineText) { rows() }
+        appendLine("=".repeat(width))
     }
+
+    private fun anyOwn(r: DiffRow): Boolean = r.own || r.children.any { anyOwn(it) }
 
     private fun clockMean(r: Profile) = r.runs.map { it.clock.mean }.filter { !it.isNaN() }.let { if (it.isEmpty()) Double.NaN else it.average() }
 
@@ -168,9 +175,11 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
                 Locale.ROOT, "clock: %s -> %s between the sides - up to %.2fx of a time difference is the machine, not the code; shares hold",
                 before.runs[0].clock.format(b), after.runs[0].clock.format(a), maxOf(a, b) / minOf(a, b)
             )
+        val oneRunEach = before.runs.size == 1 && after.runs.size == 1
+        if (oneRunEach) lines += ONE_RUN_DIFF_CAREFUL
         var sides = Warnings()
         for (side in listOf(before, after)) {
-            val interval = if (side.runs.size == 1) listOf("times: 1 run of '${side.name}', no interval - a change may be noise and no row gets a verdict; run it again for one") else emptyList()
+            val interval = if (side.runs.size == 1 && !oneRunEach) listOf("times: 1 run of '${side.name}', no interval - a change may be noise; run it again for one") else emptyList()
             sides += Warnings(interval) + side.warnings(named = true)
         }
         if (rootName != null) {
@@ -182,131 +191,5 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         }
         lines += allocationsCareful(before.runs, after.runs)
         return Warnings(lines + sides.ranked, sides.always)
-    }
-
-    /** The coarse table's rows, name first. Built before anything is printed: the longest name sizes the page. */
-    private val coarseRows: List<List<String>> by lazy {
-        val rows = ArrayList<List<String>>()
-        fun walk(bLevel: List<List<CoarseNode>>, aLevel: List<List<CoarseNode>>, bParents: List<CoarseNode?>, aParents: List<CoarseNode?>, depth: Int) {
-            // After's order, then the paths only before had, so a removed row is not silently gone.
-            val names = after.childrenOf(aLevel).map { it.name }.let { seen -> seen + before.childrenOf(bLevel).map { it.name }.filter { it !in seen } }
-            for (name in names) {
-                val b = before.matched(bLevel, name)
-                val a = after.matched(aLevel, name)
-                val wb = before.wall(b)
-                val wa = after.wall(a)
-                val share = shareCell(before.share(b, bParents), after.share(a, aParents))
-                val partial = b.present.size < before.runs.size || a.present.size < after.runs.size
-                val where = if (partial) " (${b.present.size} -> ${a.present.size} runs)" else ""
-                rows += listOf(
-                    "  ".repeat(depth) + name + where,
-                    pair(wb, wa), changeCell(Change(wb, wa)), share,
-                    countPair(b.present.map { b.nodes[it]!!.count }, a.present.map { a.nodes[it]!!.count }),
-                    coarsePerParentPair(before.coarsePerParent(b, bParents), after.coarsePerParent(a, aParents)),
-                    bytesPair(before.allocated(b).mean, after.allocated(a).mean),
-                )
-                ownRows(rows, b, a, depth)
-                walk(b.nodes.map { it?.children ?: emptyList() }, a.nodes.map { it?.children ?: emptyList() }, b.nodes, a.nodes, depth + 1)
-            }
-        }
-        walk(before.tree(), after.tree(), before.runs.map { null }, after.runs.map { null }, 0)
-        rows
-    }
-
-    private val coarseExtra by lazy { nameOverflow(RUNS_DIFF_COARSE_ROW, coarseRows.map { it[0] }) }
-    private val fineExtra by lazy { nameOverflow(RUNS_DIFF_FINE_ROW, fineRows.map { it[0] }) }
-
-    private fun StringBuilder.coarse() {
-        if (before.runs.all { it.coarseTree.isEmpty() } && after.runs.all { it.coarseTree.isEmpty() }) return
-        val allocations = before.allocations || after.allocations
-        val format = widened(if (allocations) RUNS_DIFF_ALLOCATED_ROW else RUNS_DIFF_COARSE_ROW, coarseExtra)
-        appendLine()
-        appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%")
-        appendLine(String.format(Locale.ROOT, format, "Coarse operation", "Wall", "change", "% parent", "Executions", "Per parent", "Allocated"))
-        appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
-        for (r in coarseRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
-        appendLine("-".repeat(RUNS_DIFF_WIDTH + coarseExtra))
-        if (anyOwn) appendLine(
-            "  $SPLIT_MARK rows are fine labels in a row's own time; Per parent on one is its calls per execution of the row, " +
-                "counted, which holds whatever the size of each run"
-        )
-        appendLine("  % parent is each run's share of its own parent, its change in percentage points: the run's speed cancels out of it")
-    }
-
-    /** Whether any fine row was drawn under a coarse one, for the key under the tree. */
-    private var anyOwn = false
-
-    /**
-     * The fine labels in the own time of the row matched as [b] and [a]: their wall and share of the
-     * row, and their calls per execution of it, which can be compared between runs that did different
-     * amounts of work. A run with the row and not the label counts at 0.
-     */
-    private fun ownRows(rows: MutableList<List<String>>, b: Profile.Matched, a: Profile.Matched, depth: Int) {
-        val ob = before.ownOf(b)
-        val oa = after.ownOf(a)
-        for (label in (oa.keys + ob.keys).distinct()) {
-            anyOwn = true
-            // Over the runs with the coarse row, 0 where one has it and not the label; a side caught in
-            // none of them has no figure rather than a 0.
-            fun over(m: Profile.Matched, f: (Int) -> Double) = Estimate(m.present.map(f).takeIf { v -> v.any { it > 0 } } ?: emptyList())
-            fun wall(m: Profile.Matched, rows: List<Run.OwnRow?>?) = over(m) { rows?.get(it)?.wallNanos ?: 0.0 }
-            fun share(m: Profile.Matched, rows: List<Run.OwnRow?>?) =
-                over(m) { rows?.get(it)?.share?.takeIf { s -> !s.isNaN() }?.times(100) ?: 0.0 }
-            val wb = wall(b, ob[label])
-            val wa = wall(a, oa[label])
-            val cb = before.ownCalls(b, ob[label])
-            val ca = after.ownCalls(a, oa[label])
-            rows += listOf(
-                "  ".repeat(depth) + "  $SPLIT_MARK $label",
-                pair(wb, wa), changeCell(Change(wb, wa)), shareCell(share(b, ob[label]), share(a, oa[label])),
-                if (cb.isEmpty() && ca.isEmpty()) "own" else countPair(cb, ca),
-                perParentPair(before.callsPerParent(b, ob[label]), after.callsPerParent(a, oa[label])), "",
-            )
-        }
-    }
-
-    /** A share of the parent on both sides, in percent, and its change in percentage points. */
-    private fun shareCell(sb: Estimate, sa: Estimate): String = when {
-        sb.n == 0 && sa.n == 0 -> ""
-        sb.n == 0 || sa.n == 0 -> (if (sb.n == 0) "-" else "%.0f%%".format(Locale.ROOT, sb.mean)) + " -> " +
-                (if (sa.n == 0) "-" else "%.0f%%".format(Locale.ROOT, sa.mean))
-        else -> {
-            val c = Change(sb, sa)
-            String.format(Locale.ROOT, "%.0f%% -> %.0f%%  %+.1f", sb.mean, sa.mean, c.delta) +
-                    if (c.half.isNaN()) " pp" else String.format(Locale.ROOT, " +-%.1f pp", c.half)
-        }
-    }
-
-    /** The fine table's rows, name first. See [coarseRows]. */
-    private val fineRows: List<List<String>> by lazy {
-        val b = before.fineLines()
-        val a = after.fineLines()
-        val none = Estimate(emptyList())
-        fun moved(label: String): Double {
-            val tb = b[label]?.time?.mean ?: 0.0
-            val ta = a[label]?.time?.mean ?: 0.0
-            return abs(ta - tb)
-        }
-        (b.keys + a.keys).distinct().sortedByDescending { moved(it) }.map { label ->
-            val lb = b[label]
-            val la = a[label]
-            val partial = (lb?.present ?: 0) < before.runs.size || (la?.present ?: 0) < after.runs.size
-            val where = if (partial) " (${lb?.present ?: 0} -> ${la?.present ?: 0})" else ""
-            val time = Change(lb?.time ?: none, la?.time ?: none)
-            val perCall = Change(lb?.perCall ?: none, la?.perCall ?: none)
-            val calls = if ((lb?.calls ?: emptyList()).all { it == 0L } && (la?.calls ?: emptyList()).all { it == 0L }) "-"
-            else countPair(lb?.calls ?: emptyList(), la?.calls ?: emptyList())
-            listOf(label + where, pair(time.before, time.after), changeCell(time), pair(perCall.before, perCall.after), changeCell(perCall), calls)
-        }
-    }
-
-    private fun StringBuilder.fine() {
-        val format = widened(RUNS_DIFF_FINE_ROW, fineExtra)
-        appendLine()
-        appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%")
-        appendLine(String.format(Locale.ROOT, format, "Operation", "Thread-time", "change", "Per call", "change", "Calls"))
-        appendLine("-".repeat(RUNS_DIFF_WIDTH + fineExtra))
-        for (r in fineRows) appendLine(String.format(Locale.ROOT, format, *r.toTypedArray()).trimEnd())
-        appendLine("-".repeat(RUNS_DIFF_WIDTH + fineExtra))
     }
 }

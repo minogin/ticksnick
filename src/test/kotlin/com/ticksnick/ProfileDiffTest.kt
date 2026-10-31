@@ -7,7 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** Two versions over their runs: the interval on the change, its verdict, and the report over two folders. */
+/** Two versions over their runs: the interval on the change, whether it could be noise, and the report over two folders. */
 class ProfileDiffTest {
 
     /**
@@ -15,17 +15,42 @@ class ProfileDiffTest {
      * so -2 +- 2.27 - an interval that includes 0 by a hair. Worked by hand.
      */
     @Test
-    fun `the change has Welch's interval, and a verdict only clear of 0`() {
+    fun `the change has Welch's interval`() {
         val before = Estimate(listOf(10.0, 11.0, 12.0))
         val c = Change(before, Estimate(listOf(8.0, 9.0, 10.0)))
         assertEquals(-2.0, c.delta, 1e-9)
         assertTrue(abs(c.half - 2.776 * Math.sqrt(2.0 / 3)) < 1e-9, "half-width ${c.half}")
-        assertEquals("unclear", c.verdict)
-        assertEquals("faster", Change(before, Estimate(listOf(7.0, 8.0, 9.0))).verdict)
-        assertEquals("slower", Change(before, Estimate(listOf(13.0, 14.0, 15.0))).verdict)
         val one = Change(before, Estimate(listOf(8.0)))
         assertTrue(one.half.isNaN(), "one run on a side has no interval")
-        assertEquals("", one.verdict)
+        assertTrue(!one.isNoise(1), "no interval, nothing to say")
+    }
+
+    /** Values from a table of Student's t. */
+    @Test
+    fun `the tail of Student's t`() {
+        assertEquals(0.05, studentTail(12.706, 1), 1e-4)
+        assertEquals(0.05, studentTail(4.303, 2), 1e-4)
+        assertEquals(0.05, studentTail(3.182, 3), 1e-4)
+        assertEquals(0.05, studentTail(2.447, 6), 1e-4)
+        assertEquals(0.05, studentTail(2.228, 10), 1e-4)
+        assertEquals(0.05 / 80, studentTail(6.51, 6), 1e-5)
+        assertEquals(1.0, studentTail(0.0, 6), 1e-12)
+    }
+
+    /**
+     * 10, 11, 12 against 7, 8, 9: -3 +- 2.27, clear of 0, t 3.67 with 4 degrees of freedom, which is
+     * one chance in 47. Enough for one change, and not for 80 of them, where it would be held to one
+     * in 1,600. Against 8, 9, 10 the interval itself includes 0.
+     */
+    @Test
+    fun `a change could be noise by how many changes the diff shows`() {
+        val before = Estimate(listOf(10.0, 11.0, 12.0))
+        val clear = Change(before, Estimate(listOf(7.0, 8.0, 9.0)))
+        assertTrue(!clear.isNoise(1))
+        assertTrue(clear.isNoise(80))
+        assertTrue(Change(before, Estimate(listOf(8.0, 9.0, 10.0))).isNoise(1))
+        assertTrue(!Change(before, Estimate(listOf(1.0, 2.0, 3.0))).isNoise(80), "far beyond the spread")
+        assertTrue(Change(before, Estimate(listOf(13.0, 14.0, 15.0))).isNoise(80), "up as well as down")
     }
 
     /**
@@ -37,7 +62,6 @@ class ProfileDiffTest {
         // Variances 1 and 4, three runs each: df = 50/17 = 2.94, down to 2, t 4.303. Pooled or rounded: 2.776 or 3.182.
         val spread = Change(Estimate(listOf(10.0, 11.0, 12.0)), Estimate(listOf(6.0, 8.0, 10.0)))
         assertEquals(4.303 * Math.sqrt(5.0 / 3), spread.half, 1e-9)
-        assertEquals("unclear", spread.verdict)
         // Two runs against three: df 2.002, down to 2.
         val uneven = Change(Estimate(listOf(10.0, 10.1)), Estimate(listOf(5.0, 9.0, 13.0)))
         assertEquals(4.303 * Math.sqrt(0.005 / 2 + 16.0 / 3), uneven.half, 1e-9)
@@ -48,14 +72,14 @@ class ProfileDiffTest {
         assertEquals(12.706, Estimate(listOf(1.0, 3.0)).half, 1e-9)
         val flat = Estimate(listOf(5.0, 5.0, 5.0))
         assertEquals(0.0, flat.half)
-        assertEquals("faster", Change(flat, Estimate(listOf(4.0, 4.0, 4.0))).verdict)
-        assertEquals("unclear", Change(flat, Estimate(listOf(5.0, 5.0, 5.0))).verdict)
+        assertTrue(!Change(flat, Estimate(listOf(4.0, 4.0, 4.0))).isNoise(80), "no spread at all: a change is a change")
+        assertTrue(!Change(flat, Estimate(listOf(5.0, 5.0, 5.0))).isNoise(80), "and no change is none")
         // One side flat: all of the spread is the other's, df 2.
         assertEquals(4.303 * Math.sqrt(1.0 / 3), Change(flat, Estimate(listOf(4.0, 5.0, 6.0))).half, 1e-9)
     }
 
     /**
-     * A fine label on one side only reads `-` on the other and gets no verdict; a run where a label
+     * A fine label on one side only reads `-` on the other and has no change; a run where a label
      * was called and never sampled counts at 0, not as a run without it.
      */
     @Test
@@ -70,17 +94,17 @@ class ProfileDiffTest {
                 save(after, i, tree, listOf(stat("y", 20L + i, 100), stat("unused", 0, 0)))
             }
             val runs = Profile.load(before)
-            val rare = runs.fineLines().getValue("rare")
+            val rare = runs.fineTable.rows.first { it.name == "rare" }
             assertEquals(3, rare.present, "a run that called it and never sampled it is one of its runs")
-            assertEquals(5.0 / 3 * runs.runs[0].stepNanos, rare.time.mean, 1e-6)
-            assertTrue("unused" !in Profile.load(after).fineLines(), "a label never called is in no run")
+            assertEquals(5.0 / 3 * runs.runs[0].stepNanos, rare.figures.getValue(THREAD_TIME).mean, 1e-6)
+            assertTrue(Profile.load(after).fineTable.rows.none { it.name == "unused" }, "a label never called is in no run")
 
             val text = ProfileDiff(runs, Profile.load(after)).render()
-            val x = text.lines().first { it.startsWith("x ") }
-            val y = text.lines().first { it.startsWith("y ") }
-            assertTrue(x.startsWith("x (3 -> 0)") && "faster" !in x && "slower" !in x && "unclear" !in x, x)
-            assertTrue(y.startsWith("y (0 -> 3)") && "faster" !in y && "slower" !in y && "unclear" !in y, y)
-            assertTrue(text.lines().first { it.startsWith("rare") }.startsWith("rare (3 -> 0)"), text)
+            val x = diffRow(text, "x")
+            val y = diffRow(text, "y")
+            assertTrue(x[0].startsWith("x (3 -> 0 runs)") && '%' !in x[2], x.toString())
+            assertTrue(y[0].startsWith("y (0 -> 3 runs)") && '%' !in y[2], y.toString())
+            assertTrue(diffRow(text, "rare")[0].startsWith("rare (3 -> 0 runs)"), text)
             assertTrue("NaN" !in text, text)
         } finally {
             dir.toFile().deleteRecursively()
@@ -88,7 +112,7 @@ class ProfileDiffTest {
     }
 
     @Test
-    fun `two folders diff over their runs, a verdict per row and a row only one side has`() {
+    fun `two folders diff over their runs, a change per row and a row only one side has`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             val before = dir.resolve("before").also { Files.createDirectories(it) }
@@ -102,10 +126,9 @@ class ProfileDiffTest {
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
-            assertTrue("11.0 s -> 8.00 s" in header && "faster" in header && "per execution" in header, header)
+            assertTrue("11.0 s -> 8.00 s" in header && "-27%" in header && "+-" in header && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
-            val same = text.lines().first { it.trim().startsWith("same") }
-            assertTrue("unclear" in same, same)
+            assertTrue("?" in diffRow(text, "same")[2] && NOISE_NOTE in text, text)
             assertTrue("CAREFUL" !in text, text)
         } finally {
             dir.toFile().deleteRecursively()
@@ -124,7 +147,7 @@ class ProfileDiffTest {
             val lines = text.lines()
             assertTrue(lines[2].isEmpty() && lines[3].startsWith("CAREFUL       times: 1 run of 'before', no interval") && lines[4].isEmpty(), "a section of its own, right under the title: $text")
             val header = text.lines().first { it.startsWith("runBatch ") }
-            assertTrue("-25%" in header && "faster" !in header && "unclear" !in header, header)
+            assertTrue("-25%" in header && "?" !in header && "+-" !in header.substringAfter("-25%"), header)
             assertTrue("NaN" !in text, text)
         } finally {
             dir.toFile().deleteRecursively()
@@ -145,7 +168,7 @@ class ProfileDiffTest {
             val b = Profile.load(before)
             val a = Profile.load(after)
             assertInLine(ProfileDiff(b, a).render())
-            assertInLine(OneRunDiff(b.runs[0], a.runs[0]).render())
+            assertInLine(diffOf(b.runs[0], a.runs[0]))
             assertInLine(b.render())
         } finally {
             dir.toFile().deleteRecursively()

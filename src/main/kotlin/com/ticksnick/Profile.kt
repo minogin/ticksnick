@@ -58,6 +58,9 @@ internal const val ONE_RUN_CAREFUL = "times: 1 run of '%s', no interval - the ne
 internal const val MAX_CAREFUL = 10
 
 /** The name column's narrowest width, in the coarse and in the fine table. */
+/** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
+internal const val FOLDED_ROWS = "and more"
+
 internal const val COARSE_NAME_WIDTH = 30
 internal const val FINE_NAME_WIDTH = 26
 
@@ -175,15 +178,14 @@ class Profile internal constructor(internal val name: String, internal val files
     internal fun runName(i: Int): String = "$name/${files[i].fileName}"
 
     /**
-     * A profile of one run has a `CAREFUL` line on its times: a run can be faster
-     * or slower as a whole by 20-30% from one JVM to the next, while each row's share of its parent
-     * holds within a couple of points. So the shares of one run can
-     * be worked from, and its times cannot - which is what the line says, every time, rather than
-     * refusing the first look.
+     * A profile of one run has a `CAREFUL` line on its times: a run can be faster or slower as a whole by
+     * 20-30% from one JVM to the next, while each row's share of its parent holds within a couple of
+     * points. So the shares of one run can be worked from, and its times cannot - which is what the
+     * line says, every time, rather than refusing the first look.
      */
     fun render(): String {
         Logo.once()
-        return if (runs.size == 1) runs[0].render(careful = Warnings(listOf(ONE_RUN_CAREFUL.format(name))) + warnings()) else across()
+        return report(false, (if (runs.size == 1) Warnings(listOf(ONE_RUN_CAREFUL.format(name))) else Warnings()) + warnings())
     }
 
     /** One coarse row over the runs: the node at this path in each, null where a run has none. */
@@ -217,6 +219,93 @@ class Profile internal constructor(internal val name: String, internal val files
     /** Bytes per execution of [m], over the runs that counted them. See [Run.allocatedPerExecution]. */
     internal fun allocated(m: Matched): Estimate =
         Estimate(m.present.filter { runs[it].allocations }.map { runs[it].allocatedPerExecution(m.nodes[it]!!) }.filter { !it.isNaN() })
+
+    /** One figure of each run. */
+    private fun over(f: (Run) -> Double) = Estimate(runs.map(f))
+
+    /** Who had the cores, the mean of the runs that read it. */
+    internal fun coresText(): String? = coresLine(runs.mapNotNull { it.duty.cores() })
+
+    /** How often the sampler sampled, at the mean step of the runs. */
+    internal fun samplingText(): String? = runs[0].samplingLine(runs.map { it.stepNanos }.average())
+
+    /** How much evidence there is, which is the precision of everything in the tables. See [Run]. */
+    internal fun sampledText(): String {
+        val per = if (runs.size > 1) " a run" else ""
+        return String.format(
+            Locale.ROOT, "%,.0f samples$per - %,.0f ticks at %.3f ms mean (jittered) x %s, one sample per thread per tick",
+            runs.map { it.allHits }.average(), runs.map { it.ticks }.average(), runs.map { it.stepNanos }.average() / 1e6,
+            Run.plural(Math.round(runs.map { it.threads }.average()), "thread")
+        )
+    }
+
+    /**
+     * **The report: the same lines for one run or several.** Only the data differs: a `+-` needs two runs,
+     * and the run list has as many lines as there are runs.
+     *
+     * One long rule at the top and one at the end: the report lands in a console full of the program's
+     * own output, and its first and last lines should say so. No rules between sections - the headings
+     * and the tables' own rules do that. The logo is not here: it is printed once per JVM by the first
+     * TickSnick call, see [Logo].
+     *
+     * @param legend every column explained, at the bottom. See [Run.renderLegend].
+     * @param careful the warnings, in a `CAREFUL` section: before any number, see [carefulBlock].
+     */
+    internal fun report(legend: Boolean, careful: Warnings): String = buildString {
+        for (failure in runs.mapNotNull { it.failure }.distinct()) {
+            appendLine("!".repeat(pageWidth))
+            appendLine("PROFILING STOPPED - these numbers were not going to be right:")
+            appendLine("  $failure")
+            appendLine("Everything below is what led to that verdict, not a result. Pass strict=false to")
+            appendLine("profile anyway, which is what to do when the code is not yours to change.")
+            appendLine("!".repeat(pageWidth))
+        }
+        val n = runs.size
+        appendLine("=".repeat(pageWidth))
+        appendLine(
+            row(
+                "Runs", if (n == 1) "1 run of '$name', one JVM: no interval"
+                else "$n runs of '$name', one JVM each: every figure below is their mean, " +
+                        "+- its 95% interval from how much the runs differ (Student's t, ${n - 1} degrees of freedom)"
+            )
+        )
+        carefulBlock(careful)
+        factLines(tagMaps, setupMaps)
+        runList()
+        appendLine(
+            row(
+                "Wall time", wallLine(
+                    over { it.samplingSpanNanos.toDouble() }, over { it.activeNanos.toDouble() }, over { it.pause.confirmedPausedIn(it.samplingSpanNanos).toDouble() },
+                    Math.round(runs.map { it.pause.pauses }.average()), runs.maxOf { it.pause.longestNanos },
+                )
+            )
+        )
+        root()?.let { root ->
+            val mean = meanSpan(root)
+            if (mean.n > 0) appendLine(row(root.name, "${duration(mean.mean)} ${plusMinusBoth(mean)}".trimEnd() + " per execution"))
+        }
+        // Always, under the wall time: who had the cores, the program's threads being only some of it.
+        coresText()?.let { appendLine(row("Cores", it)) }
+        // The one mechanism shown: whether the sampler held a processor, which the reader can change.
+        samplingText()?.let { appendLine(row("Sampling", it)) }
+        // The tree first: the overview - what ran inside what, how often, what part of its parent - and
+        // the own-time table after it for the detail. The tree is what a reader reads; the table is
+        // what they look up.
+        if (runs.any { r -> r.coarse.any { it.count > 0 || it.inclusiveHits > 0 } }) coarseSection()
+        appendLine()
+        fineSection()
+        // After the tables: how much evidence there is says nothing a reader acts on before the numbers,
+        // and something after them, when a share looks too close to call. "mean (jittered)": the interval
+        // is drawn +/-25% around the step so the sampler cannot lock onto a workload with a rhythm of its
+        // own, and over a short run the mean of a handful of draws is visibly off the step.
+        appendLine()
+        appendLine(row("Sampled", sampledText()))
+        appendLine("-".repeat(pageWidth))
+        // Said in the output rather than only in a document: the gap between a share and what removing
+        // the operation would save can be a factor of 275, and nothing else on the screen hints at it.
+        with(runs[0]) { renderLegend(legend) }
+        appendLine("=".repeat(pageWidth))
+    }
 
     /** The heaviest root row, a benchmark's batch: the number an article quotes. */
     internal fun root(): Matched? = childrenOf(runs.map { it.coarseTree }).firstOrNull()
@@ -256,8 +345,7 @@ class Profile internal constructor(internal val name: String, internal val files
                 COARSE_WAITING to overAll { _, n -> waiting(n.inclusiveHits, n.runningInclusiveHits) },
             ),
             nodes.size,
-            children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 },
-            folded = folded,
+            children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 } + listOfNotNull(folded),
             slowest = m.nodes.flatMap { it?.slowest.orEmpty() }.sortedByDescending { it.nanos }.take(m.nodes.maxOf { it?.slowest?.size ?: 0 }),
         )
     }
@@ -268,7 +356,7 @@ class Profile internal constructor(internal val name: String, internal val files
      * The fine labels in the own time of the row [m], in the runs [nodes]: those drawn in any run, and
      * one line for the rest. A run with the coarse row and not the label counts at 0.
      */
-    private fun ownRows(m: Matched, nodes: List<Int>, counted: MutableList<Row>): kotlin.Pair<List<Row>, FoldedRows?> {
+    private fun ownRows(m: Matched, nodes: List<Int>, counted: MutableList<Row>): kotlin.Pair<List<Row>, Row?> {
         val rows = nodes.associateWith { ownOf(it, m.nodes[it]!!) }
         val drawn = nodes.flatMap { i -> drawnOf(i, m.nodes[i]!!, rows[i]!!).map { it.name } }.distinct()
         val all = (drawn + nodes.flatMap { i -> rows[i]!!.map { it.name } }).distinct().map { name ->
@@ -298,12 +386,20 @@ class Profile internal constructor(internal val name: String, internal val files
             if (name != "unlabelled" && nodes.any { runs[it].ownRowsOf(m.nodes[it]!!) != null }) counted += row
             row
         }
-        val rest = all.filter { it.name !in drawn }
-        fun mean(r: Row, c: Column) = r.figures[c]?.mean?.takeIf { !it.isNaN() } ?: 0.0
-        val folded = if (rest.isEmpty()) null else FoldedRows(
-            rest.size,
-            nodes.map { i -> rows[i]!!.filter { r -> r.name !in drawn }.sumOf { it.share.takeIf { s -> !s.isNaN() } ?: 0.0 } * 100 }.average(),
-            rest.sumOf { mean(it, EXECUTIONS) },
+        val rest = all.filter { it.name !in drawn }.map { it.name }
+        fun overRest(f: (Run.OwnRow) -> Double) =
+            nodes.map { i -> rows[i]!!.filter { it.name in rest }.sumOf { r -> f(r).takeIf { !it.isNaN() } ?: 0.0 } }
+                .let { v -> Estimate(v.takeIf { it.any { x -> x > 0 } } ?: emptyList()) }
+        val folded = if (rest.isEmpty()) null else Row(
+            FOLDED_ROWS,
+            mapOf(
+                EXECUTIONS to overRest { it.calls.coerceAtLeast(0).toDouble() },
+                WALL to overRest { it.wallNanos },
+                PARENT_SHARE to overRest { it.share * 100 },
+            ),
+            nodes.size,
+            own = true,
+            foldedRows = rest.size,
         )
         return all.filter { it.name in drawn } to folded
     }
@@ -435,6 +531,18 @@ class Profile internal constructor(internal val name: String, internal val files
                     (if (paused) "; a pause is charged to every operation it interrupted" else "") + overRuns
         )
         with(coarseText) { rows() }
+        coarseKeys().forEach { appendLine(it) }
+        // An operation with more than one caller is a row under each, and those rows are its figures
+        // under that caller alone. Its percentiles over everything are a different question - "how long
+        // does a parse take" - and they are answered here, once, only when the question exists.
+        if (coarseTable.shared.isNotEmpty()) {
+            appendLine("  Under more than one caller - all callers together:")
+            with(coarseText) { shared() }
+        }
+    }
+
+    /** What the coarse table's rows need explained, each once and next to them. */
+    internal fun coarseKeys(): List<String> = buildList {
         val all = buildList {
             fun walk(r: Row) {
                 add(r)
@@ -443,35 +551,28 @@ class Profile internal constructor(internal val name: String, internal val files
             coarseTable.rows.forEach { walk(it) }
         }
         val anyOwn = all.any { it.own }
-        if (coarseTable.splitLeaves && anyOwn) appendLine(
+        if (coarseTable.splitLeaves && anyOwn) add(
             "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
                     " a fine label with labels inside it shows only its own part"
         )
-        if (!coarseTable.splitLeaves && anyOwn) appendLine(
+        if (!coarseTable.splitLeaves && anyOwn) add(
             "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; Parallel on one is how many" +
                     " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
-        if (all.any { it.own && it.figures[EXECUTIONS]?.n != 0 }) appendLine(
+        if (all.any { it.own && it.foldedRows == 0 && it.figures[EXECUTIONS]?.n != 0 }) add(
             "  on a $SPLIT_MARK row, Executions is its calls on that path and Per parent per execution of the row above, both counted;" +
                     " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
         )
-        if (allocations) appendLine(
+        if (allocations) add(
             "  Allocated: bytes per execution, its coarse children and every thread under it included; counted, not sampled" +
                     if (runs.size > 1) "; the mean of the runs that counted them" else ""
         )
-        if (all.any { it.inAll != null }) appendLine(
+        if (all.any { it.inAll != null }) add(
             "  'in all, under N operations' beside a fine row: that label's time, and calls where counted, under every row it is under, on its largest"
         )
         if (runs.size > 1) {
-            appendLine("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")
-            appendLine("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval; - where a run had too few executions for it")
-        }
-        // An operation with more than one caller is a row under each, and those rows are its figures
-        // under that caller alone. Its percentiles over everything are a different question - "how long
-        // does a parse take" - and they are answered here, once, only when the question exists.
-        if (coarseTable.shared.isNotEmpty()) {
-            appendLine("  Under more than one caller - all callers together:")
-            with(coarseText) { shared() }
+            add("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")
+            add("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval; - where a run had too few executions for it")
         }
     }
 
@@ -502,7 +603,13 @@ class Profile internal constructor(internal val name: String, internal val files
                 else "  nothing was sampled."
             )
         }
-        if (fine.contained.isNotEmpty()) appendLine(
+        fineNotes().forEach { appendLine(it) }
+    }
+
+    /** What is under the fine table. */
+    internal fun fineNotes(): List<String> = buildList {
+        val fine = fineTable
+        if (fine.contained.isNotEmpty()) add(
             "  " + fine.contained.joinToString { it + STAR } + ": coarse, with no own time - every sample inside " +
                     (if (fine.contained.size == 1) "it" else "them") + " was in an operation above"
         )
@@ -515,7 +622,7 @@ class Profile internal constructor(internal val name: String, internal val files
             // "called anyway" rather than "N of them did run", which reads as nonsense at N = 1 —
             // and one is the common case on a short run, which is exactly when a reader is most
             // likely to be new to the report.
-            appendLine(
+            add(
                 "  ${Run.plural(fine.folded.size.toLong(), "operation")} never sampled and folded away" +
                         (if (called.isEmpty()) ", and never called: " + names(fine.folded) else "; called anyway: " + names(called.sortedByDescending { it.calls }))
             )
@@ -523,52 +630,19 @@ class Profile internal constructor(internal val name: String, internal val files
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.
         if (fine.rows.any { it.coarse } || fine.contained.isNotEmpty()) {
-            appendLine("  * a coarse operation, showing its OWN work - its full span is in the table above")
+            add("  * a coarse operation, showing its OWN work - its full span is in the table above")
         }
         // A note and not a warning: it is the threshold the `Long` group is printed against, so it
         // belongs under the table that has those columns rather than in the warning section. The
         // floor stays over wall time on purpose: a pause inside a call stretches it past a tick, so GC
         // is a cause of a long call even though it is out of active time.
-        appendLine(
+        add(
             String.format(
                 Locale.ROOT,
                 "  Long: calls over a tick hold %s of thread-time run-wide; preemption and GC pauses alone could put it at %s, and a row at or under that shows -",
                 percent(runs.map { it.stuckBaseline }.average() * 100), percent(runs.map { it.machineFloor }.average() * 100)
             )
         )
-    }
-
-    private fun across(): String = buildString {
-        val n = runs.size
-        appendLine("=".repeat(pageWidth))
-        appendLine(
-            row(
-                "Runs", "$n runs of '$name', one JVM each: every figure below is their mean, " +
-                        "+- its 95% interval from how much the runs differ (Student's t, ${n - 1} degrees of freedom)"
-            )
-        )
-        val root = root()
-        carefulBlock(warnings())
-        factLines(tagMaps, setupMaps)
-        runList()
-        val wall = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
-        val active = Estimate(runs.map { it.activeNanos.toDouble() })
-        val paused = Estimate(runs.map { it.pause.confirmedPausedIn(it.samplingSpanNanos).toDouble() })
-        appendLine(
-            row(
-                "Wall time", "${duration(wall.mean)} ${plusMinusBoth(wall)} = ${duration(active.mean)} ${plusMinus(active)} active + " +
-                        "${duration(paused.mean)} ${plusMinus(paused)} paused"
-            )
-        )
-        if (root != null) {
-            val mean = meanSpan(root)
-            if (mean.n > 0) appendLine(row(root.name, "${duration(mean.mean)} ${plusMinusBoth(mean)} per execution"))
-        }
-        if (runs.any { it.coarseTree.isNotEmpty() }) coarseSection()
-        appendLine()
-        fineSection()
-        with(runs[0]) { renderLegend(false) }
-        appendLine("=".repeat(pageWidth))
     }
 
     /** Each run's tags, one map per run. */

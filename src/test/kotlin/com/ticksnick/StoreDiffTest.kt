@@ -323,7 +323,7 @@ class StoreDiffTest {
         try {
             val old = asOld(p, dir)
             assertTrue(old.duty.runnableDuty.isNaN(), "runnableDuty invented for an old file")
-            assertNull(old.duty.coresLine(), "a Cores line for a file that has no figures")
+            assertNull(coresOf(old.duty), "a Cores line for a file that has no figures")
             assertTrue(old.coarseTree.flatMap { it.flatten() }.all { it.parallel.isNaN() && old.ownRowsOf(it) == null })
             val text = old.render()
             assertTrue(text.lines().none { it.startsWith("Cores") }, "the old file's report has a Cores line")

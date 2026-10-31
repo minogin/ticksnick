@@ -189,38 +189,6 @@ internal class Pauses internal constructor(
      */
     val confirmedNanos: Long = 0,
 ) {
-    /**
-     * The header: one line, wall time split into active and paused.
-     *
-     * Printed on every run, `+ 0 paused` included, so that the word is on the page before the table
-     * heading uses it. The JVM's own count, and what the sampler saw but nothing confirmed, go in
-     * [careful] lines, and only when they are a warning.
-     *
-     * @param spanNanos the sampling span: the wall time being split.
-     */
-    fun headerLine(spanNanos: Long): String {
-        val paused = confirmedPausedIn(spanNanos)
-        return row(
-            "Wall time",
-            if (paused == 0L) String.format(
-                Locale.ROOT, "%s = %s active + 0 paused",
-                duration(spanNanos.toDouble()), duration(spanNanos.toDouble())
-            )
-            else String.format(
-                Locale.ROOT, "%s = %s active + %s paused (%s)%s",
-                duration(spanNanos.toDouble()), duration((spanNanos - paused).toDouble()),
-                duration(paused.toDouble()), percent(paused * 100.0 / spanNanos),
-                // The count and the longest pause are the sampler's, the time is what the JVM
-                // confirmed. Usually one quantity from two sides; when the JVM confirmed less than
-                // one of the pauses the sampler saw, "3.00 ms paused, longest 22.5 ms" is a line
-                // contradicting itself, and the counts are left off rather than capped.
-                if (longestNanos <= paused) String.format(
-                    Locale.ROOT, " in %s, longest %s", Run.plural(pauses, "pause"), duration(longestNanos.toDouble())
-                ) else ""
-            )
-        )
-    }
-
     /** The paused time taken out of [spanNanos]: what the JVM confirmed, and never more than the span. */
     fun confirmedPausedIn(spanNanos: Long): Long = min(confirmedNanos, spanNanos).coerceAtLeast(0)
 
@@ -274,4 +242,22 @@ internal class Pauses internal constructor(
         /** A session nothing is known about: a report built by hand, with no sampler behind it. */
         val NONE = Pauses(measured = true, pausedNanos = 0, pauses = 0, longestNanos = 0, gcNanos = -1)
     }
+}
+
+/**
+ * Wall time split into active and paused, each with its `+-` when there are two runs to give one. The
+ * split is the first thing about a run: GC tuning is about those figures.
+ *
+ * @param pauses how many, as the sampler counted them, and [longestNanos] the longest. Usually one
+ * quantity from two sides with the time the JVM confirmed; when it confirmed less than one of the pauses
+ * the sampler saw, "3.00 ms paused, longest 22.5 ms" is a line contradicting itself, and the counts are
+ * left off rather than capped.
+ */
+internal fun wallLine(wall: Estimate, active: Estimate, paused: Estimate, pauses: Long, longestNanos: Long): String {
+    fun both(e: Estimate) = if (e.half.isNaN()) "" else " " + plusMinusBoth(e)
+    fun pm(e: Estimate) = if (e.half.isNaN()) "" else " " + plusMinus(e)
+    val head = "${duration(wall.mean)}${both(wall)} = ${duration(active.mean)}${pm(active)} active + "
+    if (paused.mean == 0.0) return head + "0 paused"
+    val counts = if (longestNanos <= paused.mean) " in ${Run.plural(pauses, "pause")}, longest ${duration(longestNanos.toDouble())}" else ""
+    return "$head${duration(paused.mean)}${pm(paused)} paused (${percent(paused.mean * 100 / wall.mean)})$counts"
 }

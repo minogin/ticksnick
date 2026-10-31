@@ -8,6 +8,9 @@ internal fun diffOf(before: Run, after: Run, beforeName: String = "before", afte
     Profile(afterName, listOf(Path.of("$afterName.tsr")), listOf(after)),
 ).render()
 
+/** The `Cores` line of one run. */
+internal fun coresOf(d: Duty): String? = coresLine(listOfNotNull(d.cores()))
+
 /** The three lines of the row [name] of a diff's table: before, after, the change. */
 internal fun diffRow(text: String, name: String): List<String> {
     val lines = text.lines()

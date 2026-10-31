@@ -841,23 +841,15 @@ internal class Duty internal constructor(
      * threads take three and a half is a finding only the JVM's own clock shows. The profiled
      * threads come first, then the rest and its parts.
      */
-    fun coresLine(): String? {
+    fun cores(): Cores? {
         if (processCpuNanos < 0 || spanNanos <= 0) return null
         val span = spanNanos.toDouble()
         val profiled = if (profiledCpuNanos >= 0) profiledCpuNanos else cpuNanos
         val jit = if (jitNanos >= 0) min(jitNanos, max(0L, processCpuNanos - profiled - samplerCpuNanos)) else 0L
         val gc = max(0L, processCpuNanos - profiled - samplerCpuNanos - jit)
-        val parts = listOfNotNull(
-            gc to (if (pausedProcessCpuNanos > 0)
-                String.format(Locale.ROOT, "GC %.2f (%.2f in pauses)", gc / span, min(pausedProcessCpuNanos, gc) / span)
-            else String.format(Locale.ROOT, "GC %.2f", gc / span)),
-            samplerCpuNanos to String.format(Locale.ROOT, "sampler %.2f", samplerCpuNanos / span),
-            if (jitNanos >= 0) jit to String.format(Locale.ROOT, "JIT %.2f", jit / span) else null,
-        ).sortedByDescending { it.first }
-        return String.format(
-            Locale.ROOT, "%sprofiled threads %.2f, the rest %.2f: %s",
-            if (processors > 0) "$processors processors: " else "",
-            profiled / span, (gc + samplerCpuNanos + jit) / span, parts.joinToString(", ") { it.second }
+        return Cores(
+            processors, profiled / span, gc / span, if (pausedProcessCpuNanos > 0) min(pausedProcessCpuNanos, gc) / span else 0.0,
+            samplerCpuNanos / span, if (jitNanos >= 0) jit / span else Double.NaN,
         )
     }
 
@@ -982,4 +974,29 @@ internal class Duty internal constructor(
          */
         const val CAREFUL_PP = 1.0
     }
+}
+
+/** Who had the cores in one run, each figure in cores: the profiled threads, then the rest and its parts. NaN [jit] where it was not read. */
+internal class Cores(
+    val processors: Int, val profiled: Double, val gc: Double, val gcInPauses: Double, val sampler: Double, val jit: Double,
+)
+
+/** The `Cores` line: the mean of [runs], one run being a list of one. Null with none. */
+internal fun coresLine(runs: List<Cores>): String? {
+    if (runs.isEmpty()) return null
+    fun mean(f: (Cores) -> Double) = runs.map(f).average()
+    val gc = mean { it.gc }
+    val sampler = mean { it.sampler }
+    val jit = mean { it.jit }
+    val parts = listOfNotNull(
+        gc to (if (mean { it.gcInPauses } > 0) String.format(Locale.ROOT, "GC %.2f (%.2f in pauses)", gc, mean { it.gcInPauses })
+        else String.format(Locale.ROOT, "GC %.2f", gc)),
+        sampler to String.format(Locale.ROOT, "sampler %.2f", sampler),
+        if (jit.isNaN()) null else jit to String.format(Locale.ROOT, "JIT %.2f", jit),
+    ).sortedByDescending { it.first }
+    return String.format(
+        Locale.ROOT, "%sprofiled threads %.2f, the rest %.2f: %s",
+        if (runs[0].processors > 0) "${runs[0].processors} processors: " else "",
+        mean { it.profiled }, gc + sampler + (if (jit.isNaN()) 0.0 else jit), parts.joinToString(", ") { it.second }
+    )
 }

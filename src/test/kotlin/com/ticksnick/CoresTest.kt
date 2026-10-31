@@ -69,7 +69,7 @@ class CoresTest {
             counted in (used.get() - slack)..(used.get() + 50_000_000),
             "the report counted ${counted / 1e9} s of the threads' ${used.get() / 1e9} s"
         )
-        val line = assertNotNull(p.duty.coresLine(), "no Cores line on a 3 s session")
+        val line = assertNotNull(coresOf(p.duty), "no Cores line on a 3 s session")
         val processors = Runtime.getRuntime().availableProcessors()
         assertTrue(figure(line, "profiled threads") + figure(line, "the rest") <= processors + 0.3, "more cores than the JVM has: $line")
     }

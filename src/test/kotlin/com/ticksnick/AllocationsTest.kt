@@ -140,7 +140,7 @@ class AllocationsTest {
         val head = lines.first { it.startsWith("Coarse operation") }
         val end = head.indexOf("Allocated") + "Allocated".length
         assertEquals(' ', head[head.indexOf("Allocated") - 1])
-        val row = lines.first { it.startsWith("alloc.outer ") }
+        val row = lines.dropWhile { it != head }.first { it.startsWith("alloc.outer ") }
         assertEquals("3.00 MB", row.substring(end - 7, end), row)
 
         val folder = Files.createTempDirectory("alloc")
@@ -306,7 +306,7 @@ class AllocationsTest {
         val lines = Profiler.stop().render().lines()
 
         val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
-        val row = lines.first { it.startsWith("alloc.outer ") }
+        val row = lines.drop(head).first { it.startsWith("alloc.outer ") }
         assertEquals(row.length, lines[head + 1].length, "the rule and its table")
     }
 

@@ -300,8 +300,7 @@ class CoarseTest {
             instanceTicks = 1_000, activeTicks = 1_000, name = "query",
         )
         val text = report(listOf(bad), labelledDuty = 0.01).render()
-        assertTrue("READS HIGHER THAN THE MEASURED TIME ON CPU" in text, "the warning did not appear")
-        assertTrue("query" in text, "the warning did not name the operation")
+        assertTrue(text.lines().any { it.startsWith("CAREFUL       query: on a CPU") }, "the warning did not appear, or did not name the operation: $text")
         // The block carries both readings: the figure, and what the measured time on CPU allows.
         assertTrue(
             Regex("""on a CPU 3\.00, but the measured time on CPU bounds it at 0\.0\d""").containsMatchIn(text),
@@ -612,7 +611,7 @@ class CoarseTest {
 
         val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
         val executionsEnd = lines[head].indexOf("Executions") + "Executions".length
-        val rows = lines.take(fineTable).filter { it.startsWith("$long ") || it.startsWith("short ") }
+        val rows = lines.take(fineTable).filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" in it }
         assertEquals(2, rows.size, text)
         for (r in rows) assertTrue(r[executionsEnd - 1].isDigit() && r[executionsEnd] == ' ', "out of line: $r")
 
@@ -653,7 +652,7 @@ class CoarseTest {
         assertEquals(0.75, r.labelledOutsideCoarseShare)
         assertEquals(listOf("fine"), r.outsideCoarseSuspects().map { it.name })
         val text = r.render()
-        assertTrue(text.contains("NO coarse span"), "the report does not mention it")
+        assertTrue(text.lines().any { it.startsWith("CAREFUL") && "inside no coarse span" in it }, "the report does not mention it")
         assertTrue(text.contains("ESCAPING"), "the report does not name the dangerous reading")
     }
 
@@ -733,7 +732,7 @@ class CoarseTest {
         val shareAt = header.indexOf("% parent")
         assertTrue(perAt > 0 && shareAt > 0, "the columns have no header: $header")
         fun cells(prefix: String): Pair<String, String> =
-            lines.first { it.startsWith(prefix) }.let { it.substring(perAt, perAt + 10).trim() to it.substring(shareAt, shareAt + 8).trim() }
+            lines.dropWhile { it != header }.first { it.startsWith(prefix) }.let { it.substring(perAt, perAt + 10).trim() to it.substring(shareAt, shareAt + 8).trim() }
         assertEquals("" to "", cells("run "), "a root has no parent")
         assertEquals("12" to "100%", cells("  resolve "))
         assertEquals("" to "60%", cells("    select "), "once per resolve is not a loop count")

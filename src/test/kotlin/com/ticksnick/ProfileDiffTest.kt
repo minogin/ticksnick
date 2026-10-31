@@ -186,6 +186,103 @@ class ProfileDiffTest {
         }
     }
 
+    /** A report's lines by what each is, for comparing their order and not their figures. */
+    private fun shape(report: String): List<String> {
+        val keys = listOf("Runs", "Wall time", "runBatch", "COARSE OPERATIONS", "Coarse operation", "COARSE AND FINE", "Operation", "Sampled", "HOW TO READ THIS")
+        return report.lines().mapNotNull { line -> keys.firstOrNull { line.startsWith("$it ") || line == it } }
+    }
+
+    @Test
+    fun `a report prints the same lines for one run and for several`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val one = dir.resolve("one").also { Files.createDirectories(it) }
+            val two = dir.resolve("two").also { Files.createDirectories(it) }
+            val tree = listOf(node("runBatch", listOf(1_000L, 2_000L)))
+            save(one, 0, tree)
+            repeat(2) { save(two, it, tree) }
+            val alone = Profile.load(one).render()
+            val many = Profile.load(two).render()
+            assertEquals(shape(alone), shape(many))
+            assertTrue("1 run of 'one', one JVM: no interval" in alone, alone)
+            assertTrue("runBatch" in alone.lines().first { it.startsWith("runBatch ") }, alone)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a diff has everything a profile has`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val before = dir.resolve("before").also { Files.createDirectories(it) }
+            val after = dir.resolve("after").also { Files.createDirectories(it) }
+            fun keyed(key: String) = CoarseNode(
+                0, "top", 1, 1_000, 1_000, 1_000, Spans.of(listOf(1_000L)), 10, 10, LongArray(MAX_OPERATIONS + 1), 0,
+                listOf(node("runBatch", listOf(100L)), node("other", listOf(100L), listOf(node("runBatch", listOf(50L))))),
+                slowest = listOf(SlowExecution(key, 1_000)),
+            )
+            save(before, 0, listOf(keyed("was slow")))
+            save(after, 0, listOf(keyed("is slow")))
+            val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
+            assertTrue("Under more than one caller - all callers together:" in text, text)
+            assertTrue(text.lines().any { "slowest before:" in it && "was slow" in it }, text)
+            assertTrue(text.lines().any { "slowest after:" in it && "is slow" in it }, text)
+            assertTrue(text.lines().any { it.startsWith("Sampled       before") }, text)
+            assertTrue("HOW TO READ THIS" in text, text)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /** More own rows than are drawn are one row in the same columns, paired by a diff however many it stands for. */
+    @Test
+    fun `the rows not drawn are one row, on both sides of a diff`() {
+        val folded = { n: Int ->
+            Row(
+                FOLDED_ROWS, mapOf(PARENT_SHARE to Estimate(listOf(0.3))), 1, own = true, foldedRows = n,
+            )
+        }
+        val pairedRows = paired(listOf(folded(3)), listOf(folded(5)))
+        assertEquals(1, pairedRows.size)
+        assertEquals(3, pairedRows[0].before?.foldedRows)
+        assertEquals(5, pairedRows[0].after?.foldedRows)
+    }
+
+    /** What a run alone could say about itself reaches a profile of several, and so a diff. */
+    @Test
+    fun `a warning about one run reaches a profile of several`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val folder = dir.resolve("runs").also { Files.createDirectories(it) }
+            repeat(2) { RunStore.save(profile(emptyList(), listOf(stat("work", 10, 10)), stale = 5), folder.resolve("2026-10-25T16-1$it-00$RUN_EXTENSION")) }
+            val text = Profile.load(folder).render()
+            assertTrue(text.lines().any { it.startsWith("CAREFUL") && "already closed" in it && "(2 of 2 runs)" in it }, text)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /** A `?` on a line over the tables, with none in them, still has its key. */
+    @Test
+    fun `a header line with a question mark has the note`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val before = dir.resolve("before").also { Files.createDirectories(it) }
+            val after = dir.resolve("after").also { Files.createDirectories(it) }
+            fun spans(folder: Path, vararg nanos: Long) = nanos.forEachIndexed { i, span ->
+                RunStore.save(profile(emptyList(), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+            }
+            spans(before, 1_000_000_000, 1_200_000_000)
+            spans(after, 1_050_000_000, 1_250_000_000)
+            val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
+            assertTrue("?" in text.lines().first { it.startsWith("Wall time") }, text)
+            assertTrue(NOISE_NOTE in text, text)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
     private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
         RunStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
 
@@ -196,9 +293,10 @@ class ProfileDiffTest {
         10, 10, LongArray(MAX_OPERATIONS + 1), 0, children,
     )
 
-    private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>) = Run(
+    private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>, span: Long = 1_000_000_000, stale: Long = 0) = Run(
         operations = ops, idleHits = 0, ticks = 1_001,
-        samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000, threads = 1,
+        samplingSpanNanos = span, durationNanos = span, threads = 1,
+        staleContextHits = stale, coarseSampleHits = 10,
         duty = Duty(
             labelledDuty = 0.999, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,

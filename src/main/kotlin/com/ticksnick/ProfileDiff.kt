@@ -84,6 +84,7 @@ internal fun pointsHalf(points: Double): String = when {
  */
 internal class ProfileDiff(val before: Profile, val after: Profile) {
     private val coarseRows = paired(before.coarseTable.rows, after.coarseTable.rows)
+    private val sharedRows = paired(before.coarseTable.shared, after.coarseTable.shared)
 
     /** What moved most on top, whether it went up or down. */
     private val fineRows = paired(before.fineTable.rows, after.fineTable.rows).sortedByDescending { r ->
@@ -95,12 +96,15 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     private val changes: Int by lazy {
         fun count(r: DiffRow, columns: List<Column>): Int =
             columns.count { c -> c.interval && r.change(c)?.half?.isNaN() == false } + r.children.sumOf { count(it, columns) }
-        coarseRows.sumOf { count(it, COARSE_COLUMNS) } + fineRows.sumOf { count(it, FINE_COLUMNS) }
+        ((coarseRows + sharedRows).sumOf { count(it, COARSE_COLUMNS) } + fineRows.sumOf { count(it, FINE_COLUMNS) }).coerceAtLeast(1)
     }
 
-    private val coarseText = DiffText(before.coarseTable, after.coarseTable, coarseRows, "Coarse operation", COARSE_NAME_WIDTH, WALL) { it.isNoise(changes) }
-    private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, "Operation", FINE_NAME_WIDTH, null) { it.isNoise(changes) }
+    private val coarseText = DiffText(before.coarseTable, after.coarseTable, coarseRows, sharedRows, "Coarse operation", COARSE_NAME_WIDTH, WALL) { it.isNoise(changes) }
+    private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, emptyList(), "Operation", FINE_NAME_WIDTH, null) { it.isNoise(changes) }
     private val width = maxOf(coarseText.width, fineText.width)
+
+    /** Whether a header line printed a `?`, which no table's note may be there to explain. */
+    private var headerNoise = false
     private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change +- 95%" else ""
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
@@ -113,6 +117,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val c = Change(b, a)
         val sign = if (c.delta < 0) "-" else "+"
         val absolute = sign + duration(abs(c.delta)) + if (c.half.isNaN()) "" else " +- " + duration(c.half)
+        headerNoise = headerNoise || c.isNoise(changes)
         val relative = (signedPercent(c.relative) + (if (c.isNoise(changes)) "?" else "") + " " + pointsHalf(c.relativeHalf * 100)).trimEnd()
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
@@ -136,24 +141,50 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
                 appendLine(header(rootName, before.meanSpan(b), after.meanSpan(a), "per execution"))
         }
         clock()
+        bothSides("Cores", before.coresText(), after.coresText())
+        bothSides("Sampling", before.samplingText(), after.samplingText())
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
             appendLine()
             appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path$overRuns")
             with(coarseText) { rows() }
-            if (coarseRows.any { anyOwn(it) }) appendLine(
-                "  $SPLIT_MARK rows are fine labels in a row's own time; Per parent on one is its calls per execution of the row, " +
-                        "counted, which holds whatever the size of each run"
-            )
-            if (overRuns.isNotEmpty()) appendLine("  % parent is each run's share of its own parent, its change in percentage points: the run's speed cancels out of it")
+            if (coarseText.anyNoise) appendLine(NOISE_NOTE)
+            perSide(before.coarseKeys(), after.coarseKeys())
+            if (sharedRows.isNotEmpty()) {
+                appendLine("  Under more than one caller - all callers together:")
+                with(coarseText) { shared() }
+            }
         }
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change$overRuns")
         with(fineText) { rows() }
+        if (fineText.anyNoise) appendLine(NOISE_NOTE)
+        perSide(before.fineNotes(), after.fineNotes())
+        if (headerNoise && !coarseText.anyNoise && !fineText.anyNoise) appendLine(NOISE_NOTE)
+        appendLine()
+        bothSides("Sampled", before.sampledText(), after.sampledText())
+        appendLine("-".repeat(width))
+        with(after.runs[0]) { renderLegend(false) }
         appendLine("=".repeat(width))
     }
 
-    private fun anyOwn(r: DiffRow): Boolean = r.own || r.children.any { anyOwn(it) }
+    /** What is under a table: a line both sides have once, and one only a side has with that side's name. */
+    private fun StringBuilder.perSide(b: List<String>, a: List<String>) {
+        for (line in (b + a).distinct()) appendLine(
+            when (line) {
+                !in a -> "  before: " + line.trim()
+                !in b -> "  after: " + line.trim()
+                else -> line
+            }
+        )
+    }
+
+    /** A line of the report that is about the run, not the program: one line per side. */
+    private fun StringBuilder.bothSides(key: String, b: String?, a: String?) {
+        if (b == null && a == null) return
+        appendLine(row(key, "before  ${b ?: "-"}"))
+        appendLine(row("", "after   ${a ?: "-"}"))
+    }
 
     private fun clockMean(r: Profile) = r.runs.map { it.clock.mean }.filter { !it.isNaN() }.let { if (it.isEmpty()) Double.NaN else it.average() }
 

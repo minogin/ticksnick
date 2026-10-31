@@ -221,8 +221,7 @@ class PauseTest {
     @Test
     fun `wall time is split on a run with no pause too`() {
         for (quiet in listOf(Pauses.NONE, pause(0, 0, 0, gc = 0))) {
-            val line = quiet.headerLine(60 * second)
-            assertTrue(line.startsWith("Wall time"), line)
+            val line = wallOf(quiet, 60 * second)
             assertTrue("60.0 s = 60.0 s active + 0 paused" in line, line)
             assertTrue(quiet.careful().isEmpty(), quiet.careful().toString())
         }
@@ -232,7 +231,7 @@ class PauseTest {
     @Test
     fun `wall time is active plus paused, with the pauses counted on the line`() {
         val p = pause(5_780_000_000, 22, 1_850_000_000, gc = 5_790_000_000)
-        val line = p.headerLine(66 * second)
+        val line = wallOf(p, 66 * second)
         assertTrue("66.0 s = 60.2 s active + 5.78 s paused (8.76%) in 22 pauses, longest 1.85 s" in line, line)
         assertTrue(p.careful().isEmpty(), "a healthy split printed a warning: ${p.careful()}")
     }
@@ -252,7 +251,7 @@ class PauseTest {
     @Test
     fun `paused time the JVM did not count as collection stays in active time and is called out`() {
         val p = pause(5 * second, 10, 1 * second, gc = 1 * second)
-        assertTrue("60.0 s = 59.0 s active + 1.00 s paused" in p.headerLine(60 * second), p.headerLine(60 * second))
+        assertTrue("60.0 s = 59.0 s active + 1.00 s paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
         val careful = p.careful().single()
         assertTrue("the sampler lost 4.00 s the JVM did not count as GC" in careful, careful)
         assertTrue("counted as active" in careful, careful)
@@ -264,7 +263,7 @@ class PauseTest {
         assertTrue("more than the sampler saw" in gc, gc)
         // And when every pause was under a step, so the sampler saw none at all.
         val none = pause(0, 0, 0, gc = 300 * ms)
-        assertTrue("+ 0 paused" in none.headerLine(60 * second), none.headerLine(60 * second))
+        assertTrue("+ 0 paused" in wallOf(none, 60 * second), wallOf(none, 60 * second))
         val careful = none.careful().single()
         assertTrue("300 ms" in careful, careful)
         assertTrue("inside active" in careful, careful)
@@ -274,7 +273,7 @@ class PauseTest {
     @Test
     fun `an unreadable collector subtracts nothing and says what the sampler saw`() {
         val p = pause(5 * second, 10, 1 * second, gc = -1)
-        assertTrue("60.0 s = 60.0 s active + 0 paused" in p.headerLine(60 * second), p.headerLine(60 * second))
+        assertTrue("60.0 s = 60.0 s active + 0 paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
         val careful = p.careful().single()
         assertTrue("5.00 s in 10 pauses" in careful, careful)
         assertTrue("not confirmed" in careful, careful)
@@ -286,7 +285,7 @@ class PauseTest {
     @Test
     fun `a sampler that was not spinning claims no pauses`() {
         val p = pause(9 * second, 9_000, 20 * ms, gc = -1, measured = false)
-        assertTrue("+ 0 paused" in p.headerLine(60 * second), p.headerLine(60 * second))
+        assertTrue("+ 0 paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
         val careful = p.careful().single()
         assertTrue("not measured" in careful, careful)
         assertFalse("9.00 s" in careful, careful)
@@ -472,5 +471,11 @@ class PauseTest {
             assertTrue(d.activeDuty > d.duty, "run ${d.activeDuty} against wall ${d.duty}")
             assertTrue(" active" in rendered.lines().first { it.startsWith("COARSE AND FINE OPERATIONS") }, rendered)
         }
+    }
+
+    /** The `Wall time` line of a run with these pauses over [spanNanos]. */
+    private fun wallOf(p: Pauses, spanNanos: Long): String {
+        val paused = p.confirmedPausedIn(spanNanos).toDouble()
+        return wallLine(Estimate(listOf(spanNanos.toDouble())), Estimate(listOf(spanNanos - paused)), Estimate(listOf(paused)), p.pauses, p.longestNanos)
     }
 }

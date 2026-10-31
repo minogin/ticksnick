@@ -746,7 +746,7 @@ class Run internal constructor(
      * processor to keep the step, a parked one frees it and samples later than asked. Said with
      * the remedy when a spinning sampler holds one of few processors. Null when not recorded.
      */
-    internal fun samplingLine(): String? {
+    internal fun samplingLine(stepNanos: Double = this.stepNanos): String? {
         val w = wait ?: return null
         if (stepNanos.isNaN()) return null
         val n = duty.processors
@@ -1305,10 +1305,7 @@ class Run internal constructor(
     }
 
     /** This run as a folder of one: a run's report is its profile's. */
-    private val table: Profile by lazy { Profile("", listOf(java.nio.file.Path.of("")), listOf(this)) }
-
-    /** The report-level rules and banners: the widest table on this page. */
-    private val pageWidth by lazy { table.pageWidth }
+    private val table: Profile by lazy { Profile("this run", listOf(java.nio.file.Path.of("run.tsr")), listOf(this)) }
 
     /**
      * A run saved without own time: a leaf's samples split by label and applied to its wall. See
@@ -1527,88 +1524,6 @@ class Run internal constructor(
         }
     }
 
-    private fun StringBuilder.renderCoarse() {
-        val seen = coarse.filter { it.count > 0 || it.inclusiveHits > 0 }
-        if (seen.isEmpty()) return
-        with(table) { coarseSection() }
-        val nodesOf = coarseTree.flatMap { it.flatten() }.groupBy { it.type }
-        // A context made by hand rather than by the hook has no path and is in no tree. Its type
-        // still has its per-type figures; said here so it is not lost.
-        val missing = seen.filter { nodesOf[it.type] == null }
-        if (missing.isNotEmpty()) appendLine("  not in the tree, its contexts were made outside the hook: " + missing.joinToString { it.name })
-        // The one signal for work escaping its context, which neither the floor check nor the
-        // balance check can see. Stated as a measurement with both readings, because it cannot tell
-        // "I bracketed part of the program" from "work escaped to another thread" and guessing would
-        // be worse than saying so.
-        if (labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) {
-            appendLine(
-                String.format(
-                    Locale.ROOT,
-                    "%n%s of thread-time inside fine operations (%s) was inside NO coarse span.",
-                    labelledOutsideCoarseShare * 100, threadTime(labelledOutsideCoarse * stepNanos)
-                )
-            )
-            val suspects = outsideCoarseSuspects().take(4)
-            if (suspects.isNotEmpty()) {
-                appendLine("  mostly: " + suspects.joinToString(", ") { it.name })
-            }
-            appendLine("  Two readings and this cannot tell them apart. Either you bracketed part of the program")
-            appendLine("  and not the rest - fine - or work is ESCAPING its context onto threads it never reached,")
-            appendLine("  and then those threads' time is missing from its busy/exec and shows up as its waiting.")
-            appendLine("  Ask whether the operations above are ones you expected to be inside a span.")
-        }
-        // The column cannot see a native wait, and on a workload that does nothing else that is not a
-        // rounding error. Named per type, with both readings, because the number is not useless —
-        // it is right on a CPU-bound operation and it is the *reader* who knows which they have.
-        val contradicted = coarse.filter { it.count > 0 && workingIsContradicted(it) }
-        if (contradicted.isNotEmpty()) {
-            appendLine()
-            appendLine("!".repeat(pageWidth))
-            appendLine("`on a CPU` READS HIGHER THAN THE MEASURED TIME ON CPU CAN SUPPORT")
-            for (c in contradicted.sortedByDescending { it.working }) {
-                appendLine(
-                    String.format(
-                        Locale.ROOT, "  %-22s on a CPU %.2f, but the measured time on CPU bounds it at %.2f",
-                        c.name, c.working, workingCeilingOf(c)
-                    )
-                )
-            }
-            appendLine(
-                String.format(
-                    Locale.ROOT,
-                    "  Threads inside these were on a CPU %.2f%% of the time, measured from the operating",
-                    duty.labelledDuty * 100
-                )
-            )
-            appendLine("  system's own clock. `on a CPU` is built on thread state, and a thread stopped inside a")
-            appendLine("  NATIVE call - a socket read, a file read, an epoll wait - reads RUNNABLE to Java. So it")
-            appendLine("  is counted as working, and `waiting` is short by the same amount.")
-            appendLine("!".repeat(pageWidth))
-        }
-        // The opposite fault to the outside-coarse line, and the more serious one. That one is
-        // attribution lost and says so; this is attribution invented, and it is stated with the
-        // remedy because there are two quite different causes with opposite fixes.
-        if (staleContextHits > 0) {
-            val worst = coarse.maxByOrNull { it.staleHits }
-            appendLine()
-            appendLine("!".repeat(pageWidth))
-            appendLine(
-                String.format(
-                    Locale.ROOT,
-                    "%s of the thread-time inside coarse executions (%s) was inside one that " +
-                            "had ALREADY BEEN CLOSED",
-                    staleContextShare * 100, threadTime(staleContextHits * stepNanos)
-                )
-            )
-            if (worst != null && worst.staleHits > 0) appendLine("  mostly under: ${worst.name}")
-            appendLine("  It is excluded from every number in the table above rather than inflating them.")
-            appendLine("  Either work was handed to another thread and never waited for, so it outlived the span")
-            appendLine("  carrying it - propagate only what the request actually joins - or a span is closed too")
-            appendLine("  early, before the work it covers has finished.")
-            appendLine("!".repeat(pageWidth))
-        }
-    }
-
     /**
      * One line of the operations table: a fine operation, or a coarse operation's own work.
      *
@@ -1744,9 +1659,45 @@ class Run internal constructor(
                 "coarse labels: $openContextsAtEnd executions were still open when sampling stopped - their spans " +
                         "are missing, and every sample taken inside them was billed to them"
             )
+            // Thread state cannot see a native wait, and on a workload that does nothing else that is
+            // not a rounding error. Named per type, because the figure is right on a CPU-bound operation
+            // and it is the reader who knows which they have.
+            for (c in coarse.filter { it.count > 0 && workingIsContradicted(it) }.sortedByDescending { it.working }) add(
+                String.format(
+                    Locale.ROOT, "%s: on a CPU %.2f, but the measured time on CPU bounds it at %.2f - threads inside were on a CPU %.2f%% " +
+                            "of the time, and a thread stopped in a native call reads Runnable, so Waiting is short by the same amount",
+                    c.name, c.working, workingCeilingOf(c), duty.labelledDuty * 100
+                )
+            )
+            // Attribution invented, not lost: stated with the remedy, because there are two quite
+            // different causes with opposite fixes.
+            if (staleContextHits > 0) add(
+                String.format(
+                    Locale.ROOT, "coarse labels: %s of the thread-time inside coarse executions (%s) was inside one already closed%s - " +
+                            "it is left out of every table",
+                    staleContextShare * 100, threadTime(staleContextHits * stepNanos),
+                    coarse.maxByOrNull { it.staleHits }?.takeIf { it.staleHits > 0 }?.let { ", mostly under ${it.name}" } ?: ""
+                ) + "\nwork was handed to another thread and never waited for - propagate only what the request joins - or a span closes too early"
+            )
             // What limits the whole run: the pauses, the cores, the clock - the clock only when it
             // moved or could not be read, a steady one being the healthy case.
             addAll(pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful())
+            // The one signal for work escaping its context, which neither the floor check nor the
+            // balance check can see. Stated with both readings, because it cannot tell "I bracketed part
+            // of the program" from "work escaped to another thread".
+            if (labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
+                String.format(
+                    Locale.ROOT, "coarse labels: %s of thread-time inside fine operations (%s) was inside no coarse span%s - " +
+                            "you bracketed part of the program, which is fine, or work is ESCAPING its context onto threads it never reached",
+                    labelledOutsideCoarseShare * 100, threadTime(labelledOutsideCoarse * stepNanos),
+                    outsideCoarseSuspects().take(4).takeIf { it.isNotEmpty() }?.let { s -> ", mostly " + s.joinToString(", ") { it.name } } ?: ""
+                )
+            )
+            // A context made by hand rather than by the hook has no path and is in no tree.
+            val inTree = coarseTree.flatMap { it.flatten() }.map { it.type }.toSet()
+            coarse.filter { (it.count > 0 || it.inclusiveHits > 0) && it.type !in inTree }.takeIf { it.isNotEmpty() }?.let { missing ->
+                add("coarse labels: ${missing.joinToString { it.name }} are not in the tree - their contexts were made outside the hook, so the coarse table has no row for them")
+            }
             for (op in suspect()) add(
                 String.format(
                     Locale.ROOT,
@@ -1775,65 +1726,9 @@ class Run internal constructor(
         }
 
     /**
-     * @param legend every column explained, at the bottom. Off by default: see [renderLegend].
-     * @param careful the warnings, in a `CAREFUL` section under the logo: [Profile.warnings] and the
-     * line that one run has no interval, when this run is a profile's only one.
+     * This run as a report of its own. See [Profile.report].
      */
-    internal fun render(legend: Boolean = false, careful: Warnings = Warnings(warnings())): String = buildString {
-        if (failure != null) {
-            appendLine("!".repeat(pageWidth))
-            appendLine("PROFILING STOPPED - these numbers were not going to be right:")
-            appendLine("  $failure")
-            appendLine("Everything below is what led to that verdict, not a result. Pass strict=false to")
-            appendLine("profile anyway, which is what to do when the code is not yours to change.")
-            appendLine("!".repeat(pageWidth))
-        }
-        // One long rule at the top and one after the legend: the report lands in a console full of
-        // the program's own output, and its first and last lines should say so. No rules between
-        // sections - the headings and the tables' own rules do that, and a rule beside a table's
-        // rule is a doubled separator. The logo is not here: it is printed once per JVM by the
-        // first TickSnick call, see [Logo].
-        appendLine("=".repeat(pageWidth))
-        // Every warning, before any number: see [carefulBlock] and [warnings].
-        carefulBlock(careful)
-        factLines(listOf(tags), listOf(facts))
-        // One line: wall time split into active and paused. The report shows what matters for
-        // optimising performance or says the report is unreliable. The split is the first - GC
-        // tuning is about those figures. Mechanisms (the step, the clock, the windows) and lines
-        // that would only say "fine" are left out: silence says "fine", and a `CAREFUL` line says
-        // what is unreliable, before the numbers it is about and not in a footnote after them.
-        appendLine(pause.headerLine(samplingSpanNanos))
-        // Always, under the wall time: who had the cores, the program's threads being only some of it.
-        duty.coresLine()?.let { appendLine(row("Cores", it)) }
-        // The one mechanism shown: whether the sampler held a processor, which the reader can change.
-        samplingLine()?.let { appendLine(row("Sampling", it)) }
-        // The tree first: the overview - what ran inside what, how often, what part of its parent -
-        // and the own-time table after it for the detail. The tree is what a reader reads; the
-        // table is what they look up.
-        renderCoarse()
-        appendLine()
-        with(table) { fineSection() }
-        // The run's own facts, after the tables: how much evidence there is, which is the precision
-        // of everything above. Not in the header: it says nothing a reader acts on before the
-        // numbers, and something after them, when a share looks too close to call. "mean (jittered)": the interval is drawn +/-25% around the step so the sampler
-        // cannot lock onto a workload with a rhythm of its own, and over a short run the mean of a
-        // handful of draws is visibly off the step.
-        appendLine()
-        appendLine(
-            row(
-                "Sampled", String.format(
-                    Locale.ROOT, "%,d samples - %,d ticks at %.3f ms mean (jittered) x %s, one sample per thread per tick",
-                    allHits, ticks, stepNanos / 1e6, plural(threads.toLong(), "thread")
-                )
-            )
-        )
-        appendLine("-".repeat(pageWidth))
-        // Said in the output rather than only in a document: the gap between a share and what
-        // removing the operation would save can be a factor of 275, and nothing else on the screen
-        // hints at it.
-        renderLegend(legend)
-        appendLine("=".repeat(pageWidth))
-    }
+    internal fun render(legend: Boolean = false, careful: Warnings = Warnings(warnings())): String = table.report(legend, careful)
 
     /**
      * Writes this run as a new file in [folder], named by the time it is saved -

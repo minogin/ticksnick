@@ -280,12 +280,12 @@ class RunTest {
         )
         assertEquals(
             "6 processors: profiled threads 2.94, the rest 2.40: GC 1.10 (0.60 in pauses), sampler 1.00, JIT 0.30",
-            d.coresLine()
+            coresOf(d)
         )
         val careful = d.careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single()
         assertFalse("processors" in careful, "the cores line is the header's now, not the warning's: $careful")
         // A profile without the figures has no line.
-        assertEquals(null, duty().coresLine())
+        assertEquals(null, coresOf(duty()))
     }
 
     private fun dutyWith(
@@ -323,19 +323,19 @@ class RunTest {
     /** The Cores line's other branches: no JIT clock, no pause, more counted than the JVM's own clock, the profiled threads' own figure. */
     @Test
     fun `the cores line leaves out what it does not have and never goes negative`() {
-        val noJit = dutyWith(jit = -1).coresLine()!!
+        val noJit = coresOf(dutyWith(jit = -1))!!
         assertFalse("JIT" in noJit, noJit)
         assertTrue("GC 1.40 (0.60 in pauses), sampler 1.00" in noJit, noJit)
 
-        val noPause = dutyWith(paused = 0).coresLine()!!
+        val noPause = coresOf(dutyWith(paused = 0))!!
         assertFalse("in pauses" in noPause, noPause)
 
         // The threads and the sampler read more than the process: quantisation, never negative GC.
-        val over = dutyWith(cpu = 50_000_000_000, process = 53_400_000_000, sampler = 10_000_000_000).coresLine()!!
+        val over = coresOf(dutyWith(cpu = 50_000_000_000, process = 53_400_000_000, sampler = 10_000_000_000))!!
         assertTrue("GC 0.00" in over && "JIT 0.00" in over, over)
 
         // The profiled threads read ten times a second win over the window figure when present.
-        val newer = dutyWith(profiled = 32_400_000_000).coresLine()!!
+        val newer = coresOf(dutyWith(profiled = 32_400_000_000))!!
         assertTrue("profiled threads 3.24, the rest 2.10: sampler 1.00, GC 0.80 (0.60 in pauses)" in newer, newer)
     }
 

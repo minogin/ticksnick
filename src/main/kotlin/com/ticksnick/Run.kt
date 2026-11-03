@@ -14,19 +14,6 @@ internal const val FINE_ROWS_SHOWN = 6
 internal const val SPLIT_MARK = "-"
 
 /**
- * Spaces between a fine row's last column and its note - a fine label's total under every row it is
- * under - so the note reads as a note and not as a value under the `Paused` heading.
- */
-internal const val NOTE_MARGIN = 6
-
-/**
- * How much more a fine label's total must be than its largest row before the note is drawn: a
- * second row of a few milliseconds is not worth a note. `2.32 s in all, under 2 operations` beside
- * a 2.32 s row says nothing.
- */
-internal const val NOTE_MIN_GAIN = 1.1
-
-/**
  * Executions at once - or, for forked work with no label of its own, threads per execution - from
  * which a coarse row gets its *at once* line: at least this, and at least this many times its
  * parent's. Sampled figures, so a tenth is the row repeating its parent rather than a fork of its own.

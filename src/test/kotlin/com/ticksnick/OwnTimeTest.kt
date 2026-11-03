@@ -5,6 +5,7 @@ import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -148,7 +149,7 @@ class OwnTimeTest {
      * tree shows it twice and its total, about three quarters of the request, once - beside the part.
      */
     @Test
-    fun `a fine label under two rows gets its total once, beside the larger`() {
+    fun `a fine label under two rows says so on both, and its whole is under the table`() {
         val request = Profiler.registerCoarse(JOB)
         val part = Profiler.registerCoarse(PART)
         val work = Profiler.registerFine("own.spread")
@@ -162,12 +163,15 @@ class OwnTimeTest {
         val p = Profiler.stop()
 
         val text = p.render()
-        val noted = text.lines().filter { "in all, under 2 operations" in it }
-        assertTrue(noted.size == 1, "the total was not drawn once:\n$text")
-        assertTrue(noted.single().trimStart().startsWith("- own.spread"), "the note is not on the label's row: ${noted.single()}")
-        // Beside the part, the larger of the two: the part's row comes first in the tree, before the request's own.
-        val first = text.lines().first { it.trimStart().startsWith("- own.spread") }
-        assertTrue("in all" in first, "the note is not beside the larger row:\n$text")
+        val lines = text.lines()
+        val block = lines.indexOf(SHARED_HEADING)
+        assertTrue(block > 0, "no block of operations under multiple parents:\n$text")
+        val inTree = lines.take(block).filter { it.trimStart().startsWith("- own.spread") }
+        assertEquals(2, inTree.size, text)
+        assertTrue(inTree.all { it.trimStart().startsWith("- own.spread (2 parents)") }, "a row does not say it is a part:\n$text")
+        val whole = lines.drop(block).first { it.trimStart().startsWith("- own.spread") }
+        assertTrue(whole.trimStart().startsWith("- own.spread ") && "parents" !in whole, whole)
+        assertTrue("120" in whole, "its calls over both rows: $whole")
     }
 
     /** A plain thread does not carry the context: its fine label is under no coarse row at all. */

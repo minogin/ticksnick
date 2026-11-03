@@ -79,9 +79,6 @@ internal val FINE_COLUMNS = listOf(
 /** An operation the sampler never caught, with the most calls any run made of it. */
 internal class Unsampled(val name: String, val coarse: Boolean, val calls: Long)
 
-/** A fine label's total under every row it is under, beside the largest of them. Null [calls] where they were not counted. */
-internal class InAll(val wallNanos: Double, val calls: Double?, val operations: Int)
-
 /**
  * **One row of a table**: raw values, nanos and bytes and shares in percent, each with every run's
  * value behind it, never text. A run with no figure for a column has none in its [Estimate], and a
@@ -103,7 +100,11 @@ internal class Row(
     val foldedRows: Int = 0,
     val slowest: List<SlowExecution> = emptyList(),
 ) {
-    var inAll: InAll? = null
+    /**
+     * How many rows of the tree the operation is on, each its part under that parent: over 1 for one
+     * under several parents, whose whole is in [Table.shared].
+     */
+    var parents: Int = 0
 }
 
 /**
@@ -112,7 +113,7 @@ internal class Row(
  *
  * @param runs how many runs are behind it.
  * @param sortedBy the column the rows are sorted by, for the mark in its heading.
- * @param shared the coarse operations under more than one caller, all callers together.
+ * @param shared the operations under more than one parent, coarse and fine, each over all of its rows.
  * @param splitLeaves own rows are a leaf's samples split by label, from a run saved without own time.
  * @param contained coarse operations with no own time.
  * @param folded operations never sampled.
@@ -183,11 +184,6 @@ internal fun intervalText(c: Column, f: Estimate?): String = when {
  *
  * @param intervals whether there is room for a `+-` beside the columns that have one.
  */
-private fun inAllText(r: Row?): String = r?.inAll?.let { all ->
-    " ".repeat(NOTE_MARGIN) + duration(all.wallNanos) +
-            (all.calls?.let { String.format(Locale.ROOT, " and %,.0f calls", it) } ?: "") + " in all, under ${all.operations} operations"
-} ?: ""
-
 private fun StringBuilder.slowestLines(indent: String, label: String, slowest: List<SlowExecution>) {
     slowest.forEachIndexed { i, slow ->
         appendLine(indent + "  " + (if (i == 0) label else " ".repeat(label.length)) + String.format(Locale.ROOT, "%9s  %s", duration(slow.nanos.toDouble()), slow.key))
@@ -289,10 +285,20 @@ private class Layout(
  * @param minName the name column's narrowest width.
  */
 internal class TableText(private val table: Table, heading: String, minName: Int) {
-    /** The name as drawn in the first column, indent and mark included. */
-    private fun nameOf(r: Row, depth: Int): String =
-        "  ".repeat(depth) + (if (r.own) "$SPLIT_MARK " else "") + (if (r.foldedRows > 0) "and ${r.foldedRows} more" else r.name) + (if (r.coarse) STAR else "") +
-                if (r.foldedRows == 0 && r.present < table.runs) " (${r.present} of ${table.runs} runs)" else ""
+    /**
+     * The name as drawn in the first column, indent and mark included, and every fact about the row in
+     * one parenthesis: `onCentral (3 parents, 2 of 3 runs)`. In the block of [Table.shared] the
+     * parents go unsaid, since its heading says them.
+     */
+    private fun nameOf(r: Row, depth: Int, shared: Boolean = false): String {
+        val indent = "  ".repeat(depth) + if (r.own) "$SPLIT_MARK " else ""
+        if (r.foldedRows > 0) return indent + "and ${r.foldedRows} more"
+        val facts = listOfNotNull(
+            "${r.parents} parents".takeIf { !shared && r.parents > 1 },
+            "${r.present} of ${table.runs} runs".takeIf { r.present < table.runs },
+        )
+        return indent + r.name + (if (r.coarse) STAR else "") + if (facts.isEmpty()) "" else " (${facts.joinToString()})"
+    }
 
     /** Every name the table draws. */
     private val names: List<String> = buildList {
@@ -301,7 +307,7 @@ internal class TableText(private val table: Table, heading: String, minName: Int
             r.children.forEach { walk(it, depth + 1) }
         }
         table.rows.forEach { walk(it, 0) }
-        table.shared.forEach { add("  " + it.name) }
+        table.shared.forEach { add(nameOf(it, 1, shared = true)) }
     }
 
     private val layout = Layout(table.columns, table.runs >= 2, heading, minName, names, table.sortedBy)
@@ -318,7 +324,7 @@ internal class TableText(private val table: Table, heading: String, minName: Int
 
     /** [r], what is attached to it, and the rows under it. */
     private fun StringBuilder.row(r: Row, depth: Int) {
-        appendLine(layout.line(cells(nameOf(r, depth), r)) + inAllText(r))
+        appendLine(layout.line(cells(nameOf(r, depth), r)))
         slowestLines("  ".repeat(depth), "slowest: ", r.slowest)
         r.children.forEach { row(it, depth + 1) }
     }
@@ -328,7 +334,7 @@ internal class TableText(private val table: Table, heading: String, minName: Int
 
     /** The rows under more than one caller, after the rule. */
     fun StringBuilder.shared() {
-        for (r in table.shared) appendLine(layout.line(cells("  " + r.name, r)))
+        for (r in table.shared) appendLine(layout.line(cells(nameOf(r, 1, shared = true), r)))
         appendLine(layout.rule())
     }
 }
@@ -369,14 +375,25 @@ internal class DiffText(
 ) {
     private val columns = (before.columns + after.columns).distinct().sortedBy { c -> (COARSE_COLUMNS + FINE_COLUMNS).indexOf(c) }
 
-    private fun nameOf(r: DiffRow, depth: Int): String {
+    /** As in a report, `->` where the sides differ: `onCentral (3 parents, 3 -> 0 runs)`. */
+    private fun nameOf(r: DiffRow, depth: Int, shared: Boolean = false): String {
         val indent = "  ".repeat(depth) + if (r.own) "$SPLIT_MARK " else ""
         val b = r.before?.foldedRows ?: 0
         val a = r.after?.foldedRows ?: 0
         if (a > 0 || b > 0) return indent + if (a == b) "and $a more" else "and $b -> $a more"
+        val pb = r.before?.parents?.coerceAtLeast(1)
+        val pa = r.after?.parents?.coerceAtLeast(1)
         val inB = r.before?.present ?: 0
         val inA = r.after?.present ?: 0
-        return indent + r.name + (if (r.coarse) STAR else "") + if (inB < before.runs || inA < after.runs) " ($inB -> $inA runs)" else ""
+        val facts = listOfNotNull(
+            when {
+                shared || ((pb ?: 1) <= 1 && (pa ?: 1) <= 1) -> null
+                pb == null || pa == null || pb == pa -> "${pa ?: pb} parents"
+                else -> "$pb -> $pa parents"
+            },
+            "$inB -> $inA runs".takeIf { inB < before.runs || inA < after.runs },
+        )
+        return indent + r.name + (if (r.coarse) STAR else "") + if (facts.isEmpty()) "" else " (${facts.joinToString()})"
     }
 
     private val layout = Layout(
@@ -387,7 +404,7 @@ internal class DiffText(
                 r.children.forEach { walk(it, depth + 1) }
             }
             rows.forEach { walk(it, 0) }
-            shared.forEach { walk(it, 1) }
+            shared.forEach { add(nameOf(it, 1, shared = true)) }
         },
         sortedBy,
     )
@@ -407,16 +424,16 @@ internal class DiffText(
 
     /** The rows under more than one caller, after the rule. */
     fun StringBuilder.shared() {
-        for (r in shared) row(r, 1)
+        for (r in shared) row(r, 1, shared = true)
         appendLine(layout.rule())
     }
 
     /** Before, after, the change, what is attached to the row on each side, and the rows under it. */
-    private fun StringBuilder.row(r: DiffRow, depth: Int) {
+    private fun StringBuilder.row(r: DiffRow, depth: Int, shared: Boolean = false) {
         fun side(name: String, row: Row?) = layout.line(
             listOf(name) + columns.map { c -> layout.cell(c, cellText(c, row, r.own), intervalText(c, row?.figures?.get(c))) }
-        ) + inAllText(row)
-        appendLine(side(nameOf(r, depth), r.before))
+        )
+        appendLine(side(nameOf(r, depth, shared), r.before))
         appendLine(side("", r.after))
         appendLine(layout.line(listOf("") + columns.map { c -> changeCell(c, r) }))
         val indent = "  ".repeat(depth)

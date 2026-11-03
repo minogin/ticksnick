@@ -58,6 +58,9 @@ internal const val ONE_RUN_CAREFUL = "times: 1 run of '%s', no interval - the ne
 internal const val MAX_CAREFUL = 10
 
 /** The name column's narrowest width, in the coarse and in the fine table. */
+/** Over the block of operations under more than one parent, each over all of its rows. */
+internal const val SHARED_HEADING = "  Under multiple parents - each over all of them:"
+
 /** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
 internal const val FOLDED_ROWS = "and more"
 
@@ -406,7 +409,7 @@ class Profile internal constructor(internal val name: String, internal val files
     }
 
     /** The coarse operations under more than one caller in any run: their figures over all callers. */
-    private fun sharedRows(): List<Row> {
+    private fun sharedCoarseRows(): List<Row> {
         val nodes = runs.map { r -> r.coarseTree.flatMap { it.flatten() }.groupBy { it.name } }
         val names = nodes.flatMap { n -> n.filterValues { it.size > 1 }.keys }.distinct()
         return names.map { name ->
@@ -434,25 +437,54 @@ class Profile internal constructor(internal val name: String, internal val files
                 ),
                 with.size,
             )
-        }.sortedByDescending { r -> r.figures[WALL]!!.mean }
+        }
+    }
+
+    /**
+     * The fine labels [names], each over every coarse row it is in the own time of, per run: its calls
+     * there, the walls of those rows added, and its own thread-time per call.
+     */
+    private fun sharedFineRows(names: Collection<String>): List<Row> = names.map { name ->
+        val rows = runs.map { r -> r.coarseTree.flatMap { it.flatten() }.mapNotNull { n -> r.ownRowsOf(n)?.firstOrNull { it.name == name } } }
+        val with = runs.indices.filter { rows[it].isNotEmpty() }
+        fun of(f: (List<Run.OwnRow>) -> Double) = Estimate(with.map { f(rows[it]) }.filter { !it.isNaN() })
+        Row(
+            name,
+            mapOf(
+                EXECUTIONS to of { r -> if (r.any { it.calls < 0 }) Double.NaN else r.sumOf { it.calls }.toDouble() },
+                WALL to of { r -> r.sumOf { it.wallNanos }.takeIf { it > 0 } ?: Double.NaN },
+                MEAN to of { r ->
+                    val called = r.filter { it.calls > 0 && !it.perCallNanos.isNaN() }
+                    if (called.isEmpty()) Double.NaN else called.sumOf { it.perCallNanos * it.calls } / called.sumOf { it.calls }
+                },
+            ),
+            with.size,
+            own = true,
+        )
     }
 
     /** **The coarse table**: one row per path, over the runs. */
     internal val coarseTable: Table by lazy {
         val own = ArrayList<Row>()
         val rows = childrenOf(runs.map { it.coarseTree }).map { coarseRow(it, runs.map { null }, own) }
-        // A fine label under more than one row: each row is its time under that row alone, so the tree
-        // never shows its total, and a label spread over three walks reads smaller than one that leads
-        // a single walk. The total goes once, beside the label's largest row. With calls counted, every
-        // row the label was called under counts, sampled or not, so the number of operations is exact.
-        for ((_, under) in own.groupBy { it.name }) {
-            fun wall(r: Row) = r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0
-            if (under.size < 2 || under.sumOf { wall(it) } < NOTE_MIN_GAIN * under.maxOf { wall(it) }) continue
-            val calls = under.map { it.figures[EXECUTIONS]?.mean?.takeIf { c -> !c.isNaN() } }
-            under.maxBy { wall(it) }.inAll = InAll(under.sumOf { wall(it) }, calls.takeIf { null !in it }?.sumOf { it!! }, under.size)
+        // An operation under more than one parent: each row is its part under that parent alone, so the
+        // tree never shows its whole, and a label spread over three walks reads smaller than one that
+        // leads a single walk. Every row of it says how many parents it has, and its whole is a row of the
+        // block under the table, sorted with the rest by Wall. With calls counted, every row the label
+        // was called under counts, sampled or not, so the number of parents is exact.
+        val coarseRows = buildList {
+            fun walk(r: Row) {
+                if (!r.own) add(r)
+                r.children.forEach { walk(it) }
+            }
+            rows.forEach { walk(it) }
         }
+        val spread = (coarseRows.groupBy { it.name }.values + own.groupBy { it.name }.values).filter { it.size > 1 }
+        for (under in spread) under.forEach { it.parents = under.size }
+        val shared = (sharedCoarseRows() + sharedFineRows(own.groupBy { it.name }.filterValues { it.size > 1 }.keys))
+            .sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 }
         val split = runs.any { r -> r.coarseTree.any { t -> t.flatten().any { r.ownRowsOf(it) == null && r.splitRowsOf(it).isNotEmpty() } } }
-        Table(COARSE_COLUMNS.filter { it.group != ALLOCATED.group || allocations }, rows, runs.size, WALL, sharedRows(), splitLeaves = split)
+        Table(COARSE_COLUMNS.filter { it.group != ALLOCATED.group || allocations }, rows, runs.size, WALL, shared, splitLeaves = split)
     }
 
     /** **The fine table**: fine and coarse operations together, each by its own time, heaviest first. */
@@ -538,7 +570,7 @@ class Profile internal constructor(internal val name: String, internal val files
         // under that caller alone. Its percentiles over everything are a different question - "how long
         // does a parse take" - and they are answered here, once, only when the question exists.
         if (coarseTable.shared.isNotEmpty()) {
-            appendLine("  Under more than one caller - all callers together:")
+            appendLine(SHARED_HEADING)
             with(coarseText) { shared() }
         }
     }
@@ -570,8 +602,8 @@ class Profile internal constructor(internal val name: String, internal val files
                     " counted, not sampled; what the collector has to clear, not memory held" +
                     if (runs.size > 1) "; the mean of the runs that counted them" else ""
         )
-        if (all.any { it.inAll != null }) add(
-            "  'in all, under N operations' beside a fine row: that label's time, and calls where counted, under every row it is under, on its largest"
+        if (all.any { it.parents > 1 }) add(
+            "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is under the table, under multiple parents"
         )
         if (runs.size > 1) {
             add("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")

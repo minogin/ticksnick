@@ -283,7 +283,7 @@ class AllocationsTest {
 
         val head = lines.first { it.startsWith("Coarse operation") }
         val end = head.indexOf("Per execution") + "Per execution".length
-        val block = lines.indexOfFirst { "Under more than one caller" in it }
+        val block = lines.indexOf(SHARED_HEADING)
         val row = lines.drop(block).first { it.startsWith("  alloc.inner") }
         assertEquals("2.00 MB", row.substring(end - 7, end), row)
     }

@@ -97,7 +97,8 @@ class CallsPerParentTest {
         for (line in lines.drop(start + 2)) {
             if (line.isBlank() || line.startsWith("-")) break
             val indent = line.length - line.trimStart().length
-            val cells = line.replace("|", " ").trim().split(Regex(" +"))
+            // The parenthesis on a name, `(2 parents)`, is about the row, not one of its cells.
+            val cells = line.replace(Regex(" [(][^)]*[)]"), "").replace("|", " ").trim().split(Regex(" +"))
             if (cells[0] == "-") {
                 if (cells[1] == "and") continue
                 out[stack.take(indent / 2) + cells[1]] = cells[2] to cells.getOrNull(3)?.takeIf { it.matches(Regex("[0-9,.]+")) }
@@ -148,7 +149,7 @@ class CallsPerParentTest {
         var coarse = ""
         for (i in head + 2 until lines.size step 3) {
             if (lines[i].startsWith("-")) break
-            val name = lines[i].substringBefore("|").trim()
+            val name = lines[i].substringBefore("|").trim().replace(Regex(" [(][^)]*[)]"), "")
             if (!name.startsWith("- ")) coarse = name
             rows[coarse to name.removePrefix("- ")] =
                 (i..i + 2).map { cell(lines[it], executions, 11) } + (i..i + 2).map { cell(lines[it], perParent, 10) }

@@ -103,7 +103,7 @@ class TreeTest {
         assertEquals(1L, assertNotNull(p.root("tree-x")).child("tree-shared")?.count)
         assertEquals(2L, assertNotNull(p.root("tree-y")).child("tree-shared")?.count)
         assertEquals(3L, p.coarse.first { it.name == "tree-shared" }.count, "the per-type count is the sum over callers")
-        assertTrue("all callers together" in p.render(), "the shared block is missing:\n${p.render()}")
+        assertTrue(SHARED_HEADING in p.render(), "the shared block is missing:\n${p.render()}")
     }
 
     @Test

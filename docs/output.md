@@ -142,11 +142,11 @@ Coarse operation                Executions Per parent Parallel     Wall v % pare
 batch                                    1                         1.16 s                   -     1.16 s
   plan                                  10         10              1.01 s      87%          -     101 ms
     - rule                           3,400        340              710 ms      70%                209 us
-    - visit                          1,000        100              201 ms      20%                201 us      300 ms and 1,100 calls in all, under 2 operations
+    - visit (2 parents)              1,000        100              201 ms      20%                201 us
     - rare                             500         50             99.2 ms      10%                198 us
     - and 1 more                                                              <1%
   cleanup                               10         10              150 ms      13%          -    15.0 ms
-    - visit                            100         10             98.2 ms      65%                982 us
+    - visit (2 parents)                100         10             98.2 ms      65%                982 us
     - unlabelled                       own                        49.6 ms      33%
     - rare                              10          1                   -
 ```
@@ -158,8 +158,14 @@ batch                                    1                         1.16 s       
 - **Mean** - its own time per call: `visit` is 201 us under `plan` and 982 us under `cleanup`.
 - A label called on a path and never sampled there still has its row, with `-` for the time:
   `rare` ran once per `cleanup`, too briefly to be caught.
-- `unlabelled` is time under no fine label. `300 ms and 1,100 calls in all, under 2 operations` is
-  the label's total under every row it appears in, printed on its largest row.
+- `unlabelled` is time under no fine label.
+- **Every fact about a row is in one parenthesis on its name:** `(2 parents)` when an operation is on
+  more than one row of the tree, each row its part under that parent, and `(2 of 3 runs)` when some
+  runs do not have it. A diff writes the same with `->` where the sides differ: `(3 parents, 3 -> 0
+  runs)`.
+- **Under multiple parents**, under the table, has each such operation, coarse or fine, over all of its
+  rows: `visit` 300 ms and 1,100 calls, under `plan` and `cleanup` together. It is sorted by Wall, so a
+  label spread over three rows ranks by its whole, and not by its largest part.
 - `and 1 more` folds the small rows into one row, with their calls and time in the same columns. Small rows with calls are drawn while they
   fit within six rows.
 

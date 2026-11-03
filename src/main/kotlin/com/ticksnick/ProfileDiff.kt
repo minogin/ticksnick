@@ -151,7 +151,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             if (coarseText.anyNoise) appendLine(NOISE_NOTE)
             perSide(before.coarseKeys(), after.coarseKeys())
             if (sharedRows.isNotEmpty()) {
-                appendLine("  Under more than one caller - all callers together:")
+                appendLine(SHARED_HEADING)
                 with(coarseText) { shared() }
             }
         }

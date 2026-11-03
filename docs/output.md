@@ -163,7 +163,7 @@ batch                                    1                         1.16 s       
   more than one row of the tree, each row its part under that parent, and `(2 of 3 runs)` when some
   runs do not have it. A diff writes the same with `->` where the sides differ: `(3 parents, 3 -> 0
   runs)`.
-- **Under multiple parents**, under the table, has each such operation, coarse or fine, over all of its
+- **Under multiple parents**, right under the tree and above the keys, has each such operation, coarse or fine, over all of its
   rows: `visit` 300 ms and 1,100 calls, under `plan` and `cleanup` together. It is sorted by Wall, so a
   label spread over three rows ranks by its whole, and not by its largest part.
 - `and 1 more` folds the small rows into one row, with their calls and time in the same columns. Small rows with calls are drawn while they

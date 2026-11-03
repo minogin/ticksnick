@@ -148,12 +148,12 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             appendLine()
             appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path$overRuns")
             with(coarseText) { rows() }
-            if (coarseText.anyNoise) appendLine(NOISE_NOTE)
-            perSide(before.coarseKeys(), after.coarseKeys())
             if (sharedRows.isNotEmpty()) {
                 appendLine(SHARED_HEADING)
                 with(coarseText) { shared() }
             }
+            if (coarseText.anyNoise) appendLine(NOISE_NOTE)
+            perSide(before.coarseKeys(), after.coarseKeys())
         }
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change$overRuns")

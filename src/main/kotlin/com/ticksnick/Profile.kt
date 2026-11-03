@@ -57,13 +57,13 @@ internal const val ONE_RUN_CAREFUL = "times: 1 run of '%s', no interval - the ne
 /** How many warnings the `CAREFUL` section prints before it counts the rest instead of listing them. */
 internal const val MAX_CAREFUL = 10
 
-/** The name column's narrowest width, in the coarse and in the fine table. */
-/** Over the block of operations under more than one parent, each over all of its rows. */
-internal const val SHARED_HEADING = "  Under multiple parents - each over all of them:"
+/** Over the block of operations under more than one parent, each over all of its rows, right under the tree. */
+internal const val SHARED_HEADING = "Under multiple parents - each over all of them"
 
 /** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
 internal const val FOLDED_ROWS = "and more"
 
+/** The name column's narrowest width, in the coarse and in the fine table. */
 internal const val COARSE_NAME_WIDTH = 30
 internal const val FINE_NAME_WIDTH = 26
 
@@ -565,14 +565,15 @@ class Profile internal constructor(internal val name: String, internal val files
                     (if (paused) "; a pause is charged to every operation it interrupted" else "") + overRuns
         )
         with(coarseText) { rows() }
-        coarseKeys().forEach { appendLine(it) }
         // An operation with more than one caller is a row under each, and those rows are its figures
         // under that caller alone. Its percentiles over everything are a different question - "how long
-        // does a parse take" - and they are answered here, once, only when the question exists.
+        // does a parse take" - and they are answered here, once, only when the question exists: right
+        // under the tree, before the keys, so the whole sits next to its parts.
         if (coarseTable.shared.isNotEmpty()) {
             appendLine(SHARED_HEADING)
             with(coarseText) { shared() }
         }
+        coarseKeys().forEach { appendLine(it) }
     }
 
     /** What the coarse table's rows need explained, each once and next to them. */
@@ -603,7 +604,7 @@ class Profile internal constructor(internal val name: String, internal val files
                     if (runs.size > 1) "; the mean of the runs that counted them" else ""
         )
         if (all.any { it.parents > 1 }) add(
-            "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is under the table, under multiple parents"
+            "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is in the block above"
         )
         if (runs.size > 1) {
             add("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")

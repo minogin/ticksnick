@@ -77,7 +77,7 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   `Mean`. A label called on a path and never sampled there gets a row with its calls.
 - `x parent` is now `Per parent`, and its figures have no `x`: `5,262`, and `3` for what was `x3.0`.
 - `in all, under N operations` is gone. A row on more than one parent says `(3 parents)`, and its whole
-  is a row of `Under multiple parents` under the table, coarse and fine sorted together by Wall.
+  is a row of `Under multiple parents` right under the tree, coarse and fine sorted together by Wall.
 - Diffs show the `-` rows under coarse rows, and a `Per parent` column. What a diff shows has the
   name and form it has in the report.
 - Each coarse execution costs a little more for every registered fine label, and the coarse floor

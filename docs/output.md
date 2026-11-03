@@ -287,8 +287,8 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
 - **No `+-` on what says how it ran:** a percentile is the mean of the runs' percentiles, Max is the
   largest of the runs, and the Long and Spread columns have none.
 - **Counted figures** print plainly when the runs agree, and `~` their mean when not: Executions, Per
-  parent, Calls and Allocated. The same work creates nearly the same bytes, so Allocated agrees when the
-  runs print the same.
+  parent and Calls. The same work gives the same counts, so `~` says the workload differed. Allocated is
+  counted too, but runs of the same work never create quite the same bytes: it is their mean, plainly.
 - **A row missing from some runs** says in how many it appears, `rare (2 of 3 runs)`, and its figures
   cover those runs. A fine label that was called in a run but never sampled counts as 0 in that
   run.

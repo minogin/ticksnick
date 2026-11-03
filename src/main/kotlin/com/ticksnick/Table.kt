@@ -143,8 +143,8 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
         Form.ONE_DECIMAL -> String.format(Locale.ROOT, "%.1f", v)
         Form.TWO_DECIMALS -> String.format(Locale.ROOT, "%.2f", v)
         Form.TIME -> duration(v)
-        // Counted, and the same work creates nearly the same bytes: the runs agree when they print the same.
-        Form.BYTES -> bytes(v).let { if (f.values.map(::bytes).distinct().size > 1) "~$it" else it }
+        // Counted, but runs of the same work never create quite the same bytes: their mean, plainly.
+        Form.BYTES -> bytes(v)
         Form.PARENT_SHARE -> parentShareText(v)
         Form.SHARE -> percent(v)
         Form.RUNNABLE_WAITING -> runnableSplit(v)

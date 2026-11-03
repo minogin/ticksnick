@@ -47,8 +47,8 @@ internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interv
 internal val PAUSED = Column("Paused", "Load", Form.TIME, interval = true, width = 10, zeroIsAbsent = true)
 internal val COARSE_WAITING = Column("Runnable / Waiting", "Load", Form.RUNNABLE_WAITING, interval = true, width = 18)
 internal val MEAN = Column("Mean", "Load", Form.TIME, interval = true, width = 10)
-internal val ALLOCATED = Column("Total", "Allocated", Form.BYTES, interval = true, width = 10)
-internal val ALLOCATED_PER_EXECUTION = Column("Per execution", "Allocated", Form.BYTES, interval = true, width = 13)
+internal val ALLOCATED = Column("Total", "Allocated", Form.BYTES, interval = false, width = 10)
+internal val ALLOCATED_PER_EXECUTION = Column("Per execution", "Allocated", Form.BYTES, interval = false, width = 13)
 internal val P50 = Column("p50", "Long", Form.TIME, interval = false, width = 10)
 internal val P90 = Column("p90", "Long", Form.TIME, interval = false, width = 10)
 internal val P99 = Column("p99", "Long", Form.TIME, interval = false, width = 10)
@@ -142,7 +142,8 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
         Form.ONE_DECIMAL -> String.format(Locale.ROOT, "%.1f", v)
         Form.TWO_DECIMALS -> String.format(Locale.ROOT, "%.2f", v)
         Form.TIME -> duration(v)
-        Form.BYTES -> bytes(v)
+        // Counted, and the same work creates nearly the same bytes: the runs agree when they print the same.
+        Form.BYTES -> bytes(v).let { if (f.values.map(::bytes).distinct().size > 1) "~$it" else it }
         Form.PARENT_SHARE -> parentShareText(v)
         Form.SHARE -> percent(v)
         Form.RUNNABLE_WAITING -> runnableSplit(v)

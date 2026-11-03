@@ -39,8 +39,9 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   the `Sampled` line says how many samples there are.
 - `Execs` is `Long calls`, and `Per call` is `Thread-time per call` in every table.
 - `Allocated` is a group of two columns: `Total`, which adds up down the tree, and `Per execution`.
-- `+-` is on what says how much, `Runnable / Waiting` and `Allocated` included, and not on percentiles,
-  `Max`, or the `Long` and `Spread` groups.
+- `+-` is on what says how much, `Runnable / Waiting` included, and not on percentiles, `Max`, or the
+  `Long` and `Spread` groups. `Allocated` is counted, as `Executions` is: plain when the runs agree, `~`
+  their mean when not.
 - A change's interval is in percentage points: `-22% +-2.2 pp`.
 - `faster`, `slower` and `unclear` are gone. A change that could be noise is marked `?`, held to 5%
   divided by the number of changes in the diff, with a note under the table.

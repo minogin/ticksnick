@@ -172,9 +172,9 @@ class AllocationsTest {
         }
         val runs = TickSnick.load(before)
         val across = runs.render()
-        assertTrue(across.lines().any { it.startsWith("alloc.outer") && "3.00 MB +-" in it }, across)
+        assertTrue(across.lines().any { it.startsWith("alloc.outer") && "3.00 MB" in it && "MB +-" !in it }, across)
         val row = diffRow(TickSnick.diff(runs, TickSnick.load(after)), "alloc.outer")
-        assertTrue("3.00 MB +-" in row[0] && "3.00 MB +-" in row[1], row.toString())
+        assertTrue("3.00 MB" in row[0] && "3.00 MB" in row[1] && "MB +-" !in row[0], row.toString())
     }
 
     // --- the other ways into a coarse execution ------------------------------------------

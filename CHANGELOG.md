@@ -38,6 +38,7 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - The fine table has no `Trust` group: `Hits` and `Noise` are gone. The `+-` includes sampling noise, and
   the `Sampled` line says how many samples there are.
 - `Execs` is `Long calls`, and `Per call` is `Thread-time per call` in every table.
+- `Allocated` is a group of two columns: `Total`, which adds up down the tree, and `Per execution`.
 - `+-` is on what says how much, `Runnable / Waiting` and `Allocated` included, and not on percentiles,
   `Max`, or the `Long` and `Spread` groups.
 - A change's interval is in percentage points: `-22% +-2.2 pp`.

@@ -47,14 +47,16 @@ internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interv
 internal val PAUSED = Column("Paused", "Load", Form.TIME, interval = true, width = 10, zeroIsAbsent = true)
 internal val COARSE_WAITING = Column("Runnable / Waiting", "Load", Form.RUNNABLE_WAITING, interval = true, width = 18)
 internal val MEAN = Column("Mean", "Load", Form.TIME, interval = true, width = 10)
-internal val ALLOCATED = Column("Allocated", "Load", Form.BYTES, interval = true, width = 10)
+internal val ALLOCATED = Column("Total", "Allocated", Form.BYTES, interval = true, width = 10)
+internal val ALLOCATED_PER_EXECUTION = Column("Per execution", "Allocated", Form.BYTES, interval = true, width = 13)
 internal val P50 = Column("p50", "Long", Form.TIME, interval = false, width = 10)
 internal val P90 = Column("p90", "Long", Form.TIME, interval = false, width = 10)
 internal val P99 = Column("p99", "Long", Form.TIME, interval = false, width = 10)
 internal val MAX = Column("Max", "Long", Form.TIME, interval = false, width = 10, largest = true)
 
 internal val COARSE_COLUMNS = listOf(
-    EXECUTIONS, PER_PARENT, PARALLEL, WALL, PARENT_SHARE, PAUSED, COARSE_WAITING, MEAN, ALLOCATED, P50, P90, P99, MAX,
+    EXECUTIONS, PER_PARENT, PARALLEL, WALL, PARENT_SHARE, PAUSED, COARSE_WAITING, MEAN, ALLOCATED, ALLOCATED_PER_EXECUTION,
+    P50, P90, P99, MAX,
 )
 
 internal val THREAD_SHARE = Column("Thread-time%", "Load", Form.SHARE, interval = true, width = 14)

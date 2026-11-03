@@ -586,7 +586,7 @@ class CoarseTest {
         val lines = report(listOf(query), labelled = 3000, tree = listOf(node(query, fine = fine)), allocations = true).render().lines()
 
         val head = lines.first { it.startsWith("Coarse operation") }
-        assertTrue("Allocated" in head, head)
+        assertTrue("Per execution" in head, head)
         val row = lines.first { it.trimStart().startsWith("- fine") }
         assertEquals(head.indexOf("% parent") + "% parent".length, row.trimEnd().length, "out of line: $row")
     }

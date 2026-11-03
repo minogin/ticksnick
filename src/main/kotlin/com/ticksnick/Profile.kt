@@ -216,9 +216,9 @@ class Profile internal constructor(internal val name: String, internal val files
     /** Whether any run here counted allocated bytes. */
     internal val allocations: Boolean get() = runs.any { it.allocations }
 
-    /** Bytes per execution of [m], over the runs that counted them. See [Run.allocatedPerExecution]. */
-    internal fun allocated(m: Matched): Estimate =
-        Estimate(m.present.filter { runs[it].allocations }.map { runs[it].allocatedPerExecution(m.nodes[it]!!) }.filter { !it.isNaN() })
+    /** Bytes allocated under [m], [f] of each run that counted them. See [Run.allocatedTotal]. */
+    private fun allocated(m: Matched, f: (Run, CoarseNode) -> Double): Estimate =
+        Estimate(m.present.filter { runs[it].allocations }.map { f(runs[it], m.nodes[it]!!) }.filter { !it.isNaN() })
 
     /** One figure of each run. */
     private fun over(f: (Run) -> Double) = Estimate(runs.map(f))
@@ -337,7 +337,8 @@ class Profile internal constructor(internal val name: String, internal val files
                 },
                 PAUSED to overAll { _, n -> n.pausedNanos.toDouble() },
                 MEAN to meanSpan(m),
-                ALLOCATED to allocated(m),
+                ALLOCATED to allocated(m) { r, n -> r.allocatedTotal(n).toDouble() },
+                ALLOCATED_PER_EXECUTION to allocated(m) { r, n -> r.allocatedPerExecution(n) },
                 P50 to timed { it.percentileNanos(0.50) },
                 P90 to timed { it.percentileNanos(0.90) },
                 P99 to timed { it.percentileNanos(0.99) },
@@ -419,9 +420,10 @@ class Profile internal constructor(internal val name: String, internal val files
                     WALL to of { i, _, n -> n.sumOf { wallOf(i, it) } },
                     PAUSED to of { _, _, n -> n.sumOf { it.pausedNanos }.toDouble() },
                     MEAN to of { _, c, _ -> c.meanSpanNanos },
-                    ALLOCATED to Estimate(
+                    ALLOCATED to Estimate(with.filter { runs[it].allocations }.map { i -> nodes[i][name]!!.sumOf { runs[i].allocatedTotal(it) }.toDouble() }),
+                    ALLOCATED_PER_EXECUTION to Estimate(
                         with.filter { runs[it].allocations }.map { i ->
-                            nodes[i][name]!!.sumOf { n -> n.flatten().sumOf { it.allocated } }.toDouble() / runs[i].coarse.first { it.name == name }.count
+                            nodes[i][name]!!.sumOf { runs[i].allocatedTotal(it) }.toDouble() / runs[i].coarse.first { it.name == name }.count
                         }
                     ),
                     P50 to of { _, c, _ -> c.percentileNanos(0.50) },
@@ -450,7 +452,7 @@ class Profile internal constructor(internal val name: String, internal val files
             under.maxBy { wall(it) }.inAll = InAll(under.sumOf { wall(it) }, calls.takeIf { null !in it }?.sumOf { it!! }, under.size)
         }
         val split = runs.any { r -> r.coarseTree.any { t -> t.flatten().any { r.ownRowsOf(it) == null && r.splitRowsOf(it).isNotEmpty() } } }
-        Table(COARSE_COLUMNS.filter { it !== ALLOCATED || allocations }, rows, runs.size, WALL, sharedRows(), splitLeaves = split)
+        Table(COARSE_COLUMNS.filter { it.group != ALLOCATED.group || allocations }, rows, runs.size, WALL, sharedRows(), splitLeaves = split)
     }
 
     /** **The fine table**: fine and coarse operations together, each by its own time, heaviest first. */
@@ -564,7 +566,8 @@ class Profile internal constructor(internal val name: String, internal val files
                     " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
         )
         if (allocations) add(
-            "  Allocated: bytes per execution, its coarse children and every thread under it included; counted, not sampled" +
+            "  Allocated: bytes created under the row, its coarse children and every thread under it included, in all and per execution;" +
+                    " counted, not sampled; what the collector has to clear, not memory held" +
                     if (runs.size > 1) "; the mean of the runs that counted them" else ""
         )
         if (all.any { it.inAll != null }) add(

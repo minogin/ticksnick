@@ -138,8 +138,9 @@ class AllocationsTest {
 
         val lines = a.render().lines()
         val head = lines.first { it.startsWith("Coarse operation") }
-        val end = head.indexOf("Allocated") + "Allocated".length
-        assertEquals(' ', head[head.indexOf("Allocated") - 1])
+        val end = head.indexOf("Per execution") + "Per execution".length
+        assertEquals(' ', head[head.indexOf("Per execution") - 1])
+        assertTrue(lines[lines.indexOf(head) - 1].contains("Allocated"), "the group has no name")
         val row = lines.dropWhile { it != head }.first { it.startsWith("alloc.outer ") }
         assertEquals("3.00 MB", row.substring(end - 7, end), row)
 
@@ -250,7 +251,7 @@ class AllocationsTest {
         assertEquals(0L, p.node("alloc.outer").allocated)
         fun checked(text: String) {
             assertTrue("CAREFUL       allocations: this JVM cannot report allocated bytes" in text, text)
-            assertFalse("Allocated" in text.lines().first { it.startsWith("Coarse operation") }, text)
+            assertFalse("Per execution" in text.lines().first { it.startsWith("Coarse operation") }, text)
         }
         checked(p.render())
         val loaded = Run.load(p.save(Files.createTempDirectory("alloc-missing")))
@@ -281,7 +282,7 @@ class AllocationsTest {
         val lines = Profiler.stop().render().lines()
 
         val head = lines.first { it.startsWith("Coarse operation") }
-        val end = head.indexOf("Allocated") + "Allocated".length
+        val end = head.indexOf("Per execution") + "Per execution".length
         val block = lines.indexOfFirst { "Under more than one caller" in it }
         val row = lines.drop(block).first { it.startsWith("  alloc.inner") }
         assertEquals("2.00 MB", row.substring(end - 7, end), row)

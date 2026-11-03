@@ -1362,7 +1362,13 @@ class Run internal constructor(
      * bytes count, since each thread's lands on the path it ran on and the rows add up here.
      */
     internal fun allocatedPerExecution(n: CoarseNode): Double =
-        if (n.count == 0L) Double.NaN else n.flatten().sumOf { it.allocated }.toDouble() / n.count
+        if (n.count == 0L) Double.NaN else allocatedTotal(n).toDouble() / n.count
+
+    /**
+     * Bytes allocated under [n] in all its executions, its coarse children included, on every thread
+     * that ran under it. A parent's is its own and its children's, exactly: nothing is estimated.
+     */
+    internal fun allocatedTotal(n: CoarseNode): Long = n.flatten().sumOf { it.allocated }
 
     /**
      * Coarse labels on something too small to carry a context.

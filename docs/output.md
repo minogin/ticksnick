@@ -170,11 +170,13 @@ Counting the calls per path adds to each coarse execution a little for every reg
 label, so the shortest operation a coarse label suits rises with them: about 1 us with 20 fine
 labels, 1.7 us with 250. The report's floor check uses the run's own number.
 
-**`Allocated`** appears only in a run started with `allocations = true`: the bytes allocated per
-execution, with its coarse children and every thread that ran under it. It is counted, not sampled.
-It sits beside `Mean` and is per execution for the same reason: it can be compared between runs of
-different sizes. It is bytes allocated, not memory held: an operation can allocate gigabytes and
-hold none of it. Each execution includes about 100 bytes of the label's own, and the first execution
+**`Allocated`** appears only in a run started with `allocations = true`: the bytes created under the
+row, with its coarse children and every thread that ran under it, counted, not sampled. **Total** is all
+its executions together, so it follows the tree as `Wall` does: a parent's is its own and its children's,
+exactly. **Per execution** is that over `Executions`, which compares runs of different sizes, as `Mean`
+does. It is bytes allocated, not memory held: an operation can allocate gigabytes and hold none of it.
+What it measures is the collector's work - a young collection comes every time the young generation
+fills - and not how much memory the program needs. Each execution includes about 100 bytes of the label's own, and the first execution
 on a path a few KB more, which matters only for an operation that allocates very little. A thread
 counts from its first coarse boundary in the session, so an execution already open at `start` misses
 what it allocates up to there, and one still open at `stop` misses what came after its last.

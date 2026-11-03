@@ -172,9 +172,11 @@ batch                                    1                         1.16 s       
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns
 when only one did.
 
-Counting the calls per path adds to each coarse execution a little for every registered fine
-label, so the shortest operation a coarse label suits rises with them: about 1 us with 20 fine
-labels, 1.7 us with 250. The report's floor check uses the run's own number.
+A coarse label suits an operation from 2 us: there TickSnick's cost, up to 100 ns an execution, is at
+most 5% of it. Counting the calls per path adds up to 0.5 ns for every registered fine label, and
+`Allocated` up to 30 ns, so the floor rises with them: 2.2 us with 20 fine labels, 2.8 us with
+`Allocated` too, 4.5 us with 250 labels. An operation under the floor is still measured; a warning says
+how much of its time TickSnick may be, and what the floor was made of.
 
 **`Allocated`** appears only in a run started with `allocations = true`: the bytes created under the
 row, with its coarse children and every thread that ran under it, counted, not sampled. **Total** is all

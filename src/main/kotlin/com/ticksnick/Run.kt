@@ -27,16 +27,19 @@ internal const val OWN_ROW_MIN = 0.005
 internal const val ASKED_STEP_TOLERANCE = 0.05
 
 /**
- * What one coarse execution costs with no fine label registered: the context, two `nanoTime` calls
- * and the accumulate. See [coarseContextNanos].
+ * The most one coarse execution may cost with nothing opted into: no fine label registered and no
+ * allocated bytes counted - the context, two `nanoTime` calls and the accumulate. A budget, not a
+ * measurement: the coarse floor is this over [COARSE_MAX_OVERHEAD], 2 us, and it stays there however
+ * the hook changes, so a dearer hook has to fit under it rather than move it. What a session opts
+ * into adds its own price. See [coarseContextNanos].
  */
-internal const val COARSE_BASE_NANOS = 45.0
+internal const val COARSE_BUDGET_NANOS = 100.0
 
 /**
- * What each registered fine label adds to a coarse execution: the pass that moves its calls onto
- * the path they ran under, at every boundary. See `OpSlot.flushCalls`.
+ * The most each registered fine label may add to a coarse execution: the pass that moves its calls
+ * onto the path they ran under, at every boundary. See `OpSlot.flushCalls`.
  */
-internal const val COARSE_PER_FINE_LABEL_NANOS = 0.17
+internal const val COARSE_PER_FINE_LABEL_NANOS = 0.5
 
 /**
  * The most a coarse label may cost of the operation it wraps: about what two runs of the same code
@@ -44,8 +47,8 @@ internal const val COARSE_PER_FINE_LABEL_NANOS = 0.17
  */
 internal const val COARSE_MAX_OVERHEAD = 0.05
 
-/** What counting allocated bytes adds to a coarse execution, when a session asks for it: two reads of the thread's total. */
-internal const val COARSE_ALLOCATIONS_NANOS = 27.0
+/** The most counting allocated bytes may add to a coarse execution, when a session asks for it: two reads of the thread's total. */
+internal const val COARSE_ALLOCATIONS_NANOS = 30.0
 
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01
@@ -122,8 +125,24 @@ internal fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): Str
     name, calls, duration(upperNanos), Run.FLOOR_NANOS, name
 )
 
-/** What one coarse execution costs with [fineLabels] fine labels registered. */
-internal fun coarseContextNanos(fineLabels: Int): Double = COARSE_BASE_NANOS + COARSE_PER_FINE_LABEL_NANOS * fineLabels
+/** The most one coarse execution may cost with [fineLabels] fine labels registered. */
+internal fun coarseContextNanos(fineLabels: Int): Double = COARSE_BUDGET_NANOS + COARSE_PER_FINE_LABEL_NANOS * fineLabels
+
+/**
+ * What the flat coarse floor is made of, for the warning about an operation under it: ` (2.00 us,
+ * + 600 ns for Allocated, + 200 ns for 20 fine labels)`, or nothing when nothing is opted into.
+ */
+internal fun coarseFloorParts(fineLabels: Int, allocations: Boolean): String {
+    val added = buildList {
+        if (allocations) add("+ ${duration(COARSE_ALLOCATIONS_NANOS / COARSE_MAX_OVERHEAD)} for Allocated")
+        if (fineLabels > 0) add(
+            "+ ${duration(COARSE_PER_FINE_LABEL_NANOS * fineLabels / COARSE_MAX_OVERHEAD)} for $fineLabels fine label" +
+                    if (fineLabels == 1) "" else "s"
+        )
+    }
+    if (added.isEmpty()) return ""
+    return " (" + (listOf(duration(COARSE_BUDGET_NANOS / COARSE_MAX_OVERHEAD)) + added).joinToString(", ") + ")"
+}
 
 /**
  * The shortest a coarse operation may be, given how much of the run it holds and what one execution
@@ -152,7 +171,9 @@ internal fun coarseFloorNanos(share: Double, contextNanos: Double): Double =
  * while an operation that fails only the share condition is big enough to measure and too big a
  * fraction of the run to afford measuring.
  */
-internal fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double): String {
+internal fun coarseTooSmallMessage(
+    name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double, parts: String = "",
+): String {
     // Which of the two conditions bound decides what the reader is being told, and they are
     // different complaints with different remedies. Saying "the number would describe the
     // instrument" about an operation whose per-execution overhead is a comfortable 4% is simply
@@ -166,18 +187,20 @@ internal fun coarseTooSmallMessage(name: String, count: Long, meanNanos: Double,
     val overhead = contextNanos / meanNanos * 100
     val why = if (shareBound) String.format(
         Locale.ROOT,
-        "accurate per execution (%.1f%% overhead), but %,d contexts at %.0f ns are over 1%% of the run",
+        "accurate per execution (up to %.1f%% overhead), but %,d coarse executions at up to %.0f ns each are over 1%% of the run",
         overhead, count, contextNanos
     ) else String.format(
         Locale.ROOT,
-        "a context costs about %.0f ns, which is %.0f%% of an operation this size",
+        "TickSnick may add up to %.0f ns to a coarse execution here, %.0f%% of an operation this size",
         contextNanos, overhead
     )
+    // What the floor is made of only where the flat floor bound: the share condition's number is not
+    // a sum of those parts.
     return String.format(
         Locale.ROOT,
-        "%s: %,d coarse executions of %s, a coarse label needs %s here - register it fine, registerFine(\"%s\"), " +
+        "%s: %,d coarse executions of %s, a coarse label needs %s here%s - register it fine, registerFine(\"%s\"), " +
                 "and keep the op(...) calls; or put the coarse label around a batch of these%n%s",
-        name, count, duration(meanNanos), duration(requiredNanos), name, why
+        name, count, duration(meanNanos), duration(requiredNanos), if (shareBound) "" else parts, name, why
     )
 }
 
@@ -1328,10 +1351,10 @@ class Run internal constructor(
      * The shortest [c] was allowed to be, from the tier boundary. See [coarseFloorNanos].
      *
      * The share is **reduced by its own sampling noise** before the share condition is applied.
-     * `d ≥ 4 µs × share` only binds above about 20%, so an operation near that line could be pushed
+     * `d ≥ 10 µs × share` only binds above about 20%, so an operation near that line could be pushed
      * over it by counting error alone — and this check prints an accusation. Taking the share a
      * standard error low means an operation is told off for holding too much of the run only when it
-     * confidently does. The flat 800 ns floor needs no such treatment, which is the point of the
+     * confidently does. The flat 2 µs floor needs no such treatment, which is the point of the
      * whole tier: **the duration here is measured, not inferred.**
      */
     internal fun coarseFloorNanosOf(c: CoarseStat): Double {
@@ -1714,7 +1737,10 @@ class Run internal constructor(
             // because the duration it compares is measured rather than inferred — see
             // coarseTooSmall.
             for (c in coarseTooSmall()) add(
-                coarseTooSmallMessage(c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos)
+                coarseTooSmallMessage(
+                    c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos,
+                    coarseFloorParts(operations.size, allocations),
+                )
             )
         }
 

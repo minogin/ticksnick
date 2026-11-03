@@ -513,12 +513,19 @@ class CoarseTest {
         assertEquals(4000.0, coarseFloorNanos(1.0, 40.0), 1e-9)
     }
 
-    /** Every registered fine label adds to each coarse execution, so the floor rises with them. */
+    /** The floor comes from the budget, not from a measurement, so it is a fixed 2 us with nothing opted into. */
+    @Test
+    fun `the floor is 2 us with nothing opted into`() {
+        assertEquals(2_000.0, coarseFloorNanos(0.01, coarseContextNanos(0)), 1e-9)
+        assertEquals("", coarseFloorParts(0, false))
+    }
+
+    /** Every registered fine label adds its price to each coarse execution, so the floor rises with them. */
     @Test
     fun `the floor rises with the fine labels registered`() {
-        val few = coarseFloorNanos(0.01, coarseContextNanos(1))
-        val many = coarseFloorNanos(0.01, coarseContextNanos(250))
-        assertTrue(few < 1_000.0 && many > 1_500.0, "few $few, many $many")
+        assertEquals(2_010.0, coarseFloorNanos(0.01, coarseContextNanos(1)), 1e-9)
+        assertEquals(4_500.0, coarseFloorNanos(0.01, coarseContextNanos(250)), 1e-9)
+        assertEquals(" (2.00 us, + 600 ns for Allocated, + 200 ns for 20 fine labels)", coarseFloorParts(20, true))
     }
 
     @Test
@@ -549,17 +556,17 @@ class CoarseTest {
      */
     @Test
     fun `the share condition does not accuse on counting noise alone`() {
-        // 2.8 us apiece, 25 hits out of 36 labelled: a 69.4% share, so the raw rule would demand
-        // 3.1 us and accuse. 25 hits is a 20% standard error, and at 55.6% the rule demands 2.5 us
+        // 6.0 us apiece, 25 hits out of 36 labelled: a 69.4% share, so the raw rule would demand
+        // 7.0 us and accuse. 25 hits is a 20% standard error, and at 55.6% the rule demands 5.6 us
         // and lets it go. The operation is not exonerated — its share is simply not established.
-        val noisy = stat(count = 400, sumNanos = 1_120_000, hits = 25, running = 25)
+        val noisy = stat(count = 400, sumNanos = 2_400_000, hits = 25, running = 25)
         assertTrue(
             report(coarse = listOf(noisy), labelled = 36).coarseTooSmall().isEmpty(),
             "accused an operation whose share is not established"
         )
         // The same operation with the same share, measured a thousand times over, is accused —
         // it is the uncertainty that spared it, not the share being innocent.
-        val settled = stat(count = 400_000, sumNanos = 1_120_000_000, hits = 25_000, running = 25_000)
+        val settled = stat(count = 400_000, sumNanos = 2_400_000_000, hits = 25_000, running = 25_000)
         assertEquals(
             listOf("req"), report(coarse = listOf(settled), labelled = 36_000).coarseTooSmall().map { it.name }
         )
@@ -567,15 +574,20 @@ class CoarseTest {
 
     // --- the Allocated column ---------------------------------------------------------
 
-    /** 1.2 us clears 20 x 45 ns and not 20 x (45 + 27) ns: the same operation, the same run, one setting apart. */
+    /** 2.3 us clears 20 x 100.5 ns and not 20 x (100.5 + 30) ns: the same operation, the same run, one setting apart. */
     @Test
     fun `counting allocations flags an operation the floor would otherwise pass`() {
-        val c = stat(count = 1_000_000, sumNanos = 1_200_000_000, hits = 1_000, running = 1_000)
+        val c = stat(count = 1_000_000, sumNanos = 2_300_000_000, hits = 1_000, running = 1_000)
         assertTrue(report(listOf(c)).coarseTooSmall().isEmpty())
 
         val counted = report(listOf(c), allocations = true)
         assertEquals(listOf("req"), counted.coarseTooSmall().map { it.name })
-        assertTrue("a context costs about 72 ns" in counted.render(), counted.render())
+        val text = counted.render()
+        assertTrue("TickSnick may add up to 131 ns to a coarse execution here" in text, text)
+        assertTrue(
+            "needs 2.61 us here (2.00 us, + 600 ns for Allocated, + 10.0 ns for 1 fine label)" in text,
+            "the floor does not say what it is made of: $text"
+        )
     }
 
     /** A profile saved without own time splits a leaf by its samples, a row of its own format. */

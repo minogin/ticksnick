@@ -103,6 +103,10 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   taken its starting counts; a session shorter than the sampler thread's start-up counted no calls.
 - A long operation name no longer pushes its row out of line. Each table's name column grows to the
   longest name in it, and the rules grow with it. Names are not cut.
+- A fine label no longer shows in a coarse row's own time where it never ran. The sampler read a
+  thread's fine label and its coarse execution one after the other, and a thread that closed both in
+  between was charged to the parent: a row with no calls, and an extra parent in `(N parents)`. The
+  two are now read as one instant.
 
 ## 0.5.0 - 2026-10-27
 

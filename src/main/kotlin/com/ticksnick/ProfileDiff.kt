@@ -66,11 +66,15 @@ internal fun signedPercent(f: Double): String {
     return if (abs(p) < 9.95) String.format(Locale.ROOT, "%s%.1f%%", sign, abs(p)) else String.format(Locale.ROOT, "%s%.0f%%", sign, abs(p))
 }
 
-/** A change's interval, in percentage points: `+-2.2 pp`, nothing where there is none. */
-internal fun pointsHalf(points: Double): String = when {
+/**
+ * A change's interval, in points of the change, with the change's [unit]: `+-2.2 pp` for a share's,
+ * `+-119%` for a relative one. Written after the change without its unit, `-22 +-119%`, so the unit is
+ * said once. Nothing where there is none.
+ */
+internal fun pointsHalf(points: Double, unit: String): String = when {
     points.isNaN() -> ""
-    points < 9.95 -> String.format(Locale.ROOT, "+-%.1f pp", points)
-    else -> String.format(Locale.ROOT, "+-%.0f pp", points)
+    points < 9.95 -> String.format(Locale.ROOT, "+-%.1f%s", points, unit)
+    else -> String.format(Locale.ROOT, "+-%.0f%s", points, unit)
 }
 
 /**
@@ -116,9 +120,11 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     private fun header(key: String, b: Estimate, a: Estimate, suffix: String = ""): String {
         val c = Change(b, a)
         val sign = if (c.delta < 0) "-" else "+"
-        val absolute = sign + duration(abs(c.delta)) + if (c.half.isNaN()) "" else " +- " + duration(c.half)
+        val absolute = if (c.half.isNaN()) sign + duration(abs(c.delta)) else durationPlusMinus(c.delta, c.half, signed = true)
         headerNoise = headerNoise || c.isNoise(changes)
-        val relative = (signedPercent(c.relative) + (if (c.isNoise(changes)) "?" else "") + " " + pointsHalf(c.relativeHalf * 100)).trimEnd()
+        // The change without its unit, the interval with it, and the `?` last: `-27 +-67%?`.
+        val relative = if (c.relativeHalf.isNaN()) signedPercent(c.relative)
+        else signedPercent(c.relative).removeSuffix("%") + " " + pointsHalf(c.relativeHalf * 100, "%") + (if (c.isNoise(changes)) "?" else "")
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 

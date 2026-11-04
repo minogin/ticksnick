@@ -126,7 +126,7 @@ class ProfileDiffTest {
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
-            assertTrue("11.0 s -> 8.00 s" in header && "-27%" in header && "+-" in header && "per execution" in header, header)
+            assertTrue("11.0 s -> 8.00 s" in header && Regex("""-27 \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             assertTrue("?" in diffRow(text, "same")[2] && NOISE_NOTE in text, text)
             assertTrue("CAREFUL" !in text, text)

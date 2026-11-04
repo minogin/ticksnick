@@ -44,6 +44,9 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - A change's interval is in percentage points: `-22% +-2.2 pp`.
 - `faster`, `slower` and `unclear` are gone. A change that could be noise is marked `?`, held to 5%
   divided by the number of changes in the diff, with a note under the table.
+- A figure and its `+-` in one unit say the unit once, at the right: `52 +-0.4%`, `117 +-0.444 s
+  (0.4%)`, and in a diff `-22 +-2.2%` and `+5.3 +-0.6 pp`. A `+-` that is a percent of its figure
+  stays as it was: `42.5 s +-1.1%`. A change's `?` goes last: `-7.7 +-9.5%?`.
 
 ### Warnings
 

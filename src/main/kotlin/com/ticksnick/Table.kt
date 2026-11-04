@@ -9,11 +9,13 @@ internal const val STAR = " *"
 /** The smallest change of a share a diff can print, in percentage points. */
 internal const val MIN_SHARE_CHANGE = 0.05
 
-/** The width of a `+-` beside a figure, `+-0.4 pp`, its separating space included. */
-internal const val INTERVAL_COLUMN = 9
+/** The width of a `+-` beside a figure, its separating space included: the widest is a change's, `+-4.7 pp?`. */
+internal const val INTERVAL_COLUMN = 10
 
 /** How a column's figures read. Text only: a [Row] holds raw values, so that another writer can take them. */
-internal enum class Form { COUNT, PER_PARENT, WHOLE, ONE_DECIMAL, TWO_DECIMALS, TIME, BYTES, PARENT_SHARE, SHARE, RUNNABLE_WAITING }
+internal enum class Form(val percentage: Boolean = false) {
+    COUNT, PER_PARENT, WHOLE, ONE_DECIMAL, TWO_DECIMALS, TIME, BYTES, PARENT_SHARE(true), SHARE(true), RUNNABLE_WAITING(true)
+}
 
 /**
  * **One column of a table, for every report and every diff.** A figure added here is in all of them,
@@ -228,9 +230,14 @@ private class Layout(
 
     private val headings: List<String> = listOf(heading) + columns.map { cell(it, if (it === sortedBy) it.name + " v" else it.name, "") }
 
-    /** One figure and its `+-`, sized for its column. */
-    fun cell(c: Column, value: String, interval: String): String =
-        if (hasInterval(c)) value.padStart(c.width) + " " + interval.padEnd(INTERVAL_COLUMN - 1) else value
+    /**
+     * One figure and its `+-`, sized for its column. A percentage with an interval leaves its unit to
+     * the interval, `57 +-0.3%`, so it is said once; without one it keeps it, `57%`.
+     */
+    fun cell(c: Column, value: String, interval: String): String {
+        val figure = if (interval.isNotEmpty() && c.form.percentage) value.replace("%", "") else value
+        return if (hasInterval(c)) figure.padStart(c.width) + " " + interval.padEnd(INTERVAL_COLUMN - 1) else figure
+    }
 
     /** One line of the table, with nothing after its last figure: no bar closes an empty group. */
     fun line(cells: List<String>): String {
@@ -453,9 +460,12 @@ internal class DiffText(
         if (share && abs((a - b) * scale) < MIN_SHARE_CHANGE) return layout.cell(c, "=", "")
         val value = if (share) String.format(Locale.ROOT, "%+.1f pp", (a - b) * scale) else signedPercent((a - b) / b)
         if (!c.interval) return value
+        val half = if (share) change.half * scale else change.relativeHalf * 100
+        if (half.isNaN()) return layout.cell(c, value, "")
         val isNoise = noise(change)
         anyNoise = anyNoise || isNoise
-        val half = if (share) change.half * scale else change.relativeHalf * 100
-        return layout.cell(c, value + if (isNoise) "?" else "", pointsHalf(half))
+        // The change without its unit, the interval with it, and the `?` last: `-22 +-119%?`, `+4.6 +-4.7 pp?`.
+        val unit = if (share) " pp" else "%"
+        return layout.cell(c, value.removeSuffix(unit), pointsHalf(half, unit) + if (isNoise) "?" else "")
     }
 }

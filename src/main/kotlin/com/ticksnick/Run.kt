@@ -281,12 +281,35 @@ internal fun isSuspect(hits: Long, stuckHits: Long, stuckInstances: Long, machin
  */
 internal fun duration(nanos: Double): String {
     if (nanos.isNaN()) return "-"
+    val unit = durationUnitOf(nanos)
+    return threeSignificantString(nanos / unit.scale) + " " + unit.name
+}
+
+/** The unit [duration] prints [nanos] in. */
+private fun durationUnitOf(nanos: Double): DurationUnit {
     var i = 0
     while (i + 1 < DURATION_UNITS.size && nanos >= DURATION_UNITS[i + 1].from) i++
     // Rounding can reach the next unit - 999.7 ms is three significant digits of 1.00 s, not
     // "1000 ms" - so the choice is made again against the value as it will actually print.
     if (i + 1 < DURATION_UNITS.size && threeSignificant(nanos / DURATION_UNITS[i].scale) >= 1000.0) i++
-    return threeSignificantString(nanos / DURATION_UNITS[i].scale) + " " + DURATION_UNITS[i].name
+    return DURATION_UNITS[i]
+}
+
+/**
+ * A duration and its `+-` in one unit, the larger one's, said once at the right: `9.15 +-2.59 s`,
+ * `-0.380 +-6.17 s`. [value] may be negative, a change; [signed] puts `+` on a positive one.
+ */
+internal fun durationPlusMinus(value: Double, half: Double, signed: Boolean = false): String {
+    val unit = durationUnitOf(maxOf(abs(value), half))
+    val sign = if (value < 0) "-" else if (signed) "+" else ""
+    return sign + significant(abs(value) / unit.scale) + " +-" + significant(half / unit.scale) + " " + unit.name
+}
+
+/** Three significant digits, below 1 as well as above it: `0.444`, `0.00128`, `9.15`, `117`. */
+private fun significant(v: Double): String = when {
+    v == 0.0 -> "0"
+    v >= 1.0 -> threeSignificantString(v)
+    else -> String.format(Locale.ROOT, "%." + (2 - kotlin.math.floor(kotlin.math.log10(v)).toInt()) + "f", v)
 }
 
 /** One rung: the value it takes over at, what to divide by, and what to call it. */

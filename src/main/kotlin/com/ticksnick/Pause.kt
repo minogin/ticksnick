@@ -254,9 +254,8 @@ internal class Pauses internal constructor(
  * left off rather than capped.
  */
 internal fun wallLine(wall: Estimate, active: Estimate, paused: Estimate, pauses: Long, longestNanos: Long): String {
-    fun both(e: Estimate) = if (e.half.isNaN()) "" else " " + plusMinusBoth(e)
     fun pm(e: Estimate) = if (e.half.isNaN()) "" else " " + plusMinus(e)
-    val head = "${duration(wall.mean)}${both(wall)} = ${duration(active.mean)}${pm(active)} active + "
+    val head = "${durationWithInterval(wall)} = ${duration(active.mean)}${pm(active)} active + "
     if (paused.mean == 0.0) return head + "0 paused"
     val counts = if (longestNanos <= paused.mean) " in ${Run.plural(pauses, "pause")}, longest ${duration(longestNanos.toDouble())}" else ""
     return "$head${duration(paused.mean)}${pm(paused)} paused (${percent(paused.mean * 100 / wall.mean)})$counts"

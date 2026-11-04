@@ -44,9 +44,9 @@ class ProfileTest {
             assertTrue("6.22 s  5.96 s  5.90 s" in text, "the first run's batches, in order: $text")
             val row = text.lines().first { it.startsWith("runBatch") }
             // The runs' mean batches are 6.03, 6.50 and 7.16 s: 6.56 s.
-            assertTrue("6.56 s" in row && "+-" in row, row)
+            assertTrue("6.56 +-" in row, row)
             assertTrue(text.lines().any { it.trim().startsWith("rare (1 of 3 runs)") }, text)
-            assertTrue(Regex("""runBatch +6.56 s \+- [0-9.]+ s \([0-9.]+%\) per execution""").containsMatchIn(text), "the batch, quotable: $text")
+            assertTrue(Regex("""runBatch +6.56 \+-[0-9.]+ s \([0-9.]+%\) per execution""").containsMatchIn(text), "the batch, quotable: $text")
             assertTrue("CAREFUL" !in text, "nothing to be careful about: $text")
         } finally {
             dir.toFile().deleteRecursively()

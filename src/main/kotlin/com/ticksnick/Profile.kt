@@ -136,15 +136,21 @@ internal class Estimate(val values: List<Double>) {
     val relative: Double get() = if (mean == 0.0) Double.NaN else half / mean
 }
 
-/** `+- 1.9 s (28%)`: the form a report quotes, absolute and relative. Nothing where there is no interval. */
-internal fun plusMinusBoth(e: Estimate): String =
-    if (e.half.isNaN()) "" else "+- ${duration(e.half)} (${plusMinus(e).removePrefix("+-")})"
+/**
+ * A duration with its interval, the form a header quotes, absolute and relative: `9.15 +-2.59 s (28%)`,
+ * the unit once at the right. Just the duration where there is no interval.
+ */
+internal fun durationWithInterval(e: Estimate): String =
+    if (e.half.isNaN()) duration(e.mean) else "${durationPlusMinus(e.mean, e.half)} (${plusMinus(e).removePrefix("+-")})"
 
-/** A share's interval in percentage points, `+-1 pp`: a relative one of a percentage reads two ways. */
+/**
+ * A percentage's interval, in its points, `+-0.3%`: written after the figure without its unit, `57
+ * +-0.3%`, so the unit is said once. A relative interval of a percentage would read two ways.
+ */
 internal fun plusMinusPoints(e: Estimate): String = when {
     e.half.isNaN() -> ""
-    e.half < 9.95 -> String.format(Locale.ROOT, "+-%.1f pp", e.half)
-    else -> String.format(Locale.ROOT, "+-%.0f pp", e.half)
+    e.half < 9.95 -> String.format(Locale.ROOT, "+-%.1f%%", e.half)
+    else -> String.format(Locale.ROOT, "+-%.0f%%", e.half)
 }
 
 /** `+-2.3%`, `+-12%`, or `-` where there is no interval. */
@@ -285,7 +291,7 @@ class Profile internal constructor(internal val name: String, internal val files
         )
         root()?.let { root ->
             val mean = meanSpan(root)
-            if (mean.n > 0) appendLine(row(root.name, "${duration(mean.mean)} ${plusMinusBoth(mean)}".trimEnd() + " per execution"))
+            if (mean.n > 0) appendLine(row(root.name, durationWithInterval(mean) + " per execution"))
         }
         // Always, under the wall time: who had the cores, the program's threads being only some of it.
         coresText()?.let { appendLine(row("Cores", it)) }

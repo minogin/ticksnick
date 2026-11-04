@@ -251,6 +251,22 @@ internal class OpSlot(
     var context: CoarseContext? = null
 
     /**
+     * How many times [context] has changed, so the sampler can take [current] and [context] as one
+     * instant.
+     *
+     * The sampler reads the two one after the other, and the thread does not wait for it: caught in a
+     * fine label inside a coarse child, it can close the label and the child before the second read,
+     * and the sample would land as that label in the parent's own time, where it never ran. So the
+     * owner raises this before it publishes a new context, and the sampler reads it before and after
+     * the pair: equal, and no context changed while it read. See [setContextOpaque] and
+     * `Sampler.readPair`.
+     *
+     * Written by the owner only, so the increment needs no atomic. The fine hook does not touch it.
+     */
+    @JvmField
+    var contextChanges: Int = 0
+
+    /**
      * This thread's calling-context tree of coarse executions, or null if it has entered none.
      *
      * Lazily allocated so that a program using only the fine tier pays nothing for this — not the
@@ -357,6 +373,11 @@ internal class OpSlot(
         @JvmStatic
         val CONTEXT: VarHandle =
             MethodHandles.lookup().findVarHandle(OpSlot::class.java, "context", CoarseContext::class.java)
+
+        /** The count of [context]'s changes. Static final for the same constant-folding reason as [CURRENT]. */
+        @JvmStatic
+        val CHANGES: VarHandle =
+            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "contextChanges", Int::class.javaPrimitiveType)
     }
 }
 
@@ -375,9 +396,26 @@ internal fun OpSlot.countOpaque(id: Int): Long = OpSlot.COUNTS.getOpaque(counts,
 @PublishedApi
 internal fun OpSlot.contextOpaque(): CoarseContext? = OpSlot.CONTEXT.getOpaque(this) as CoarseContext?
 
-/** Publishes [ctx] as this thread's current coarse execution. See [OpSlot.context]. */
+/**
+ * Publishes [ctx] as this thread's current coarse execution, counting the change first. See
+ * [OpSlot.context] and [OpSlot.contextChanges].
+ *
+ * The count is raised with a release store, so a sampler that sees it raised also sees every fine
+ * label closed before it, and the fence keeps the context from being seen before the count. On x86
+ * both compile to an ordinary store and no fence instruction.
+ */
 @PublishedApi
-internal fun OpSlot.setContextOpaque(ctx: CoarseContext?) = OpSlot.CONTEXT.setOpaque(this, ctx)
+internal fun OpSlot.setContextOpaque(ctx: CoarseContext?) {
+    OpSlot.CHANGES.setRelease(this, contextChanges + 1)
+    VarHandle.storeStoreFence()
+    OpSlot.CONTEXT.setOpaque(this, ctx)
+}
+
+/** The count of context changes, read by the sampler before the pair. See [OpSlot.contextChanges]. */
+internal fun OpSlot.changesAcquire(): Int = OpSlot.CHANGES.getAcquire(this) as Int
+
+/** The count of context changes, read by the sampler after the pair. See [OpSlot.contextChanges]. */
+internal fun OpSlot.changesOpaque(): Int = OpSlot.CHANGES.getOpaque(this) as Int
 
 /**
  * The slot registry. A thread gets its slot from a ThreadLocal and is added to the walk list on

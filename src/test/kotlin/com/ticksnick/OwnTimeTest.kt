@@ -174,6 +174,29 @@ class OwnTimeTest {
         assertTrue("120" in whole, "its calls over both rows: $whole")
     }
 
+    /**
+     * A fine label that runs only inside the part, last before the part closes, has no row in the
+     * request's own time. The sampler reads a thread's fine label and its coarse execution one after
+     * the other; if a thread caught in the label closed the part before the second read, the sample
+     * would land as the label in the request's own time, where it was never called. The loop is all
+     * such closes, and the tick is short, so tens of thousands of samples get the chance.
+     */
+    @Test
+    fun `a fine label is never charged to a parent it did not run under`() {
+        val request = Profiler.registerCoarse(JOB)
+        val part = Profiler.registerCoarse(PART)
+        val last = Profiler.registerFine("own.last")
+        Profiler.start(strict = false, tickMillis = 0.1)
+        val until = System.nanoTime() + 3_000 * ms
+        while (System.nanoTime() < until) {
+            op(request) { repeat(10_000) { op(part) { op(last) { sink = sink * 31 + 1 } } } }
+        }
+        val p = Profiler.stop()
+
+        val stray = ownOf(p, JOB, "own.last")
+        assertNull(stray, "own.last in the request's own time: share ${stray?.share}, calls ${stray?.calls}")
+    }
+
     /** A plain thread does not carry the context: its fine label is under no coarse row at all. */
     @Test
     fun `a fine label on a thread that does not carry the context is not under the request`() {

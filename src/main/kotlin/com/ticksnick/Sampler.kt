@@ -1,8 +1,16 @@
 package com.ticksnick
 
+import java.lang.invoke.VarHandle
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.locks.LockSupport
+
+/**
+ * How many times the sampler reads a thread's fine label and coarse execution before it gives up on
+ * the thread for this tick, when its coarse execution changed during every read. See
+ * [OpSlot.contextChanges].
+ */
+internal const val PAIR_READ_TRIES = 3
 
 /**
  * How the sampler waits for its next tick.
@@ -420,6 +428,13 @@ internal class Sampler(
     internal var coarseSampleHits: Long = 0; private set
 
     /**
+     * Samples whose coarse half was left out because the thread's coarse execution changed during
+     * each of [PAIR_READ_TRIES] reads: the fine label still counts, the coarse rows miss one sample,
+     * where a torn read would have put it in the wrong row. See [OpSlot.contextChanges].
+     */
+    internal var unpairedSamples: Long = 0; private set
+
+    /**
      * Per thread, every sample taken at its slot and those of them that were inside some operation.
      *
      * Paired with the duty cycle's per-thread CPU fractions to bound the error on the shares — see
@@ -610,7 +625,28 @@ internal class Sampler(
                 val owner = s.thread.get()
                 if (owner == null || !owner.isAlive) continue
                 live++
-                val c = s.getOpaque()
+                // The fine label and the coarse execution as one instant: read between two reads of
+                // the slot's count of context changes, and again if a change fell between them. Read
+                // apart, a thread caught in a label could close the label and its coarse execution
+                // before the second read, and the sample would land in the parent's own time, where
+                // the label never ran. See OpSlot.contextChanges.
+                var pairedFine = NO_OP
+                var pairedContext: CoarseContext? = null
+                var paired = false
+                for (attempt in 0 until PAIR_READ_TRIES) {
+                    val before = s.changesAcquire()
+                    pairedFine = s.getOpaque()
+                    pairedContext = s.contextOpaque()
+                    VarHandle.loadLoadFence()
+                    if (s.changesOpaque() == before) {
+                        paired = true
+                        break
+                    }
+                }
+                // A fine label read once is always a real instant, so the fine half of an unpaired
+                // sample still counts; only its coarse half, which could be torn, is left out.
+                if (!paired) unpairedSamples++
+                val c = pairedFine
                 counters[if (c < 0) NO_OP_INDEX else c]++
 
                 // Carried down to the long-execution test below, so that a hit which is both long
@@ -640,10 +676,10 @@ internal class Sampler(
                     idleWaitingHits++
                 }
 
-                // The coarse half of the same photograph. One reference read, and it costs nothing
-                // at all when nobody has placed a coarse label: the field is null and the branch is
-                // perfectly predicted.
-                val ctx = s.contextOpaque()
+                // The coarse half of the same photograph, read with the fine half above. It costs
+                // nothing at all when nobody has placed a coarse label: the field is null and the
+                // branch is perfectly predicted.
+                val ctx = if (paired) pairedContext else null
                 if (ctx != null) {
                     coarseSampleHits++
                     val t = ctx.type
@@ -772,7 +808,7 @@ internal class Sampler(
                         d++
                     }
                     if (anyStale) staleContextHits++
-                } else if (c >= 0) {
+                } else if (paired && c >= 0) {
                     // Labelled work, under no coarse span at all. See labelledOutsideCoarse.
                     labelledOutsideCoarse++
                 }

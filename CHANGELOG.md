@@ -109,6 +109,14 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   A diff warns when only one side counted.
 - On a JVM that cannot report allocated bytes the session runs without them and the report says so.
 
+### Floors that follow the machine
+
+- A body, a fixed piece of CPU work, is timed once a second during a session, and `System.nanoTime()`
+  against it once at `stop()`. Both are saved with the run.
+- The fine floor is 2 bodies and the coarse floor 100 bodies, read at the run's body: about 50 ns and
+  2.5 us on a fast machine, more on a slower one or at a lower clock. The coarse floor rises with a
+  slow `nanoTime`. A run saved without a body is read at 25 ns a body, and its floor warnings say so.
+
 ### Fixed
 
 - Calls made right after `Profiler.start()` are counted. `start()` returns once the sampler has

@@ -424,6 +424,8 @@ class CoarseTest {
         tree: List<CoarseNode> = coarse.map { node(it) },
         fineName: String = "fine",
         allocations: Boolean = false,
+        /** One body in ns; NaN, a run that timed none, reads every limit at the default body. */
+        body: Double = Double.NaN,
     ) = Run(
         operations = listOf(OperationStat(0, fineName, labelled, labelled, 0, 0, 0, 0, labelled)),
         idleHits = 0,
@@ -445,6 +447,7 @@ class CoarseTest {
         coarseSampleHits = coarseSampleHits,
         coarseTree = tree,
         allocations = allocations,
+        bodyNanos = body,
     )
 
     @Test
@@ -505,34 +508,57 @@ class CoarseTest {
 
     @Test
     fun `the floor is flat below twenty percent share and rises above it`() {
-        // The share term only binds above ~20%, which is why the flat floor is the rule in
-        // practice and the share term is the exception. At 40 ns an execution, that is 800 ns.
-        assertEquals(800.0, coarseFloorNanos(0.01, 40.0), 1e-9)
-        assertEquals(800.0, coarseFloorNanos(0.20, 40.0), 1e-9)
-        assertEquals(2000.0, coarseFloorNanos(0.50, 40.0), 1e-9)
-        assertEquals(4000.0, coarseFloorNanos(1.0, 40.0), 1e-9)
+        // The share term only binds above ~20% at a flat floor of 20 executions' cost, which is why
+        // the flat floor is the rule in practice and the share term is the exception.
+        assertEquals(800.0, coarseFloorNanos(0.01, 800.0, 40.0), 1e-9)
+        assertEquals(800.0, coarseFloorNanos(0.20, 800.0, 40.0), 1e-9)
+        assertEquals(2000.0, coarseFloorNanos(0.50, 800.0, 40.0), 1e-9)
+        assertEquals(4000.0, coarseFloorNanos(1.0, 800.0, 40.0), 1e-9)
     }
 
-    /** The floor comes from the budget, not from a measurement, so it is a fixed 2 us with nothing opted into. */
+    /** With nothing opted into and an ordinary `nanoTime` the floor is its bodies, at the default body 2.5 us. */
     @Test
-    fun `the floor is 2 us with nothing opted into`() {
-        assertEquals(2_000.0, coarseFloorNanos(0.01, coarseContextNanos(0)), 1e-9)
+    fun `the floor is 100 bodies with nothing opted into`() {
+        assertEquals(100.0, coarseFlatFloorBodies(0), 1e-9)
+        assertEquals(2_500.0, coarseFloorNanos(0.01, coarseFlatFloorBodies(0) * DEFAULT_BODY_NANOS, coarseContextBodies(0) * DEFAULT_BODY_NANOS), 1e-9)
         assertEquals("", coarseFloorParts(0, false))
+    }
+
+    /** The coarse hook is mostly two `nanoTime` calls, so a dearer `nanoTime` raises the floor with it, and a cheaper one never lowers it. */
+    @Test
+    fun `the floor scales with nanoTime and never falls below its bodies`() {
+        assertEquals(1.0, coarseHookScale(Double.NaN), 1e-12)
+        assertEquals(1.0, coarseHookScale(FLOOR_NANOTIME_BODIES), 1e-12)
+        assertEquals(1.0, coarseHookScale(0.2), 1e-12)
+        val scale = coarseHookScale(40.0)
+        assertEquals((80.0 + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES), scale, 1e-12)
+        assertEquals(100.0 * scale, coarseFlatFloorBodies(0, hookScale = scale), 1e-9)
+        assertTrue("for a slow nanoTime" in coarseFloorParts(0, false, hookScale = scale))
+    }
+
+    /** A run's limits are read at its own body: the same bodies, twice the ns on a machine twice as slow. */
+    @Test
+    fun `the floors follow the run's body`() {
+        val fast = report(listOf(stat(count = 1, sumNanos = 1_000_000, hits = 1, running = 1)), body = 25.0)
+        val slow = report(listOf(stat(count = 1, sumNanos = 1_000_000, hits = 1, running = 1)), body = 61.5)
+        assertEquals(50.0, fast.fineFloorNanos, 1e-9)
+        assertEquals(123.0, slow.fineFloorNanos, 1e-9)
+        assertEquals(2 * slow.coarseFlatFloorNanos / 123.0, 2 * fast.coarseFlatFloorNanos / 50.0, 1e-9)
     }
 
     /** Every registered fine label adds its price to each coarse execution, so the floor rises with them. */
     @Test
     fun `the floor rises with the fine labels registered`() {
-        assertEquals(2_010.0, coarseFloorNanos(0.01, coarseContextNanos(1)), 1e-9)
-        assertEquals(4_500.0, coarseFloorNanos(0.01, coarseContextNanos(250)), 1e-9)
-        assertEquals(" (2.00us, + 600ns for Allocated, + 200ns for 20 fine labels)", coarseFloorParts(20, true))
+        assertEquals(100.4, coarseFlatFloorBodies(1), 1e-9)
+        assertEquals(200.0, coarseFlatFloorBodies(250), 1e-9)
+        assertEquals(" (2.50us, + 600ns for Allocated, + 200ns for 20 fine labels)", coarseFloorParts(20, true))
     }
 
     @Test
     fun `a coarse label on a 200 ns operation is reported`() {
         val r = report(coarse = listOf(stat(count = 1_000_000, sumNanos = 200_000_000, hits = 200, running = 200)))
         assertEquals(listOf("req"), r.coarseTooSmall().map { it.name })
-        val msg = coarseTooSmallMessage("req", 1_000_000, 200.0, r.coarseFloorNanosOf(r.coarse[0]), r.coarseContextNanos)
+        val msg = coarseTooSmallMessage("req", 1_000_000, 200.0, r.coarseFloorNanosOf(r.coarse[0]), r.coarseContextNanos, r.coarseFlatFloorNanos)
         // "200 ns" and not "200.0 ns": durations print to three significant digits, so the fourth
         // one - which for a sampled or bucketed number is noise - never reaches the page.
         assertTrue(msg.contains("200ns"), "the message does not name the measured duration: $msg")
@@ -574,10 +600,10 @@ class CoarseTest {
 
     // --- the Allocated column ---------------------------------------------------------
 
-    /** 2.3 us clears 20 x 100.5 ns and not 20 x (100.5 + 30) ns: the same operation, the same run, one setting apart. */
+    /** 2.8 us clears 100.4 bodies and not 124.4 at the default body: the same operation, the same run, one setting apart. */
     @Test
     fun `counting allocations flags an operation the floor would otherwise pass`() {
-        val c = stat(count = 1_000_000, sumNanos = 2_300_000_000, hits = 1_000, running = 1_000)
+        val c = stat(count = 1_000_000, sumNanos = 2_800_000_000, hits = 1_000, running = 1_000)
         assertTrue(report(listOf(c)).coarseTooSmall().isEmpty())
 
         val counted = report(listOf(c), allocations = true)
@@ -585,7 +611,7 @@ class CoarseTest {
         val text = counted.render()
         assertTrue("TickSnick may add up to 131ns to a coarse execution here" in text, text)
         assertTrue(
-            "needs 2.61us here (2.00us, + 600ns for Allocated, + 10.0ns for 1 fine label)" in text,
+            "needs 3.11us here (2.50us, + 600ns for Allocated, + 10.0ns for 1 fine label) (a default: this run timed no body)" in text,
             "the floor does not say what it is made of: $text"
         )
     }

@@ -501,9 +501,9 @@ class AllocationsTest {
 
     @Test
     fun `counting them raises the coarse floor`() {
-        val base = Run.load(emptySave(false)).coarseContextNanos
-        val counted = Run.load(emptySave(true)).coarseContextNanos
-        assertEquals(COARSE_ALLOCATIONS_NANOS, counted - base, 1e-9)
+        assertEquals(COARSE_ALLOCATIONS_BODIES, coarseContextBodies(0, true) - coarseContextBodies(0, false), 1e-12)
+        assertTrue(Run.load(emptySave(true)).allocations)
+        assertFalse(Run.load(emptySave(false)).allocations)
     }
 
     private fun emptySave(allocations: Boolean): java.nio.file.Path {

@@ -957,6 +957,17 @@ internal class Sampler(
     }
 
     /** How much of the occupancy this session sampled was CPU. See [DutyCycle]. */
+    /**
+     * Labelled samples so far: every fine operation's and every coarse operation's own. Read from
+     * another thread without a lock, so a figure may lag a tick; it only weighs the body's timings.
+     */
+    internal fun labelledSoFar(): Long {
+        var n = 0L
+        for (id in 0 until MAX_OPERATIONS) n += counters[id]
+        for (t in 0 until MAX_COARSE_TYPES) n += coarseSelfHits[t]
+        return n
+    }
+
     internal fun duty(): Duty =
         duty.result(slotHits, slotLabelled, slotWaiting, slotLabelledWaiting, sampleState)
 

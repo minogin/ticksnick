@@ -529,6 +529,9 @@ object Profiler {
     /** The CPU clock over the session. See [ClockTrace]. */
     private var clock: ClockProbe? = null
 
+    /** The body over the session. See [BodyProbe]. */
+    private var bodyProbe: BodyProbe? = null
+
     /** The JVM's collection-pause count when the current session began, or -1. See [GcPauseClock]. */
     private var gcAtStart: Long = -1
 
@@ -1163,6 +1166,8 @@ object Profiler {
         sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
             .also { it.start() }
         clock = ClockProbe().also { it.start() }
+        val counting = sampler!!
+        bodyProbe = BodyProbe { counting.labelledSoFar() }.also { it.start() }
     }
 
     /**
@@ -1185,6 +1190,8 @@ object Profiler {
         val allocations = allocationSession != 0
         allocationSession = 0
         val clockTrace = clock?.stop() ?: ClockTrace.NOT_RECORDED
+        val bodyTrace = bodyProbe?.stop() ?: BodyTrace.NOT_TIMED
+        bodyProbe = null
         clock = null
         val duration = System.nanoTime() - startedAt
         // Both ends or neither: a clock that could not be read at one of them has no difference.
@@ -1267,6 +1274,8 @@ object Profiler {
             pause = pauses,
             coarseTree = coarseTree,
             clock = clockTrace,
+            bodyNanos = bodyTrace.nanos,
+            nanoTimeBodies = bodyTrace.nanoTimeBodies,
             wait = s.wait,
             askedStepNanos = s.stepNanos,
             allocations = allocations,

@@ -41,8 +41,9 @@ The common ones:
   more runs into the same folder.
 - `clock: moved during the run` - the CPU's frequency changed, so times and costs per call drift
   with it. Shares are not affected.
-- `<label>: N calls at under D each, below the 50ns floor` - the label is a visible part of what
-  it measures. Label the enclosing loop instead, with `op(X, times = n) { }`.
+- `<label>: N calls at under D each, below the Fns floor` - the label is a visible part of what
+  it measures. Label the enclosing loop instead, with `op(X, times = n) { }`. The floor is 2 bodies at
+  the run's body; `(a default: this run timed no body)` when the run is too short to time one.
 - `<label>: N coarse executions of D, a coarse label needs D here` - the operation is too short for
   a coarse label. Make it a fine one; the `op` calls stay the same.
 - `labels: N were still open at a point the caller said should be quiescent` - a label set with
@@ -172,11 +173,14 @@ batch                                    1                          1.16s       
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns
 when only one did.
 
-A coarse label suits an operation from 2 us: there TickSnick's cost, up to 100 ns an execution, is at
-most 5% of it. Counting the calls per path adds up to 0.5 ns for every registered fine label, and
-`Allocated` up to 30 ns, so the floor rises with them: 2.2 us with 20 fine labels, 2.8 us with
-`Allocated` too, 4.5 us with 250 labels. An operation under the floor is still measured; a warning says
-how much of its time TickSnick may be, and what the floor was made of.
+A coarse label suits an operation from 100 bodies, about 2.5 us on a fast machine: under it the part of
+TickSnick's hook that runs inside the span makes its share of the samples read high, and a very short
+one loses samples. A body is a fixed piece of CPU work that TickSnick times once a second during the
+run, so the floor follows the machine and its clock. The hook is mostly its two `System.nanoTime()`
+calls, so where `nanoTime` is slow the floor rises with it. Counting the calls per path adds 0.4 bodies
+to the floor for every registered fine label, and `Allocated` 24 bodies: 2.7 us with 20 fine labels,
+3.3 us with `Allocated` too, 5 us with 250 labels, at 25 ns a body. An operation under the floor is still
+measured; a warning says how much of its time TickSnick may be, and what the floor was made of.
 
 **`Allocated`** appears only in a run started with `allocations = true`: the bytes created under the
 row, with its coarse children and every thread that ran under it, counted, not sampled. **Total** is all

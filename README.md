@@ -59,7 +59,7 @@ println(TickSnick.diff(before, after))
 There are two kinds of label, and you choose one when you register the operation. Wrapping code looks
 the same for both: `op(X) { ... }`.
 
-**Fine** (`registerFine`) is for short operations, from about 50 ns up. Entering a fine label writes
+**Fine** (`registerFine`) is for short operations, from about 50 ns up on a fast machine. Entering a fine label writes
 its id to a slot of the current thread. A sampling thread reads every thread's slot once a
 millisecond and counts what it finds. The share of samples is the share of time. Per call cost comes
 from the time and an exact call count. No call is timed, so the label costs about as much as a field
@@ -70,8 +70,10 @@ phase of an algorithm. Each execution is timed at both ends, about 50 ns. You ge
 percentiles and a tree of which operation ran inside which. A coarse operation also shows which fine
 labels its own time went to, and how many times each was called per execution.
 
-Below 50 ns a fine label is a visible part of what it measures. The report says so and names the
-label. Label the enclosing loop instead, and pass the number of operations inside:
+Below its floor a fine label is a visible part of what it measures. The report says so and names the
+label. The floors are counted in bodies, a fixed piece of CPU work that TickSnick times once a second
+during the run, so they follow the machine and its clock: a fine label needs 2 bodies, about 50 ns on a
+fast machine, and a coarse one 100 bodies, about 2.5 us. Label the enclosing loop instead, and pass the number of operations inside:
 
 ```kotlin
 op(LOOKUP, times = keys.size) { for (k in keys) table.find(k) }

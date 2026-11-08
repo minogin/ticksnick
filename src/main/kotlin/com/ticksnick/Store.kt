@@ -113,6 +113,10 @@ internal object RunStore {
             line("clock.samples", clock.samples.joinToString(" ") { if (it.isNaN()) "-" else it.toString() })
         }
 
+        // Only when timed; a file without them is read at the default body.
+        if (p.bodyTimed) line("body.nanos", p.bodyNanos)
+        if (!p.nanoTimeBodies.isNaN()) line("body.nanoTimeBodies", p.nanoTimeBodies)
+
         // Only when recorded; a file without them has no `Sampling` line.
         p.wait?.let { line("sampler.wait", it.name) }
         line("sampler.askedStepNanos", p.askedStepNanos)
@@ -356,6 +360,8 @@ internal object RunStore {
             allocationsMissing = m["allocationsMissing"]?.toBoolean() ?: false,
             setup = setup,
             tags = pairs("tags", "tag"),
+            bodyNanos = m["body.nanos"]?.toDouble() ?: Double.NaN,
+            nanoTimeBodies = m["body.nanoTimeBodies"]?.toDouble() ?: Double.NaN,
         )
     }
 

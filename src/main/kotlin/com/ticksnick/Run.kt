@@ -27,28 +27,56 @@ internal const val OWN_ROW_MIN = 0.005
 internal const val ASKED_STEP_TOLERANCE = 0.05
 
 /**
- * The most one coarse execution may cost with nothing opted into: no fine label registered and no
- * allocated bytes counted - the context, two `nanoTime` calls and the accumulate. A budget, not a
- * measurement: the coarse floor is this over [COARSE_MAX_OVERHEAD], 2 us, and it stays there however
- * the hook changes, so a dearer hook has to fit under it rather than move it. What a session opts
- * into adds its own price. See [coarseContextNanos].
+ * The shortest a fine operation may be, in bodies, before its figures stop holding: under it the
+ * sampler reads it low. See [Run.fineFloorNanos].
  */
-internal const val COARSE_BUDGET_NANOS = 100.0
+internal const val FINE_FLOOR_BODIES = 2.0
 
 /**
- * The most each registered fine label may add to a coarse execution: the pass that moves its calls
- * onto the path they ran under, at every boundary. See `OpSlot.flushCalls`.
+ * The shortest a coarse operation may be, in bodies, with nothing opted into and `nanoTime` at
+ * [FLOOR_NANOTIME_BODIES]: under it its share of the samples stops holding, since part of the hook
+ * runs inside the span and a short execution loses samples. See [coarseFlatFloorBodies].
  */
-internal const val COARSE_PER_FINE_LABEL_NANOS = 0.5
+internal const val COARSE_FLOOR_BODIES = 100.0
 
 /**
- * The most a coarse label may cost of the operation it wraps: about what two runs of the same code
- * already differ by, so a label at the floor moves its operation no further than running it again.
+ * What one `System.nanoTime()` costs, in bodies, where [COARSE_FLOOR_BODIES] holds. The coarse hook is
+ * mostly its two `nanoTime` calls, so where one costs more the floor rises with the hook. See
+ * [coarseHookScale].
+ */
+internal const val FLOOR_NANOTIME_BODIES = 0.89
+
+/** The coarse hook apart from its two `nanoTime` calls, in bodies. See [coarseHookScale]. */
+internal const val COARSE_HOOK_REST_BODIES = 0.4
+
+/**
+ * One body, in ns, for a run saved without one: what a body takes on a typical developer machine.
+ * Every limit of such a run is read at it, and its warnings say the floor is a default.
+ */
+internal const val DEFAULT_BODY_NANOS = 25.0
+
+/**
+ * The most one coarse execution may cost with nothing opted into, in bodies: no fine label
+ * registered and no allocated bytes counted - the context, two `nanoTime` calls and the accumulate. A
+ * budget, not a measurement: a dearer hook has to fit under it. What a session opts into adds its
+ * own price. See [coarseContextBodies].
+ */
+internal const val COARSE_BUDGET_BODIES = 4.0
+
+/**
+ * The most each registered fine label may add to a coarse execution, in bodies: the pass that moves
+ * its calls onto the path they ran under, at every boundary. See `OpSlot.flushCalls`.
+ */
+internal const val COARSE_PER_FINE_LABEL_BODIES = 0.02
+
+/**
+ * What an opt-in's price is divided by to raise the coarse floor: a label at the floor pays at most
+ * this share of its operation for what the session turned on.
  */
 internal const val COARSE_MAX_OVERHEAD = 0.05
 
-/** The most counting allocated bytes may add to a coarse execution, when a session asks for it: two reads of the thread's total. */
-internal const val COARSE_ALLOCATIONS_NANOS = 30.0
+/** The most counting allocated bytes may add to a coarse execution, in bodies, when a session asks for it: two reads of the thread's total. */
+internal const val COARSE_ALLOCATIONS_BODIES = 1.2
 
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01
@@ -82,7 +110,8 @@ internal fun allocationsCareful(before: List<Run>, after: List<Run>): List<Strin
     val a = after.any { it.allocations }
     return if (b == a) emptyList() else listOf(
         "allocations: counted on one side only${sym.dash}each coarse execution there cost about " +
-                "${COARSE_ALLOCATIONS_NANOS.toInt()} ns more, which a short operation shows in its time"
+                "${duration(COARSE_ALLOCATIONS_BODIES * (after + before).first { it.allocations }.bodyOrDefaultNanos)} more, " +
+                "which a short operation shows in its time"
     )
 }
 
@@ -109,59 +138,79 @@ internal fun perParentText(perParent: Double): String = when {
 }
 
 /** Whether a label is on something too small for the instrument to describe. See [Run.tooSmall]. */
-internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double): Boolean =
-    calls > 0 && impliedUpperNanos(hits, calls, stepNanos) * Run.FLOOR_BIAS_ALLOWANCE < Run.FLOOR_NANOS
+internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double, floorNanos: Double = Run.FLOOR_NANOS): Boolean =
+    calls > 0 && impliedUpperNanos(hits, calls, stepNanos) * Run.FLOOR_BIAS_ALLOWANCE < floorNanos
 
 /**
  * What to tell someone whose label is below the floor. Both reasons, because the second is the one
  * they cannot check for themselves.
  */
-internal fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): String = String.format(
+internal fun tooSmallMessage(
+    name: String, calls: Long, upperNanos: Double, floorNanos: Double = Run.FLOOR_NANOS, default: Boolean = false,
+): String = String.format(
     // Three lines: the fact, the reason, the fix. Same shape as the coarse floor's message.
     Locale.ROOT,
-    "%s: %,d calls at under %s each, below the %.0fns floor${sym.dash}label the enclosing loop instead, " +
+    "%s: %,d calls at under %s each, below the %.0fns floor%s${sym.dash}label the enclosing loop instead, " +
             "op(%s, times = n) { }, or drop it if its share has already answered the question%n" +
             "the hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels",
-    name, calls, duration(upperNanos), Run.FLOOR_NANOS, name
+    name, calls, duration(upperNanos), floorNanos, if (default) DEFAULT_FLOOR else "", name
 )
 
-/** The most one coarse execution may cost with [fineLabels] fine labels registered. */
-internal fun coarseContextNanos(fineLabels: Int): Double = COARSE_BUDGET_NANOS + COARSE_PER_FINE_LABEL_NANOS * fineLabels
+/** Beside a floor read at [DEFAULT_BODY_NANOS]: the run timed no body of its own. */
+internal const val DEFAULT_FLOOR = " (a default: this run timed no body)"
 
 /**
- * What the flat coarse floor is made of, for the warning about an operation under it: ` (2.00 us,
- * + 600 ns for Allocated, + 200 ns for 20 fine labels)`, or nothing when nothing is opted into.
+ * How much dearer the coarse hook is than where [COARSE_FLOOR_BODIES] holds, never below 1: the hook is
+ * two `nanoTime` calls and [COARSE_HOOK_REST_BODIES], so a `nanoTime` of [nanoTimeBodies] scales it by
+ * this. 1 when `nanoTime` was not timed.
  */
-internal fun coarseFloorParts(fineLabels: Int, allocations: Boolean): String {
+internal fun coarseHookScale(nanoTimeBodies: Double): Double =
+    if (nanoTimeBodies.isNaN()) 1.0
+    else ((2 * nanoTimeBodies + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES)).coerceAtLeast(1.0)
+
+/** The most one coarse execution may cost, in bodies, with [fineLabels] fine labels registered. */
+internal fun coarseContextBodies(fineLabels: Int, allocations: Boolean = false, hookScale: Double = 1.0): Double =
+    COARSE_BUDGET_BODIES * hookScale + COARSE_PER_FINE_LABEL_BODIES * fineLabels + if (allocations) COARSE_ALLOCATIONS_BODIES else 0.0
+
+/** The flat coarse floor, in bodies: [COARSE_FLOOR_BODIES] scaled with the hook, and each opt-in's price over [COARSE_MAX_OVERHEAD]. */
+internal fun coarseFlatFloorBodies(fineLabels: Int, allocations: Boolean = false, hookScale: Double = 1.0): Double =
+    COARSE_FLOOR_BODIES * hookScale +
+            (COARSE_PER_FINE_LABEL_BODIES * fineLabels + if (allocations) COARSE_ALLOCATIONS_BODIES else 0.0) / COARSE_MAX_OVERHEAD
+
+/**
+ * What the flat coarse floor is made of, for the warning about an operation under it, at a body of
+ * [bodyNanos]: ` (2.50us, + 600ns for Allocated, + 200ns for 20 fine labels)`, or nothing when nothing
+ * adds to it.
+ */
+internal fun coarseFloorParts(fineLabels: Int, allocations: Boolean, bodyNanos: Double = DEFAULT_BODY_NANOS, hookScale: Double = 1.0): String {
     val added = buildList {
-        if (allocations) add("+ ${duration(COARSE_ALLOCATIONS_NANOS / COARSE_MAX_OVERHEAD)} for Allocated")
+        if (hookScale > 1.0) add("+ ${duration(COARSE_FLOOR_BODIES * (hookScale - 1) * bodyNanos)} for a slow nanoTime")
+        if (allocations) add("+ ${duration(COARSE_ALLOCATIONS_BODIES / COARSE_MAX_OVERHEAD * bodyNanos)} for Allocated")
         if (fineLabels > 0) add(
-            "+ ${duration(COARSE_PER_FINE_LABEL_NANOS * fineLabels / COARSE_MAX_OVERHEAD)} for $fineLabels fine label" +
+            "+ ${duration(COARSE_PER_FINE_LABEL_BODIES * fineLabels / COARSE_MAX_OVERHEAD * bodyNanos)} for $fineLabels fine label" +
                     if (fineLabels == 1) "" else "s"
         )
     }
     if (added.isEmpty()) return ""
-    return " (" + (listOf(duration(COARSE_BUDGET_NANOS / COARSE_MAX_OVERHEAD)) + added).joinToString(", ") + ")"
+    return " (" + (listOf(duration(COARSE_FLOOR_BODIES * bodyNanos)) + added).joinToString(", ") + ")"
 }
 
 /**
- * The shortest a coarse operation may be, given how much of the run it holds and what one execution
- * costs, [contextNanos]. See [Run.coarseTooSmall].
+ * The shortest a coarse operation may be, given how much of the run it holds, the flat floor
+ * [flatFloorNanos] and what one execution costs, [contextNanos]. See [Run.coarseTooSmall].
  *
- * The tier boundary, as arithmetic rather than a rule of thumb. Two conditions,
- * protecting different things and neither implying the other:
+ * Two conditions, protecting different things and neither implying the other:
  *
  * 1. `cost x executions <= 1% of the run` protects **the program** — that you are measuring what
  *    you started with. In terms of share this is `d >= 100 x cost x share`.
- * 2. `cost <= 5% of the operation's own duration` protects **the number** — that it describes the
- *    code and not the instrument. This is the flat `d >= 20 x cost`, and it is what binds below
- *    about 20% share, which is nearly always.
+ * 2. `d >= the flat floor` protects **the number** — that its share of the samples still holds. It
+ *    binds below about 20% share, which is nearly always.
  *
- * A 40 ns operation called rarely passes the first comfortably and is then reported at 80 ns: the
- * program is undisturbed and the measurement is 100% wrong. That is why both are needed.
+ * A short operation called rarely passes the first comfortably and is then reported at twice its
+ * length: the program is undisturbed and the measurement is wrong. That is why both are needed.
  */
-internal fun coarseFloorNanos(share: Double, contextNanos: Double): Double =
-    maxOf(contextNanos / COARSE_MAX_OVERHEAD, contextNanos / COARSE_MAX_RUN_SHARE * share)
+internal fun coarseFloorNanos(share: Double, flatFloorNanos: Double, contextNanos: Double): Double =
+    maxOf(flatFloorNanos, contextNanos / COARSE_MAX_RUN_SHARE * share)
 
 /**
  * What to tell someone whose coarse label is on something too small to carry a context.
@@ -172,7 +221,8 @@ internal fun coarseFloorNanos(share: Double, contextNanos: Double): Double =
  * fraction of the run to afford measuring.
  */
 internal fun coarseTooSmallMessage(
-    name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double, parts: String = "",
+    name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double, flatFloorNanos: Double,
+    parts: String = "", default: Boolean = false,
 ): String {
     // Which of the two conditions bound decides what the reader is being told, and they are
     // different complaints with different remedies. Saying "the number would describe the
@@ -183,7 +233,7 @@ internal fun coarseTooSmallMessage(
     //
     // The fix names the registration, not a call: `op` takes both tiers, so the call site is already
     // right.
-    val shareBound = requiredNanos > contextNanos / COARSE_MAX_OVERHEAD
+    val shareBound = requiredNanos > flatFloorNanos
     val overhead = contextNanos / meanNanos * 100
     val why = if (shareBound) String.format(
         Locale.ROOT,
@@ -200,7 +250,8 @@ internal fun coarseTooSmallMessage(
         Locale.ROOT,
         "%s: %,d coarse executions of %s, a coarse label needs %s here%s${sym.dash}register it fine, registerFine(\"%s\"), " +
                 "and keep the op(...) calls; or put the coarse label around a batch of these%n%s",
-        name, count, duration(meanNanos), duration(requiredNanos), if (shareBound) "" else parts, name, why
+        name, count, duration(meanNanos), duration(requiredNanos),
+        (if (shareBound) "" else parts) + if (default) DEFAULT_FLOOR else "", name, why
     )
 }
 
@@ -765,7 +816,27 @@ class Run internal constructor(
     internal val setup: Setup = Setup.NONE,
     /** What the user said about the session, in the order they said it. */
     internal val tags: Map<String, String> = emptyMap(),
+    /** One body, in ns, over the session; NaN for a run that timed none. See [BodyProbe]. */
+    internal val bodyNanos: Double = Double.NaN,
+    /** One `System.nanoTime()`, in bodies; NaN for a run that did not time it. See [BodyProbe]. */
+    internal val nanoTimeBodies: Double = Double.NaN,
 ) {
+    /** Whether this run timed a body of its own; without one its limits are read at [DEFAULT_BODY_NANOS]. */
+    internal val bodyTimed: Boolean get() = bodyNanos > 0
+
+    /** One body in ns: this run's, or [DEFAULT_BODY_NANOS]. */
+    internal val bodyOrDefaultNanos: Double get() = if (bodyTimed) bodyNanos else DEFAULT_BODY_NANOS
+
+    /** The shortest a fine operation may be here, in ns: [FINE_FLOOR_BODIES] at this run's body. */
+    internal val fineFloorNanos: Double get() = FINE_FLOOR_BODIES * bodyOrDefaultNanos
+
+    /** See [coarseHookScale]. */
+    internal val hookScale: Double get() = coarseHookScale(nanoTimeBodies)
+
+    /** The flat coarse floor here, in ns. See [coarseFlatFloorBodies]. */
+    internal val coarseFlatFloorNanos: Double
+        get() = coarseFlatFloorBodies(operations.size, allocations, hookScale) * bodyOrDefaultNanos
+
     /** [setup] and how the session measured: what the runs of a folder should agree on, by name. */
     internal val facts: Map<String, String>
         get() = setup.facts + buildMap {
@@ -1042,7 +1113,7 @@ class Run internal constructor(
      * here, since it would make an innocent operation look smaller than it is.
      */
     internal fun tooSmall(): List<OperationStat> = operations
-        .filter { isTooSmall(it.hits, it.calls, stepNanos) }
+        .filter { isTooSmall(it.hits, it.calls, stepNanos, fineFloorNanos) }
         .sortedByDescending { it.calls }
 
     /**
@@ -1385,12 +1456,12 @@ class Run internal constructor(
      */
     internal fun coarseFloorNanosOf(c: CoarseStat): Double {
         val noise = if (c.inclusiveHits <= 0L) 1.0 else 1.0 / sqrt(c.inclusiveHits.toDouble())
-        return coarseFloorNanos((shareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseContextNanos)
+        return coarseFloorNanos((shareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseFlatFloorNanos, coarseContextNanos)
     }
 
     /** What one coarse execution cost in this run, which rises with the fine labels registered. See [coarseContextNanos]. */
     internal val coarseContextNanos: Double
-        get() = coarseContextNanos(operations.size) + if (allocations) COARSE_ALLOCATIONS_NANOS else 0.0
+        get() = coarseContextBodies(operations.size, allocations, hookScale) * bodyOrDefaultNanos
 
     /**
      * Bytes allocated per execution of [n], its coarse children included, on every thread that ran
@@ -1758,14 +1829,14 @@ class Run internal constructor(
             // below the floor cannot move a ranking, so the cost of being wrong about one is the
             // loudest failure this tool has - stopping a run that was fine. Every offender is named;
             // the reader decides.
-            for (op in tooSmall()) add(tooSmallMessage(op.name, op.calls, impliedUpperNanosOf(op)))
+            for (op in tooSmall()) add(tooSmallMessage(op.name, op.calls, impliedUpperNanosOf(op), fineFloorNanos, !bodyTimed))
             // The same boundary from the other side. Unlike the fine floor this one is exact,
             // because the duration it compares is measured rather than inferred — see
             // coarseTooSmall.
             for (c in coarseTooSmall()) add(
                 coarseTooSmallMessage(
-                    c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos,
-                    coarseFloorParts(operations.size, allocations),
+                    c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos, coarseFlatFloorNanos,
+                    coarseFloorParts(operations.size, allocations, bodyOrDefaultNanos, hookScale), !bodyTimed,
                 )
             )
         }
@@ -1830,7 +1901,8 @@ class Run internal constructor(
          */
         internal const val WORKING_CEILING_SLACK = 4.0
 
-        internal const val FLOOR_NANOS = 50.0
+        /** The fine floor at [DEFAULT_BODY_NANOS]. See [Run.fineFloorNanos]. */
+        internal const val FLOOR_NANOS = FINE_FLOOR_BODIES * DEFAULT_BODY_NANOS
 
         /** The fine table's row for samples inside no label. */
         internal const val NO_OPERATION = "(no operation)"

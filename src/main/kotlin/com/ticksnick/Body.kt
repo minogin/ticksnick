@@ -39,9 +39,8 @@ internal fun body(seed: Long): Long {
 }
 
 /**
- * The body as a session saw it: [nanos], one body in ns, the mean over the session's seconds weighted
- * by the labelled samples in each; [nanoTimeBodies], what one `System.nanoTime()` costs, in bodies.
- * NaN for what was not timed.
+ * The body as a session saw it: [nanos], one body in ns, the fastest of the session's seconds;
+ * [nanoTimeBodies], what one `System.nanoTime()` costs, in bodies. NaN for what was not timed.
  */
 internal class BodyTrace(val nanos: Double, val nanoTimeBodies: Double) {
     companion object {
@@ -52,16 +51,16 @@ internal class BodyTrace(val nanos: Double, val nanoTimeBodies: Double) {
 /**
  * Times a body once a second on a thread of its own, in plain Java, so it works wherever the JVM
  * does: no OS counter is read. What a CPU cost is compared with is counted in bodies, and the run's
- * body turns it into seconds at the speed the run's work ran at.
+ * body turns it into seconds.
  *
- * Each second the fastest of [BODY_TIMINGS] timings is kept, weighted by the labelled samples taken
- * since the one before, read through [labelled]: an operation's time is a mean over the clock it ran
- * at, so the body it is compared with is too. The thread lands on whatever core the OS gives it; on a
- * CPU with slower cores a body read there is longer, which raises a floor in seconds, never lowers it.
+ * Each second the fastest of [BODY_TIMINGS] timings is kept, and the run's body is the fastest of
+ * those: the fastest core at the highest clock the session saw. The thread lands on whatever core the
+ * OS gives it, and an OS tends to give a thread that wakes once a second a slow one, so a mean would
+ * read the floors high and warn about operations that are fine. The fastest reads them a little low
+ * where the work ran on slower cores or at a lower clock, which the floors' margin covers.
  */
-internal class BodyProbe(private val labelled: () -> Long) {
+internal class BodyProbe {
     private val bodies = ArrayList<Double>()
-    private val weights = ArrayList<Long>()
     @Volatile private var running = false
     private var thread: Thread? = null
     private var sink = -7046029254386353131L
@@ -85,20 +84,14 @@ internal class BodyProbe(private val labelled: () -> Long) {
         running = true
         thread = Thread({
             repeat(BODY_WARMUP_LAPS) { if (running) lap() }
-            var seen = labelled()
             while (running) {
                 val b = fastest()
+                synchronized(bodies) { bodies += b }
                 try {
                     Thread.sleep(BODY_PERIOD_MILLIS)
                 } catch (_: InterruptedException) {
-                    // The stop: the samples since the last read still weigh this timing.
+                    // The stop.
                 }
-                val now = labelled()
-                synchronized(bodies) {
-                    bodies += b
-                    weights += (now - seen).coerceAtLeast(0)
-                }
-                seen = now
             }
         }, "ticksnick-body").apply { isDaemon = true; start() }
     }
@@ -108,13 +101,11 @@ internal class BodyProbe(private val labelled: () -> Long) {
         running = false
         thread?.interrupt()
         thread?.join(2 * BODY_PERIOD_MILLIS)
-        val (b, w) = synchronized(bodies) { bodies.toDoubleArray() to weights.toLongArray() }
+        val b = synchronized(bodies) { bodies.toDoubleArray() }
         // A session stopped before its first timing has no body, and the report falls back to the
         // default one; nor is `nanoTime` timed, against a body the JIT may not have compiled yet.
         if (b.isEmpty()) return BodyTrace.NOT_TIMED
-        val total = w.sum()
-        val nanos = if (total == 0L) b.average() else b.indices.sumOf { b[it] * w[it] } / total
-        return BodyTrace(nanos, nanoTimeBodies())
+        return BodyTrace(b.min(), nanoTimeBodies())
     }
 
     /** One `nanoTime` in bodies: [NANOTIME_TIMINGS] alternating timings, the median ratio. */

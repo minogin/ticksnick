@@ -524,12 +524,16 @@ class CoarseTest {
         assertEquals("", coarseFloorParts(0, false))
     }
 
-    /** The coarse hook is mostly two `nanoTime` calls, so a dearer `nanoTime` raises the floor with it, and a cheaper one never lowers it. */
+    /**
+     * The coarse hook is mostly two `nanoTime` calls, so a slow `nanoTime` raises the floor with it; one
+     * under twice the usual cost, which is where the core the timing ran on moves it, does not.
+     */
     @Test
-    fun `the floor scales with nanoTime and never falls below its bodies`() {
+    fun `the floor scales with a slow nanoTime only`() {
         assertEquals(1.0, coarseHookScale(Double.NaN), 1e-12)
         assertEquals(1.0, coarseHookScale(FLOOR_NANOTIME_BODIES), 1e-12)
         assertEquals(1.0, coarseHookScale(0.2), 1e-12)
+        assertEquals(1.0, coarseHookScale(1.17), 1e-12)
         val scale = coarseHookScale(40.0)
         assertEquals((80.0 + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES), scale, 1e-12)
         assertEquals(100.0 * scale, coarseFlatFloorBodies(0, hookScale = scale), 1e-9)

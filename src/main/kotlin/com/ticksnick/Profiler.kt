@@ -1166,8 +1166,7 @@ object Profiler {
         sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
             .also { it.start() }
         clock = ClockProbe().also { it.start() }
-        val counting = sampler!!
-        bodyProbe = BodyProbe { counting.labelledSoFar() }.also { it.start() }
+        bodyProbe = BodyProbe().also { it.start() }
     }
 
     /**

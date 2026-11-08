@@ -46,6 +46,12 @@ internal const val COARSE_FLOOR_BODIES = 100.0
  */
 internal const val FLOOR_NANOTIME_BODIES = 0.89
 
+/**
+ * How many times [FLOOR_NANOTIME_BODIES] `nanoTime` must cost before the coarse floor rises with it.
+ * Below it the ratio moves with the core the timing ran on, not with a slow clock source.
+ */
+internal const val NANOTIME_SLOW_FACTOR = 2.0
+
 /** The coarse hook apart from its two `nanoTime` calls, in bodies. See [coarseHookScale]. */
 internal const val COARSE_HOOK_REST_BODIES = 0.4
 
@@ -160,13 +166,13 @@ internal fun tooSmallMessage(
 internal const val DEFAULT_FLOOR = " (a default: this run timed no body)"
 
 /**
- * How much dearer the coarse hook is than where [COARSE_FLOOR_BODIES] holds, never below 1: the hook is
- * two `nanoTime` calls and [COARSE_HOOK_REST_BODIES], so a `nanoTime` of [nanoTimeBodies] scales it by
- * this. 1 when `nanoTime` was not timed.
+ * How much dearer the coarse hook is than where [COARSE_FLOOR_BODIES] holds: the hook is two `nanoTime`
+ * calls and [COARSE_HOOK_REST_BODIES], so a `nanoTime` of [nanoTimeBodies] scales it by this. 1 when
+ * `nanoTime` was not timed, or costs under [NANOTIME_SLOW_FACTOR] times [FLOOR_NANOTIME_BODIES].
  */
 internal fun coarseHookScale(nanoTimeBodies: Double): Double =
-    if (nanoTimeBodies.isNaN()) 1.0
-    else ((2 * nanoTimeBodies + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES)).coerceAtLeast(1.0)
+    if (nanoTimeBodies.isNaN() || nanoTimeBodies < NANOTIME_SLOW_FACTOR * FLOOR_NANOTIME_BODIES) 1.0
+    else (2 * nanoTimeBodies + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES)
 
 /** The most one coarse execution may cost, in bodies, with [fineLabels] fine labels registered. */
 internal fun coarseContextBodies(fineLabels: Int, allocations: Boolean = false, hookScale: Double = 1.0): Double =

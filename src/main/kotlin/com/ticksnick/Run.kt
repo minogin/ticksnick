@@ -87,6 +87,9 @@ internal const val COARSE_ALLOCATIONS_BODIES = 1.2
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01
 
+/** Beside a floor read at [DEFAULT_BODY_NANOS]: the run timed no body of its own. */
+internal const val DEFAULT_FLOOR = " (a default: this run timed no body)"
+
 /** The second line of a leaked-label warning: the usual cause. */
 internal const val NO_FINALLY = "a label placed with enter/exit has no finally: a body that throws leaves it set"
 
@@ -153,17 +156,47 @@ internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double, floorNanos: 
  */
 internal fun tooSmallMessage(
     name: String, calls: Long, upperNanos: Double, floorNanos: Double = Run.FLOOR_NANOS, default: Boolean = false,
-): String = String.format(
+): String = tooSmallMessage(listOf(FineUnderFloor(name, calls, upperNanos, floorNanos, default)))
+
+/**
+ * One fine label under its floor in one run or several: one line, each figure a range where the runs
+ * differ (`under 47.8ns to 50.9ns each, below the 60ns to 62ns floor`), since each run has a floor of
+ * its own.
+ */
+internal fun tooSmallMessage(fs: List<FineUnderFloor>): String = String.format(
     // Three lines: the fact, the reason, the fix. Same shape as the coarse floor's message.
     Locale.ROOT,
-    "%s: %,d calls at under %s each, below the %.0fns floor%s${sym.dash}label the enclosing loop instead, " +
+    "%s: %s calls at under %s each, below the %s floor%s${sym.dash}label the enclosing loop instead, " +
             "op(%s, times = n) { }, or drop it if its share has already answered the question%n" +
             "the hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels",
-    name, calls, duration(upperNanos), floorNanos, if (default) DEFAULT_FLOOR else "", name
+    fs[0].name, rangeText(fs.map { it.calls.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
+    rangeText(fs.map { it.upperNanos }, ::duration), rangeText(fs.map { it.floorNanos }) { String.format(Locale.ROOT, "%.0fns", it) },
+    if (fs.any { it.default }) DEFAULT_FLOOR else "", fs[0].name
 )
 
-/** Beside a floor read at [DEFAULT_BODY_NANOS]: the run timed no body of its own. */
-internal const val DEFAULT_FLOOR = " (a default: this run timed no body)"
+/** [values] as one figure in [format], or `lo to hi` where they differ. */
+internal fun rangeText(values: List<Double>, format: (Double) -> String): String {
+    val lo = format(values.min())
+    val hi = format(values.max())
+    return if (lo == hi) lo else "$lo to $hi"
+}
+
+/** A fine label under its floor in one run: what its warning says. See [tooSmallMessage]. */
+internal class FineUnderFloor(
+    val name: String, val calls: Long, val upperNanos: Double, val floorNanos: Double, val default: Boolean,
+)
+
+/**
+ * A coarse label under its floor in one run: what its warning says. [shareBound] when it is the 1% of
+ * the run that binds rather than the flat floor. See [coarseTooSmallMessage].
+ */
+internal class CoarseUnderFloor(
+    val name: String, val count: Long, val meanNanos: Double, val requiredNanos: Double, val contextNanos: Double,
+    val flatFloorNanos: Double, val parts: String, val default: Boolean,
+) {
+    val shareBound: Boolean get() = requiredNanos > flatFloorNanos
+}
+
 
 /**
  * How much dearer the coarse hook is than where [COARSE_FLOOR_BODIES] holds: the hook is two `nanoTime`
@@ -229,7 +262,14 @@ internal fun coarseFloorNanos(share: Double, flatFloorNanos: Double, contextNano
 internal fun coarseTooSmallMessage(
     name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double, flatFloorNanos: Double,
     parts: String = "", default: Boolean = false,
-): String {
+): String = coarseTooSmallMessage(listOf(CoarseUnderFloor(name, count, meanNanos, requiredNanos, contextNanos, flatFloorNanos, parts, default)))
+
+/**
+ * One coarse label under its floor in one run or several, all bound by the same condition: one line,
+ * each figure a range where the runs differ. What the floor is made of is said only when every run
+ * made it of the same parts.
+ */
+internal fun coarseTooSmallMessage(cs: List<CoarseUnderFloor>): String {
     // Which of the two conditions bound decides what the reader is being told, and they are
     // different complaints with different remedies. Saying "the number would describe the
     // instrument" about an operation whose per-execution overhead is a comfortable 4% is simply
@@ -239,25 +279,28 @@ internal fun coarseTooSmallMessage(
     //
     // The fix names the registration, not a call: `op` takes both tiers, so the call site is already
     // right.
-    val shareBound = requiredNanos > flatFloorNanos
-    val overhead = contextNanos / meanNanos * 100
+    val shareBound = cs[0].shareBound
+    val overheads = cs.map { it.contextNanos / it.meanNanos * 100 }
+    val count = rangeText(cs.map { it.count.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) }
+    val context = rangeText(cs.map { it.contextNanos }) { String.format(Locale.ROOT, "%.0fns", it) }
     val why = if (shareBound) String.format(
         Locale.ROOT,
-        "accurate per execution (up to %.1f%% overhead), but %,d coarse executions at up to %.0fns each are over 1%% of the run",
-        overhead, count, contextNanos
+        "accurate per execution (up to %s overhead), but %s coarse executions at up to %s each are over 1%% of the run",
+        rangeText(overheads) { String.format(Locale.ROOT, "%.1f%%", it) }, count, context
     ) else String.format(
         Locale.ROOT,
-        "TickSnick may add up to %.0fns to a coarse execution here, %.0f%% of an operation this size",
-        contextNanos, overhead
+        "TickSnick may add up to %s to a coarse execution here, %s of an operation this size",
+        context, rangeText(overheads) { String.format(Locale.ROOT, "%.0f%%", it) }
     )
+    val parts = cs.map { it.parts }.distinct().singleOrNull() ?: ""
     // What the floor is made of only where the flat floor bound: the share condition's number is not
     // a sum of those parts.
     return String.format(
         Locale.ROOT,
-        "%s: %,d coarse executions of %s, a coarse label needs %s here%s${sym.dash}register it fine, registerFine(\"%s\"), " +
+        "%s: %s coarse executions of %s, a coarse label needs %s here%s${sym.dash}register it fine, registerFine(\"%s\"), " +
                 "and keep the op(...) calls; or put the coarse label around a batch of these%n%s",
-        name, count, duration(meanNanos), duration(requiredNanos),
-        (if (shareBound) "" else parts) + if (default) DEFAULT_FLOOR else "", name, why
+        cs[0].name, count, rangeText(cs.map { it.meanNanos }, ::duration), rangeText(cs.map { it.requiredNanos }, ::duration),
+        (if (shareBound) "" else parts) + if (cs.any { it.default }) DEFAULT_FLOOR else "", cs[0].name, why
     )
 }
 
@@ -1500,6 +1543,18 @@ class Run internal constructor(
         .filter { it.count > 0 && it.meanSpanNanos < coarseFloorNanosOf(it) }
         .sortedByDescending { it.count }
 
+    /** Coarse labels under their floor here, as their warnings say them. See [coarseTooSmall]. */
+    internal fun coarseUnderFloor(): List<CoarseUnderFloor> = coarseTooSmall().map { c ->
+        CoarseUnderFloor(
+            c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos, coarseFlatFloorNanos,
+            coarseFloorParts(operations.size, allocations, bodyOrDefaultNanos, hookScale), !bodyTimed,
+        )
+    }
+
+    /** Fine labels under their floor here, as their warnings say them. See [tooSmall]. */
+    internal fun fineUnderFloor(): List<FineUnderFloor> =
+        tooSmall().map { FineUnderFloor(it.name, it.calls, impliedUpperNanosOf(it), fineFloorNanos, !bodyTimed) }
+
     /**
      * Of the thread-time inside a fine label, the fraction that fell under **no** coarse span.
      *
@@ -1751,7 +1806,7 @@ class Run internal constructor(
      * All in one place and before any table, not where each is computed: printed there, a warning
      * about a fine operation would sit under the coarse table and read as one about a coarse one.
      */
-    internal fun warnings(): List<String> =
+    internal fun warnings(floors: Boolean = true): List<String> =
         // Ordered by what each costs the reader: numbers that are missing or inflated first, then
         // what limits the whole run, then labels in the wrong tier, which are honest measurements
         // of the wrong-sized thing.
@@ -1835,16 +1890,11 @@ class Run internal constructor(
             // below the floor cannot move a ranking, so the cost of being wrong about one is the
             // loudest failure this tool has - stopping a run that was fine. Every offender is named;
             // the reader decides.
-            for (op in tooSmall()) add(tooSmallMessage(op.name, op.calls, impliedUpperNanosOf(op), fineFloorNanos, !bodyTimed))
+            if (floors) for (f in fineUnderFloor()) add(tooSmallMessage(listOf(f)))
             // The same boundary from the other side. Unlike the fine floor this one is exact,
             // because the duration it compares is measured rather than inferred — see
             // coarseTooSmall.
-            for (c in coarseTooSmall()) add(
-                coarseTooSmallMessage(
-                    c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos, coarseFlatFloorNanos,
-                    coarseFloorParts(operations.size, allocations, bodyOrDefaultNanos, hookScale), !bodyTimed,
-                )
-            )
+            if (floors) for (c in coarseUnderFloor()) add(coarseTooSmallMessage(listOf(c)))
         }
 
     /**

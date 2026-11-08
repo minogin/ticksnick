@@ -426,8 +426,10 @@ class CoarseTest {
         allocations: Boolean = false,
         /** One body in ns; NaN, a run that timed none, reads every limit at the default body. */
         body: Double = Double.NaN,
+        /** Calls of the one fine operation, which holds every labelled sample. */
+        fineCalls: Long = labelled,
     ) = Run(
-        operations = listOf(OperationStat(0, fineName, labelled, labelled, 0, 0, 0, 0, labelled)),
+        operations = listOf(OperationStat(0, fineName, labelled, fineCalls, 0, 0, 0, 0, labelled)),
         idleHits = 0,
         ticks = 1_000_001,
         samplingSpanNanos = 1_000_000_000_000,
@@ -538,6 +540,22 @@ class CoarseTest {
         assertEquals((80.0 + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES), scale, 1e-12)
         assertEquals(100.0 * scale, coarseFlatFloorBodies(0, hookScale = scale), 1e-9)
         assertTrue("for a slow nanoTime" in coarseFloorParts(0, false, hookScale = scale))
+    }
+
+    /**
+     * Each run has a floor of its own, so the same label under it would read once per run with other
+     * figures. A profile says it once, with the runs' figures as ranges.
+     */
+    @Test
+    fun `a label under its floor in several runs is one warning`() {
+        fun run(body: Double) = report(emptyList(), labelled = 1_000, fineCalls = 100_000_000, body = body)
+        val runs = listOf(run(25.0), run(30.0))
+        val profile = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs)
+        val floor = profile.warnings().ranked.filter { "floor" in it }
+        assertEquals(1, floor.size, floor.joinToString("\n"))
+        assertTrue("below the 50ns to 60ns floor" in floor[0], floor[0])
+        assertTrue("(2 of 2 runs)" in floor[0], floor[0])
+        assertTrue("calls at under" in floor[0] && " to " !in floor[0].substringBefore("each"), "the calls and the bound are the same in both runs: ${floor[0]}")
     }
 
     /** A run's limits are read at its own body: the same bodies, twice the ns on a machine twice as slow. */

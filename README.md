@@ -217,7 +217,7 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
   OS once a second, on Windows by a `typeperf` process; and a few ms at `stop()`.
 - **On your program** the cost is per label entered, not per second of work: a fine label on a 50 ns
   operation is about 5% of it. The report warns where a label is under its floor, and when the hooks
-  together may cost more than 1% of the time inside labels.
+  may add more than 1% to the work inside labels, with the most they can add to the wall time.
 
 ## Tags and setup
 

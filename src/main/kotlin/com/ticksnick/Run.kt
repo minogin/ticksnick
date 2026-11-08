@@ -186,18 +186,27 @@ internal fun tooSmallMessage(fs: List<FineUnderFloor>): String = String.format(
 /**
  * What TickSnick's hooks may have cost a run, at their budgets and the run's body: [fineEntries] times
  * a fine hook ran, [coarseExecutions] coarse executions, [costNanos] of thread-time in all, out of
- * [labelledNanos] inside labels. See [Run.hookCost].
+ * [labelledNanos] inside labels and [wallNanos] of the run's active time. See [Run.hookCost].
  */
-internal class HookCost(val fineEntries: Long, val coarseExecutions: Long, val costNanos: Double, val labelledNanos: Double) {
+internal class HookCost(
+    val fineEntries: Long, val coarseExecutions: Long, val costNanos: Double, val labelledNanos: Double, val wallNanos: Double,
+) {
+    /** Of the work inside labels: what the hooks add to it. */
     val share: Double get() = costNanos / labelledNanos
+
+    /**
+     * Of the wall time: the most the hooks can add to it, all of their cost on the run's critical
+     * path. A run whose labelled work is spread over many threads gains much less.
+     */
+    val wallShare: Double get() = costNanos / wallNanos
 }
 
 /** The `CAREFUL` line of [HookCost] in one run or several, each figure a range where the runs differ. */
 internal fun hookCostMessage(hs: List<HookCost>): String = String.format(
     Locale.ROOT,
-    "labels: TickSnick's hooks may be up to %s of the time inside labels, for %s fine hook entries and %s coarse " +
-            "executions${sym.dash}the labelled code ran up to that much slower than without them; fewer, larger labels cost less",
-    rangeText(hs.map { it.share * 100 }, ::percent),
+    "labels: TickSnick's hooks may add up to %s to the work inside labels, and up to %s to the wall time where that " +
+            "work is the run's critical path, for %s fine hook entries and %s coarse executions${sym.dash}fewer, larger labels cost less",
+    rangeText(hs.map { it.share * 100 }, ::percent), rangeText(hs.map { it.wallShare * 100 }, ::percent),
     rangeText(hs.map { it.fineEntries.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
     rangeText(hs.map { it.coarseExecutions.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
 )
@@ -930,7 +939,7 @@ class Run internal constructor(
         val fine = operations.sumOf { it.hookEntries }
         val executions = coarse.sumOf { it.count }
         val bodies = fine * FINE_BUDGET_BODIES + executions * coarseContextBodies(operations.size, allocations, hookScale)
-        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled)
+        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled, activeNanos.toDouble())
         return h.takeIf { it.share > HOOKS_MAX_SHARE }
     }
 

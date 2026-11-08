@@ -568,7 +568,9 @@ class CoarseTest {
         fun run(calls: Long, body: Double = 25.0) = report(emptyList(), labelled = 1_000, fineCalls = calls, body = body)
         val heavy = run(100_000_000).hookCost()!!
         assertEquals(0.25, heavy.share, 0.01)
-        assertTrue("may be up to 25.0% of the time inside labels" in hookCostMessage(listOf(heavy)), hookCostMessage(listOf(heavy)))
+        assertTrue("may add up to 25.0% to the work inside labels" in hookCostMessage(listOf(heavy)), hookCostMessage(listOf(heavy)))
+        // 0.25 s of a run active for 1,000 s: the most the wall time can grow.
+        assertEquals(0.00025, heavy.wallShare, 0.00001)
         assertTrue(run(10_000_000).hookCost() != null)
         assertTrue(run(100_000).hookCost() == null)
         val runs = listOf(run(100_000_000), run(100_000_000, body = 30.0))

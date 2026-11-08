@@ -405,8 +405,8 @@ class CoarseTest {
         assertEquals(12e9 / 3.4, walls.getValue(branch), 1.0)
         assertEquals(8.4e9 / 3.4, walls.getValue(leaf), 1.0)
         val text = r.render()
-        assertTrue(Regex("""branch\s+\|\s+800\s+4\s+3\.4\s+3\.53 s\s+88%""").containsMatchIn(text), text)
-        assertTrue(Regex("""leaf\s+\|\s+2,400\s+3\s+2\.47 s\s+70%""").containsMatchIn(text), text)
+        assertTrue(Regex("""branch\s+\|\s+800\s+4\s+3\.4\s+3\.53s\s+88%""").containsMatchIn(text), text)
+        assertTrue(Regex("""leaf\s+\|\s+2,400\s+3\s+2\.47s\s+70%""").containsMatchIn(text), text)
     }
 
     /**
@@ -525,7 +525,7 @@ class CoarseTest {
     fun `the floor rises with the fine labels registered`() {
         assertEquals(2_010.0, coarseFloorNanos(0.01, coarseContextNanos(1)), 1e-9)
         assertEquals(4_500.0, coarseFloorNanos(0.01, coarseContextNanos(250)), 1e-9)
-        assertEquals(" (2.00 us, + 600 ns for Allocated, + 200 ns for 20 fine labels)", coarseFloorParts(20, true))
+        assertEquals(" (2.00us, + 600ns for Allocated, + 200ns for 20 fine labels)", coarseFloorParts(20, true))
     }
 
     @Test
@@ -535,7 +535,7 @@ class CoarseTest {
         val msg = coarseTooSmallMessage("req", 1_000_000, 200.0, r.coarseFloorNanosOf(r.coarse[0]), r.coarseContextNanos)
         // "200 ns" and not "200.0 ns": durations print to three significant digits, so the fourth
         // one - which for a sampled or bucketed number is noise - never reaches the page.
-        assertTrue(msg.contains("200 ns"), "the message does not name the measured duration: $msg")
+        assertTrue(msg.contains("200ns"), "the message does not name the measured duration: $msg")
         assertTrue(msg.contains("registerFine(\"req\")"), "the message does not say what to do instead: $msg")
         assertTrue(msg.lines().size == 2, "two lines - the fact and the fix, then the reason: $msg")
     }
@@ -583,9 +583,9 @@ class CoarseTest {
         val counted = report(listOf(c), allocations = true)
         assertEquals(listOf("req"), counted.coarseTooSmall().map { it.name })
         val text = counted.render()
-        assertTrue("TickSnick may add up to 131 ns to a coarse execution here" in text, text)
+        assertTrue("TickSnick may add up to 131ns to a coarse execution here" in text, text)
         assertTrue(
-            "needs 2.61 us here (2.00 us, + 600 ns for Allocated, + 10.0 ns for 1 fine label)" in text,
+            "needs 2.61us here (2.00us, + 600ns for Allocated, + 10.0ns for 1 fine label)" in text,
             "the floor does not say what it is made of: $text"
         )
     }
@@ -717,11 +717,11 @@ class CoarseTest {
         assertTrue(iRun in 0 until iBatch && iBatch < iQuery, "the tree is not drawn in order: $text")
         assertEquals(1, lines.count { it.trim().startsWith("query ") }, "an operation is printed more than once: $text")
         val fineRow = lines[iQuery + 1].split(Regex(" +")).filter { it.isNotEmpty() && it != "|" }
-        assertEquals(listOf("-", "fine", "own", "3.00", "s", "100%"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
+        assertEquals(listOf("-", "fine", "own", "3.00s", "100%"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
         assertTrue(text.contains("- rows split a leaf's time by the innermost label"), "the split rows have no key: $text")
         assertFalse(lines[iQuery].trim().startsWith("fine "), "the fine row is not under its leaf")
         assertTrue(lines[iBatch + 1].trim().startsWith("query "), "a parent repeats its children's breakdown: ${lines[iBatch + 1]}")
-        assertTrue("200 ms" in lines[iQuery], "the pause charged to the row is not on it: ${lines[iQuery]}")
+        assertTrue("200ms" in lines[iQuery], "the pause charged to the row is not on it: ${lines[iQuery]}")
         assertFalse(" was: " in text, "the flat lines are still printed")
         assertFalse("all callers together" in text, "a one-caller tree got the shared-operation block")
     }
@@ -765,7 +765,7 @@ class CoarseTest {
         val rows = text.substringAfter("COARSE OPERATIONS").substringBefore("COARSE AND FINE OPERATIONS").lines().filter { it.trim().startsWith("parse ") }
         assertEquals(3, rows.size, "parse should be under each caller and once over both: $text")
         assertTrue(SHARED_HEADING in text, "the figure over both callers is missing: $text")
-        assertTrue(rows.any { "2.00 s" in it } && rows.any { "1.00 s" in it }, "the per-caller figures are not per caller: $rows")
+        assertTrue(rows.any { "2.00s" in it } && rows.any { "1.00s" in it }, "the per-caller figures are not per caller: $rows")
     }
 
     @Test

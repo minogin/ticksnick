@@ -109,11 +109,11 @@ class FloorCheckTest {
     fun `the same label is named or not depending on the machine`() {
         assertTrue(
             isTooSmall(hits = 559, calls = 31_497_063, stepNanos = step),
-            "tinyStep at one thread bounds under 19.4 ns and must be named"
+            "tinyStep at one thread bounds under 19.4ns and must be named"
         )
         assertFalse(
             isTooSmall(hits = 4_862, calls = 87_847_316, stepNanos = step),
-            "tinyStep at eight threads reads 55 ns and must not be named"
+            "tinyStep at eight threads reads 55ns and must not be named"
         )
     }
 }

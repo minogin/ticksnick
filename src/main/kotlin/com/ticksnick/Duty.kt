@@ -312,7 +312,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
         !ThreadCpuClock.enabled -> "per-thread CPU time is supported but disabled and would not enable"
         resolution < 0 -> "the per-thread CPU clock did not move during the probe"
         resolution * 10 > windowNanos -> String.format(
-            Locale.ROOT, "clock resolution %.3f ms is too coarse for a %.3f s window",
+            Locale.ROOT, "clock resolution %.3fms is too coarse for a %.3fs window",
             resolution / 1e6, windowNanos / 1e9
         )
 
@@ -880,13 +880,13 @@ internal class Duty internal constructor(
      */
     fun careful(activeNanos: Long, reclaimedSlots: Int): List<String> {
         val out = ArrayList<String>()
-        if (reason != null) out += "Runnable: unchecked against the CPU clock, $reason - $UNCHECKED"
+        if (reason != null) out += "Runnable: unchecked against the CPU clock, $reason${sym.dash}$UNCHECKED"
         // Three ways to finish with no window, and the message names the one that happened. Telling
         // a 1.7 s run it was shorter than a 1 s window would contradict the report's own numbers,
         // which is worse than saying nothing.
         else if (!available) out += "Runnable: unchecked against the CPU clock, " + when {
             activeNanos in 1..<windowNanos -> String.format(
-                Locale.ROOT, "the %.1f s run is shorter than the %.3f s check window",
+                Locale.ROOT, "the %.1fs run is shorter than the %.3fs check window",
                 activeNanos / 1e9, windowNanos / 1e9
             )
             // The clock reads -1 for a thread that has exited, so a walk that finds only dead
@@ -896,8 +896,8 @@ internal class Duty internal constructor(
                 Locale.ROOT, "no window closed, %d of the threads being measured exited before the run ended",
                 reclaimedSlots
             )
-            else -> String.format(Locale.ROOT, "no window closed in the %.1f s run", activeNanos / 1e9)
-        } + " - $UNCHECKED"
+            else -> String.format(Locale.ROOT, "no window closed in the %.1fs run", activeNanos / 1e9)
+        } + "${sym.dash}$UNCHECKED"
         // The bound has not found anything; it has run out of evidence, and that is a different
         // sentence. It also names the fix, which is a label around the waiting rather than only
         // around the work.
@@ -905,7 +905,7 @@ internal class Duty internal constructor(
             Locale.ROOT,
             "Runnable: unchecked, %.1f%% of thread-time was off the CPU while reading runnable (a native " +
                     "call, an event loop in a poll, or the scheduler) and operations cover %.1f%% of these " +
-                    "threads, so all of it could be inside them - put a label around the waiting, not only the work",
+                    "threads, so all of it could be inside them${sym.dash}put a label around the waiting, not only the work",
             invisibleOffCpu * 100, labelledFraction * 100
         )
         // Said as what it means for the column a reader looks at, then the number behind it, then
@@ -913,12 +913,12 @@ internal class Duty internal constructor(
         // Broken into lines as a warning is, since it is four times the width of the others.
         else if (runnableBoundPp > CAREFUL_PP) out += String.format(
             Locale.ROOT,
-            "Thread-time%%: may be off by up to %s pp as a share of CPU time - " +
+            "Thread-time%%: may be off by up to %spp as a share of CPU time${sym.dash}" +
                     "only %s of the time inside labels read as Runnable is sure to have been on a CPU, the rest may have been waiting%n",
             threeDigits(runnableBoundPp), percent(carefulDuty * 100)
         ) + causeLine() + (if (carefulDuty < OCCUPANCY_ONLY)
             "\nRead a share as where threads SIT, not where cycles GO, and do not add two up" else "")
-        if (anomalies > 0) out += "thread CPU clock: $anomalies readings went backwards - dropped"
+        if (anomalies > 0) out += "thread CPU clock: $anomalies readings went backwards${sym.dash}dropped"
         return out
     }
 
@@ -941,7 +941,7 @@ internal class Duty internal constructor(
                     "blocking I/O or native calls (label them, so their waiting is a row of its own), or other programs on the same cores"
             else -> String.format(
                 Locale.ROOT,
-                "%s of it when the JVM's %s were full - threads waiting for a core: more processors or fewer threads -%n" +
+                "%s of it when the JVM's %s were full${sym.dash}threads waiting for a core: more processors or fewer threads${sym.dash.trimEnd()}%n" +
                         "and %s with cores to spare: blocking I/O, native calls (label them) or other programs on the same cores",
                 percent(full * 100), cores, percent((1 - full) * 100)
             )

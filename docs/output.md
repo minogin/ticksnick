@@ -19,11 +19,11 @@ Runs          1 run of 'naive', one JVM: no interval
 CAREFUL       times: 1 run of 'naive', no interval - the next JVM can run faster or slower as a whole; shares of all but the smallest rows hold
 
               run  file                               wall    clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr           117 s      99%   27.6 s  27.4 s  27.0 s
-Wall time     117 s = 104 s active + 13.0 s paused (11.1%) in 57 pauses, longest 1.98 s
-runBatch      27.3 s per execution
+              1    2026-10-26T18-16-43.tsr            117s      99%    27.6s   27.4s   27.0s
+Wall time      117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
+runBatch       27.3s per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
-Sampling      every 1.0 ms: the sampler keeps one of the 14 processors busy to hold the interval
+Sampling      every 1.0ms: the sampler keeps one of the 14 processors busy to hold the interval
 ```
 
 ### CAREFUL
@@ -41,7 +41,7 @@ The common ones:
   more runs into the same folder.
 - `clock: moved during the run` - the CPU's frequency changed, so times and costs per call drift
   with it. Shares are not affected.
-- `<label>: N calls at under D each, below the 50 ns floor` - the label is a visible part of what
+- `<label>: N calls at under D each, below the 50ns floor` - the label is a visible part of what
   it measures. Label the enclosing loop instead, with `op(X, times = n) { }`.
 - `<label>: N coarse executions of D, a coarse label needs D here` - the operation is too short for
   a coarse label. Make it a fine one; the `op` calls stay the same.
@@ -64,7 +64,7 @@ several runs is one line ending in `(2 of 4 runs)`. A diff shows the warnings of
 
 ```
 Tags          warmups: 2; batches: 3; roots: org.apache.*
-Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; Processors: 14; Heap: 18 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00 ms; Wait: SPIN
+Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; Processors: 14; Heap: 18 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
 ```
 
 **Tags** are what the program said about the run. **Setup** is what the run read by itself, and how it
@@ -87,7 +87,7 @@ processors it spins on one of them to hold the interval, as here. With fewer it 
 samples, which leaves the processor to the program and makes the interval longer and less regular:
 
 ```
-Sampling      every 1.6 ms (1.0 ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors
+Sampling      every 1.6ms (1.0ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors
 ```
 
 A sampler told to spin on fewer than 4 processors gets the remedy at the end of the line:
@@ -102,12 +102,12 @@ mentions it only in `CAREFUL`, when it moved; the reports over runs list it for 
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
                                |                                             Load                                             |                    Long
 Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
-runBatch                       |           3                         82.0 s              4.20 s      80.0% / 20.0%     27.3 s |     27.4 s          -          -     27.6 s
-  resolveRoot                  |      92,667     30,889      4.0     82.0 s     100%     4.20 s          100% / 0%    3.53 ms |     602 us    7.50 ms    61.6 ms     434 ms
-    resolve                    |     278,001          3              82.0 s     100%     4.20 s          100% / 0%    1.18 ms |     146 us    2.57 ms    19.0 ms     358 ms
-      select                   |     278,001                         42.5 s      52%     3.90 s          100% / 0%     611 us |    62.7 us    1.27 ms    11.6 ms     348 ms
-      via                      |     278,001                         28.1 s      34%     2.99 s          100% / 0%     404 us |    47.9 us     856 us    6.06 ms     339 ms
-      reach                    |     278,001                         10.1 s      12%     1.15 s          100% / 0%     145 us |    27.8 us     362 us    1.65 ms     166 ms
+runBatch                       |           3                          82.0s               4.20s      80.0% / 20.0%      27.3s |      27.4s          -          -      27.6s
+  resolveRoot                  |      92,667     30,889      4.0      82.0s     100%      4.20s          100% / 0%     3.53ms |      602us     7.50ms     61.6ms      434ms
+    resolve                    |     278,001          3               82.0s     100%      4.20s          100% / 0%     1.18ms |      146us     2.57ms     19.0ms      358ms
+      select                   |     278,001                          42.5s      52%      3.90s          100% / 0%      611us |     62.7us     1.27ms     11.6ms      348ms
+      via                      |     278,001                          28.1s      34%      2.99s          100% / 0%      404us |     47.9us      856us     6.06ms      339ms
+      reach                    |     278,001                          10.1s      12%      1.15s          100% / 0%      145us |     27.8us      362us     1.65ms      166ms
 ```
 
 The table is a tree: each operation sits under the one it ran inside, and its figures cover the
@@ -139,15 +139,15 @@ children:
 
 ```
 Coarse operation                Executions Per parent Parallel     Wall v % parent     Paused       Mean
-batch                                    1                         1.16 s                   -     1.16 s
-  plan                                  10         10              1.01 s      87%          -     101 ms
-    - rule                           3,400        340              710 ms      70%                209 us
-    - visit (2 parents)              1,000        100              201 ms      20%                201 us
-    - rare                             500         50             99.2 ms      10%                198 us
+batch                                    1                          1.16s                   -      1.16s
+  plan                                  10         10               1.01s      87%          -      101ms
+    - rule                           3,400        340               710ms      70%                 209us
+    - visit (2 parents)              1,000        100               201ms      20%                 201us
+    - rare                             500         50              99.2ms      10%                 198us
     - and 1 more                                                              <1%
-  cleanup                               10         10              150 ms      13%          -    15.0 ms
-    - visit (2 parents)                100         10             98.2 ms      65%                982 us
-    - unlabelled                       own                        49.6 ms      33%
+  cleanup                               10         10               150ms      13%          -     15.0ms
+    - visit (2 parents)                100         10              98.2ms      65%                 982us
+    - unlabelled                       own                         49.6ms      33%
     - rare                              10          1                   -
 ```
 
@@ -195,15 +195,15 @@ longest executions on that path, with their keys.
 ### Coarse and fine operations
 
 ```
-COARSE AND FINE OPERATIONS - own time, out of 104 s active time
+COARSE AND FINE OPERATIONS - own time, out of 104s active time
                            |                                       Load                                       |             Long             |               Spread
 Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
-onCentral                  |          28.1%       117 s          100% / 0%   569,233,860               205 ns |          8  10.0 ms  2.00 ms |    65.5 s        1.78       4    12
-runBatch *                 |          18.8%      77.8 s     0.198% / 99.8%             3               25.9 s |          -        -        - |    77.8 s        1.00       2     1
-merge                      |          14.1%      58.4 s          100% / 0%   199,138,728               293 ns |          5  7.01 ms  2.00 ms |    43.1 s        1.36       4    12
-visit                      |          14.0%      58.2 s          100% / 0%   562,928,865               103 ns |          -        -        - |    43.5 s        1.34       4    12
-(no operation)             |          6.37%      26.4 s     99.0% / 0.950%             -                    - |          -        -        - |         -           -       -     -
-passedOn                   |          6.00%      24.9 s          100% / 0%   222,178,167               112 ns |          -        -        - |    21.9 s        1.14       4    12
+onCentral                  |          28.1%        117s          100% / 0%   569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
+runBatch *                 |          18.8%       77.8s     0.198% / 99.8%             3                25.9s |          -        -        - |     77.8s        1.00       2     1
+merge                      |          14.1%       58.4s          100% / 0%   199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
+visit                      |          14.0%       58.2s          100% / 0%   562,928,865                103ns |          -        -        - |     43.5s        1.34       4    12
+(no operation)             |          6.37%       26.4s     99.0% / 0.950%             -                    - |          -        -        - |         -           -       -     -
+passedOn                   |          6.00%       24.9s          100% / 0%   222,178,167                112ns |          -        -        - |     21.9s        1.14       4    12
 ```
 
 One row per label, across the whole run, in its **own** time: time inside it and inside no label
@@ -241,7 +241,7 @@ footnote says how much that is.
 ### Sampled
 
 ```
-Sampled       414,466 samples - 103,684 ticks at 1.001 ms mean (jittered) x 5 threads, one sample per thread per tick
+Sampled       414,466 samples - 103,684 ticks at 1.001ms mean (jittered) x 5 threads, one sample per thread per tick
 ```
 
 How many samples the fine table is made of: the ticks, the mean time between them, and the threads
@@ -257,21 +257,21 @@ With two runs or more, each figure is the mean of the runs, and what says how mu
 ```
 Runs          4 runs of 'naive', one JVM each: every figure below is their mean, +- its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
               run  file                               wall    clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr           117 s      99%   27.6 s  27.4 s  27.0 s
-              2    2026-10-26T18-23-49.tsr           117 s      99%   27.4 s  27.1 s  27.5 s
-              3    2026-10-26T18-30-57.tsr           117 s      99%   27.8 s  27.1 s  28.1 s
-              4    2026-10-26T18-38-06.tsr           117 s      99%   27.5 s  27.4 s  27.6 s
-Wall time     117 +-0.444 s (0.4%) = 104 s +-0.3% active + 13.2 s +-2.4% paused (11.3%) in 59 pauses, longest 2.01 s
-runBatch      27.5 +-0.260 s (0.9%) per execution
+              1    2026-10-26T18-16-43.tsr            117s      99%    27.6s   27.4s   27.0s
+              2    2026-10-26T18-23-49.tsr            117s      99%    27.4s   27.1s   27.5s
+              3    2026-10-26T18-30-57.tsr            117s      99%    27.8s   27.1s   28.1s
+              4    2026-10-26T18-38-06.tsr            117s      99%    27.5s   27.4s   27.6s
+Wall time     117 +-0.444s (0.4%) = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 59 pauses, longest 2.01s
+runBatch      27.5 +-0.260s (0.9%) per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
 
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs +- 95%
                                    |                                                                      Load                                                                      |                    Long
 Coarse operation                   |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
-runBatch                           |           3                         82.4 s +-0.9%                           4.29 s +-5.2%           80.0 / 20.0 +-0.0%        27.5 s +-0.9%    |     27.5 s          -          -     28.1 s
-  resolveRoot                      |      92,667     30,889      4.0     82.4 s +-0.9%         100 +-0.0%        4.29 s +-5.2%               100 / 0 +-0.0%       3.55 ms +-0.9%    |     602 us    7.54 ms    61.3 ms     449 ms
-    resolve                        |     278,001          3              82.4 s +-0.9%         100 +-0.0%        4.29 s +-5.2%               100 / 0 +-0.0%       1.18 ms +-0.9%    |     148 us    2.57 ms    18.9 ms     358 ms
-      select                       |     278,001                         42.5 s +-1.1%          52 +-0.4%        4.01 s +-9.1%               100 / 0 +-0.0%        611 us +-1.1%    |    62.8 us    1.28 ms    11.7 ms     348 ms
+runBatch                           |           3                          82.4s +-0.9%                            4.29s +-5.2%           80.0 / 20.0 +-0.0%         27.5s +-0.9%    |      27.5s          -          -      28.1s
+  resolveRoot                      |      92,667     30,889      4.0      82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        3.55ms +-0.9%    |      602us     7.54ms     61.3ms      449ms
+    resolve                        |     278,001          3               82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        1.18ms +-0.9%    |      148us     2.57ms     18.9ms      358ms
+      select                       |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
 ```
 
 **Each run is one sample.** Batches inside one JVM share its compiled code, its heap and the CPU
@@ -285,8 +285,8 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
   slower.
 - **`+-` goes on what says how much:** Wall, % parent, Paused, Runnable / Waiting, Mean,
   Thread-time%, Thread-time and Thread-time per call. Where the figure and its `+-` share a unit, the
-  unit is written once, at the right: `52 +-0.4%` is 51.6% to 52.4%, `117 +-0.444 s` is 116.6 to 117.4 s.
-  Where they do not, the `+-` is a percent of the figure: `42.5 s +-1.1%`. One run has no `+-`, and its
+  unit is written once, at the right: `52 +-0.4%` is 51.6% to 52.4%, `117 +-0.444s` is 116.6 to 117.4 s.
+  Where they do not, the `+-` is a percent of the figure: `42.5s +-1.1%`. One run has no `+-`, and its
   figures keep their units: `52%`.
 - **No `+-` on what says how it ran:** a percentile is the mean of the runs' percentiles, Max is the
   largest of the runs, and the Long and Spread columns have none.
@@ -315,29 +315,29 @@ A warning about either profile is repeated here, and that includes a profile who
 
 ```
 Diff          naive (4 runs) -> centralEdges (4 runs)
-Wall time       117 s -> 91.6 s   -25.4 +-1.75 s         -22 +-1.5%
-  Active        104 s -> 79.2 s   -24.6 +-1.53 s         -24 +-1.5%
-runBatch       27.5 s -> 19.4 s   -8.09 +-0.361 s        -29 +-1.3%       per execution
+Wall time        117s -> 91.6s   -25.4 +-1.75s         -22 +-1.5%
+  Active         104s -> 79.2s   -24.6 +-1.53s         -24 +-1.5%
+runBatch        27.5s -> 19.4s   -8.09 +-0.361s        -29 +-1.3%       per execution
 
 COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%
                                              |                                                                      Load                                                                      |                    Long
 Coarse operation                             |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
-      select                                 |     278,001                         42.5 s +-1.1%          52 +-0.4%        4.01 s +-9.1%               100 / 0 +-0.0%        611 us +-1.1%    |    62.8 us    1.28 ms    11.7 ms     348 ms
-                                             |     278,001                         33.1 s +-2.9%          57 +-0.6%        3.70 s +-8.0%               100 / 0 +-0.0%        475 us +-2.9%    |    49.9 us     995 us    8.75 ms     190 ms
-                                             |           =          =                 -22 +-2.2%        +5.3 +-0.6 pp        -7.7 +-9.5%?                    =                  -22 +-2.2%    |       -21%       -22%       -25%       -45%
+      select                                 |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
+                                             |     278,001                          33.1s +-2.9%          57 +-0.6%         3.70s +-8.0%               100 / 0 +-0.0%         475us +-2.9%    |     49.9us      995us     8.75ms      190ms
+                                             |           =          =                 -22 +-2.2%        +5.3 +-0.6pp        -7.7? +-9.5%                    =                  -22 +-2.2%    |       -21%       -22%       -25%       -45%
 
 COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%
                            |                                                           Load                                                           |             Long             |               Spread
 Operation                  |   Thread-time%           Thread-time           Runnable / Waiting                   Calls Thread-time per call           | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
-onCentral (4 -> 0 runs)    |           28.3 +-0.3%          118 s +-1.6%               100 / 0 +-0.0%      569,233,860               207 ns +-1.6%    |        ~16  45.5 ms  11.0 ms |    65.9 s        1.78       4    12
+onCentral (4 -> 0 runs)    |           28.3 +-0.3%           118s +-1.6%               100 / 0 +-0.0%      569,233,860                207ns +-1.6%    |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
                            |              -                     -                            -                       -                    -           |          -        -        - |         -           -       -     -
 
-dependencies               |           5.58 +-0.1%         23.2 s +-2.6%               100 / 0 +-0.0%      222,178,167               104 ns +-2.6%    |         ~5  14.5 ms  9.01 ms |    20.7 s        1.12       4    12
-                           |           14.5 +-0.2%         43.1 s +-3.1%               100 / 0 +-0.0%      222,178,167               194 ns +-3.1%    |          6  23.5 ms  12.0 ms |    31.6 s        1.37       4    12
-                           |           +9.0 +-0.2 pp          +86 +-5.5%                     =                       =                  +86 +-5.5%    |       +33%     +62%     +33% |      +52%        +22%       =     =
-merge                      |           14.2 +-0.2%         59.0 s +-2.1%               100 / 0 +-0.0%      199,138,728               296 ns +-2.1%    |         ~8  27.7 ms  9.01 ms |    43.6 s        1.35       4    12
-                           |           20.1 +-0.5%         59.7 s +-3.3%               100 / 0 +-0.0%      199,138,728               300 ns +-3.3%    |         ~4  9.51 ms  7.00 ms |    38.3 s        1.56       4    12
-                           |           +5.9 +-0.4 pp         +1.1 +-3.2%?                    =                       =                 +1.1 +-3.2%?   |       -56%     -66%     -22% |      -12%        +15%       =     =
+dependencies               |           5.58 +-0.1%          23.2s +-2.6%               100 / 0 +-0.0%      222,178,167                104ns +-2.6%    |         ~5   14.5ms   9.01ms |     20.7s        1.12       4    12
+                           |           14.5 +-0.2%          43.1s +-3.1%               100 / 0 +-0.0%      222,178,167                194ns +-3.1%    |          6   23.5ms   12.0ms |     31.6s        1.37       4    12
+                           |           +9.0 +-0.2pp          +86 +-5.5%                     =                       =                  +86 +-5.5%    |       +33%     +62%     +33% |      +52%        +22%       =     =
+merge                      |           14.2 +-0.2%          59.0s +-2.1%               100 / 0 +-0.0%      199,138,728                296ns +-2.1%    |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
+                           |           20.1 +-0.5%          59.7s +-3.3%               100 / 0 +-0.0%      199,138,728                300ns +-3.3%    |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
+                           |           +5.9 +-0.4pp         +1.1? +-3.2%                    =                       =                 +1.1? +-3.2%   |       -56%     -66%     -22% |      -12%        +15%       =     =
 ```
 
 A diff has everything a report has, with the same names and forms. A row is three lines: before, after,
@@ -347,7 +347,7 @@ all` stands at the end of each side's line, and a note under a table that only o
 
 - **The change** is a percentage, `pp` for what is itself a percentage, and `=` for no change. Its `+-`
   is in the change's own unit, written once at the right: `-22 +-2.2%` is between -24.2% and -19.8%,
-  `+5.3 +-0.6 pp` between +4.7 and +5.9 pp.
+  `+5.3 +-0.6pp` between +4.7 and +5.9 pp.
 - **`?` at the end of a change means it could be noise:** the runs differ too much to tell, given how many
   changes the diff shows. A 95% interval misses zero one time in twenty when nothing changed, so a
   diff of 80 such changes would show four that are not there. So each change is held to 5% divided by

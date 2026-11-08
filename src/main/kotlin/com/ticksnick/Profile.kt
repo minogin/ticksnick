@@ -51,14 +51,14 @@ internal const val RUN_EXECUTIONS_LISTED = 10
 internal const val RUNS_CLOCK_SPREAD = 0.10
 
 /** The `CAREFUL` line of a folder with one run in it. */
-internal const val ONE_RUN_CAREFUL = "times: 1 run of '%s', no interval - the next JVM can run faster or slower as a whole; " +
+internal val ONE_RUN_CAREFUL: String get() = "times: 1 run of '%s', no interval${sym.dash}the next JVM can run faster or slower as a whole; " +
         "shares of all but the smallest rows hold"
 
 /** How many warnings the `CAREFUL` section prints before it counts the rest instead of listing them. */
 internal const val MAX_CAREFUL = 10
 
 /** Over the block of operations under more than one parent, each over all of its rows, right under the tree. */
-internal const val SHARED_HEADING = "Under multiple parents - each over all of them"
+internal val SHARED_HEADING: String get() = "Under multiple parents${sym.dash}each over all of them"
 
 /** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
 internal const val FOLDED_ROWS = "and more"
@@ -149,8 +149,8 @@ internal fun durationWithInterval(e: Estimate): String =
  */
 internal fun plusMinusPoints(e: Estimate): String = when {
     e.half.isNaN() -> ""
-    e.half < 9.95 -> String.format(Locale.ROOT, "+-%.1f%%", e.half)
-    else -> String.format(Locale.ROOT, "+-%.0f%%", e.half)
+    e.half < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%%", e.half)
+    else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%%", e.half)
 }
 
 /** `+-2.3%`, `+-12%`, or `-` where there is no interval. */
@@ -158,8 +158,8 @@ internal fun plusMinus(e: Estimate): String {
     val r = e.relative * 100
     return when {
         r.isNaN() -> "-"
-        r < 9.95 -> String.format(Locale.ROOT, "+-%.1f%%", r)
-        else -> String.format(Locale.ROOT, "+-%.0f%%", r)
+        r < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%%", r)
+        else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%%", r)
     }
 }
 
@@ -191,10 +191,15 @@ class Profile internal constructor(internal val name: String, internal val files
      * 20-30% from one JVM to the next, while each row's share of its parent holds within a couple of
      * points. So the shares of one run can be worked from, and its times cannot - which is what the
      * line says, every time, rather than refusing the first look.
+     *
+     * In ASCII by default, which every console and pipe prints. [unicode] asks for `±`, `µs`, `→`,
+     * `—`, `…` and `×` in their place: pass it only where the text will be read as Unicode, since
+     * the library cannot tell where it goes.
      */
-    fun render(): String {
+    @JvmOverloads
+    fun render(unicode: Boolean = false): String = withSymbols(unicode) {
         Logo.once()
-        return report(false, (if (runs.size == 1) Warnings(listOf(ONE_RUN_CAREFUL.format(name))) else Warnings()) + warnings())
+        report(false, (if (runs.size == 1) Warnings(listOf(ONE_RUN_CAREFUL.format(name))) else Warnings()) + warnings())
     }
 
     /** One coarse row over the runs: the node at this path in each, null where a run has none. */
@@ -242,7 +247,7 @@ class Profile internal constructor(internal val name: String, internal val files
     internal fun sampledText(): String {
         val per = if (runs.size > 1) " a run" else ""
         return String.format(
-            Locale.ROOT, "%,.0f samples$per - %,.0f ticks at %.3f ms mean (jittered) x %s, one sample per thread per tick",
+            Locale.ROOT, "%,.0f samples$per${sym.dash}%,.0f ticks at %.3fms mean (jittered) ${sym.times} %s, one sample per thread per tick",
             runs.map { it.allHits }.average(), runs.map { it.ticks }.average(), runs.map { it.stepNanos }.average() / 1e6,
             Run.plural(Math.round(runs.map { it.threads }.average()), "thread")
         )
@@ -263,7 +268,7 @@ class Profile internal constructor(internal val name: String, internal val files
     internal fun report(legend: Boolean, careful: Warnings): String = buildString {
         for (failure in runs.mapNotNull { it.failure }.distinct()) {
             appendLine("!".repeat(pageWidth))
-            appendLine("PROFILING STOPPED - these numbers were not going to be right:")
+            appendLine("PROFILING STOPPED${sym.dash}these numbers were not going to be right:")
             appendLine("  $failure")
             appendLine("Everything below is what led to that verdict, not a result. Pass strict=false to")
             appendLine("profile anyway, which is what to do when the code is not yours to change.")
@@ -275,7 +280,7 @@ class Profile internal constructor(internal val name: String, internal val files
             row(
                 "Runs", if (n == 1) "1 run of '$name', one JVM: no interval"
                 else "$n runs of '$name', one JVM each: every figure below is their mean, " +
-                        "+- its 95% interval from how much the runs differ (Student's t, ${n - 1} degrees of freedom)"
+                        "${sym.plusMinus} its 95% interval from how much the runs differ (Student's t, ${n - 1} degrees of freedom)"
             )
         )
         carefulBlock(careful)
@@ -546,7 +551,7 @@ class Profile internal constructor(internal val name: String, internal val files
     /** The widest table, for the rules around a report. */
     internal val pageWidth: Int get() = maxOf(coarseText.width, fineText.width)
 
-    private val overRuns: String get() = if (runs.size > 1) "; each figure the mean of the runs +- 95%" else ""
+    private val overRuns: String get() = if (runs.size > 1) "; each figure the mean of the runs ${sym.plusMinus} 95%" else ""
 
     /**
      * The coarse table with its keys, each once and next to the rows that need it.
@@ -567,7 +572,7 @@ class Profile internal constructor(internal val name: String, internal val files
             // Wall time, so each row says what part of its parent it took: `branch` 88% of the request,
             // and the rest the request's own merge. Summed durations would read 988% of the parent
             // once a fork runs ten at a time. See Run.wallsOf.
-            "COARSE OPERATIONS - wall time, inclusive, nested as it ran" +
+            "COARSE OPERATIONS${sym.dash}wall time, inclusive, nested as it ran" +
                     (if (paused) "; a pause is charged to every operation it interrupted" else "") + overRuns
         )
         with(coarseText) { rows() }
@@ -593,7 +598,7 @@ class Profile internal constructor(internal val name: String, internal val files
         }
         val anyOwn = all.any { it.own }
         if (coarseTable.splitLeaves && anyOwn) add(
-            "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once - they add up to 100%;" +
+            "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once${sym.dash}they add up to 100%;" +
                     " a fine label with labels inside it shows only its own part"
         )
         if (!coarseTable.splitLeaves && anyOwn) add(
@@ -613,7 +618,7 @@ class Profile internal constructor(internal val name: String, internal val files
             "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is in the block above"
         )
         if (runs.size > 1) {
-            add("  % parent is each run's share of its own parent, +- in percentage points: the run's speed cancels out of it")
+            add("  % parent is each run's share of its own parent, ${sym.plusMinus} in percentage points: the run's speed cancels out of it")
             add("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval; - where a run had too few executions for it")
         }
     }
@@ -627,7 +632,7 @@ class Profile internal constructor(internal val name: String, internal val files
      */
     internal fun StringBuilder.fineSection() {
         val fine = fineTable
-        appendLine("COARSE AND FINE OPERATIONS - own time, out of ${duration(runs.map { it.activeNanos.toDouble() }.average())} active time$overRuns")
+        appendLine("COARSE AND FINE OPERATIONS${sym.dash}own time, out of ${duration(runs.map { it.activeNanos.toDouble() }.average())} active time$overRuns")
         if (fine.rows.isNotEmpty()) with(fineText) { rows() }
         // A table with no rows is two rules around nothing. Say what happened instead: an empty
         // table is nearly always a run too short for the sampler to catch, and that is worth
@@ -641,7 +646,7 @@ class Profile internal constructor(internal val name: String, internal val files
             val ticks = runs.maxOf { it.ticks }
             appendLine(
                 if (runs.all { it.labelledHits == 0L } && ticks < Run.MIN_TICKS_FOR_A_TABLE)
-                    "  nothing was sampled - $ticks ticks is too few for the sampler to catch anything. Run for longer."
+                    "  nothing was sampled${sym.dash}$ticks ticks is too few for the sampler to catch anything. Run for longer."
                 else "  nothing was sampled."
             )
         }
@@ -652,7 +657,7 @@ class Profile internal constructor(internal val name: String, internal val files
     internal fun fineNotes(): List<String> = buildList {
         val fine = fineTable
         if (fine.contained.isNotEmpty()) add(
-            "  " + fine.contained.joinToString { it + STAR } + ": coarse, with no own time - every sample inside " +
+            "  " + fine.contained.joinToString { it + STAR } + ": coarse, with no own time${sym.dash}every sample inside " +
                     (if (fine.contained.size == 1) "it" else "them") + " was in an operation above"
         )
         if (fine.folded.isNotEmpty()) {
@@ -660,7 +665,7 @@ class Profile internal constructor(internal val name: String, internal val files
             // Named, in both branches: "1 operation never sampled" leaves the reader to work out
             // which of their labels it was, and on a short run — where this line fires most — the
             // answer is usually the whole point. Capped at four, since a run can fold twenty-five.
-            fun names(ops: List<Unsampled>) = ops.take(4).joinToString { it.name + if (it.coarse) STAR else "" } + if (ops.size > 4) ", ..." else ""
+            fun names(ops: List<Unsampled>) = ops.take(4).joinToString { it.name + if (it.coarse) STAR else "" } + if (ops.size > 4) ", ${sym.ellipsis}" else ""
             // "called anyway" rather than "N of them did run", which reads as nonsense at N = 1 —
             // and one is the common case on a short run, which is exactly when a reader is most
             // likely to be new to the report.
@@ -672,7 +677,7 @@ class Profile internal constructor(internal val name: String, internal val files
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.
         if (fine.rows.any { it.coarse } || fine.contained.isNotEmpty()) {
-            add("  * a coarse operation, showing its OWN work - its full span is in the table above")
+            add("  * a coarse operation, showing its OWN work${sym.dash}its full span is in the table above")
         }
         // A note and not a warning: it is the threshold the `Long` group is printed against, so it
         // belongs under the table that has those columns rather than in the warning section. The
@@ -709,7 +714,7 @@ class Profile internal constructor(internal val name: String, internal val files
         return Warnings(
             intervalWarnings(root(), where) + runWarnings(where),
             if (mixed.isEmpty()) emptyList() else listOf(
-                "runs$where: they differ in ${mixed.joinToString(", ")} - " +
+                "runs$where: they differ in ${mixed.joinToString(", ")}${sym.dash}" +
                         "a folder is same code, same workload, same setup; move a run that differs out of it"
             ),
         )
@@ -719,7 +724,7 @@ class Profile internal constructor(internal val name: String, internal val files
     private fun runWarnings(where: String): List<String> {
         val said = LinkedHashMap<String, Int>()
         for (run in runs) {
-            val failure = run.failure?.let { "profiling stopped: $it - this run's numbers are not a result" }
+            val failure = run.failure?.let { "profiling stopped: $it${sym.dash}this run's numbers are not a result" }
             for (w in listOfNotNull(failure) + run.warnings()) said.merge(w, 1, Int::plus)
         }
         return said.map { (warning, count) ->
@@ -742,7 +747,7 @@ class Profile internal constructor(internal val name: String, internal val files
         if (root != null) {
             val counts = runs.indices.map { root.nodes[it]?.count ?: 0L }
             if (counts.distinct().size > 1) lines +=
-                "${root.name}$where: the runs ran it ${counts.joinToString(", ")} times - " +
+                "${root.name}$where: the runs ran it ${counts.joinToString(", ")} times${sym.dash}" +
                         "a folder is same code, same workload, same setup; move a run that is not out of it"
         }
         val clocks = runs.map { it.clock.mean }
@@ -750,12 +755,12 @@ class Profile internal constructor(internal val name: String, internal val files
             val lo = clocks.min()
             val hi = clocks.max()
             if (lo > 0 && (hi - lo) / lo > RUNS_CLOCK_SPREAD) lines +=
-                "clock$where: ${runs[0].clock.format(lo)} to ${runs[0].clock.format(hi)} across the runs - a run's time " +
+                "clock$where: ${runs[0].clock.format(lo)} to ${runs[0].clock.format(hi)} across the runs${sym.dash}a run's time " +
                         "follows it and the interval includes that; hold the clock still (turbo off) for a tighter one"
         }
         val shared = runs.mapNotNull { it.setup.jvm }.groupingBy { it }.eachCount().values.filter { it > 1 }.sum()
         if (shared > 0) lines +=
-            "runs$where: $shared of ${runs.size} came from one JVM - the interval counts them as independent, so it reads too narrow"
+            "runs$where: $shared of ${runs.size} came from one JVM${sym.dash}the interval counts them as independent, so it reads too narrow"
         return lines
     }
 

@@ -68,7 +68,7 @@ internal class ClockTrace internal constructor(
      * and the maximum: one second caught in a collection or a page fault is not a trend.
      */
     fun careful(): List<String> {
-        notMeasured?.let { return listOf("clock: not measured - $it") }
+        notMeasured?.let { return listOf("clock: not measured${sym.dash}$it") }
         val v = valid
         if (v.size < MIN_CLOCK_SAMPLES) return emptyList()
         val sorted = v.sorted()
@@ -82,7 +82,7 @@ internal class ClockTrace internal constructor(
         val end = median(v.takeLast(ends))
         return listOf(
             "clock: moved during the run, ${format(start)}${unit()} at the start, ${format(end)} at the end, " +
-                    "${format(low)} to ${format(high)} for 80% of it - times and per-call costs drift with it; shares hold"
+                    "${format(low)} to ${format(high)} for 80% of it${sym.dash}times and per-call costs drift with it; shares hold"
         )
     }
 
@@ -102,7 +102,7 @@ internal class ClockTrace internal constructor(
             val b = after.mean
             if (a.isNaN() && b.isNaN()) return emptyList()
             val unit = (if (!b.isNaN()) after else before).unit()
-            return listOf(row("Clock", "${before.format(a)} -> ${after.format(b)}$unit, the mean of each run"))
+            return listOf(row("Clock", "${before.format(a)} ${sym.arrow} ${after.format(b)}$unit, the mean of each run"))
         }
 
         /** The warning when the two runs' clocks are more than [CLOCK_MOVED] apart, for the diff's `CAREFUL` section. */
@@ -112,7 +112,7 @@ internal class ClockTrace internal constructor(
             if (a.isNaN() || b.isNaN() || before.ofBase != after.ofBase || max(a, b) <= min(a, b) * (1 + CLOCK_MOVED)) return emptyList()
             return listOf(
                 String.format(
-                    Locale.ROOT, "clock: %s -> %s%s between the runs - up to %.2fx of a time difference is the " +
+                    Locale.ROOT, "clock: %s ${sym.arrow} %s%s between the runs${sym.dash}up to %.2f${sym.times} of a time difference is the " +
                             "machine, not the code; shares hold", before.format(a), after.format(b), after.unit(), max(a, b) / min(a, b)
                 )
             )

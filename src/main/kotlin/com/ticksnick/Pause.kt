@@ -199,7 +199,7 @@ internal class Pauses internal constructor(
      */
     fun careful(): List<String> {
         if (!measured) return listOf(
-            "pauses: not measured - a parked sampler is late on every tick, so none of them reads as a pause" +
+            "pauses: not measured${sym.dash}a parked sampler is late on every tick, so none of them reads as a pause" +
                     (if (gcNanos > 0) "; the JVM counts ${duration(gcNanos.toDouble())} of GC, inside active"
                     else "")
         )
@@ -207,7 +207,7 @@ internal class Pauses internal constructor(
             // Collections the sampler could not see, each shorter than a step. Real pauses, and left
             // in active time all the same: nothing here measured them but the JVM's word for it.
             return if (gcNanos > 0) listOf(
-                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC in pauses under one tick - the " +
+                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC in pauses under one tick${sym.dash}the " +
                         "sampler cannot see them, so they are inside active"
             ) else emptyList()
         }
@@ -215,20 +215,20 @@ internal class Pauses internal constructor(
             Locale.ROOT, "%s in %s", duration(pausedNanos.toDouble()), Run.plural(pauses, "pause")
         )
         if (gcNanos < 0) return listOf(
-            "pauses: $seen seen by the sampler, not confirmed - this JVM's collectors cannot be read, so counted as active"
+            "pauses: $seen seen by the sampler, not confirmed${sym.dash}this JVM's collectors cannot be read, so counted as active"
         )
         return when {
             // The two are the same quantity measured from opposite sides, and they agree to a
             // percent when the pauses were collections. Said only when they do not.
             pausedNanos - gcNanos > slack(pausedNanos) -> listOf(
                 String.format(
-                    Locale.ROOT, "pauses: the sampler lost %s the JVM did not count as GC - another kind of pause, or " +
+                    Locale.ROOT, "pauses: the sampler lost %s the JVM did not count as GC${sym.dash}another kind of pause, or " +
                             "the sampler kept off its core; counted as active",
                     duration((pausedNanos - gcNanos).toDouble())
                 )
             )
             gcNanos - pausedNanos > slack(gcNanos) -> listOf(
-                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC, more than the sampler saw - pauses under " +
+                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC, more than the sampler saw${sym.dash}pauses under " +
                         "one tick are not resolved, and are inside active"
             )
             else -> emptyList()

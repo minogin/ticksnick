@@ -34,8 +34,8 @@ class RunTest {
      * *why*, because that is what a dash is for.
      *
      * The library cannot fix this at the other end — [Run.render] returns a `String` and somebody
-     * else decides the encoding it is printed with — so the only reliable answer is to emit nothing
-     * that needs an encoding.
+     * else decides the encoding it is printed with — so the default emits nothing that needs an
+     * encoding, and Unicode is printed only when the caller asks for it.
      */
     @Test
     fun `every line the report can print is ASCII`() {
@@ -241,7 +241,7 @@ class RunTest {
      * When the bound found nothing, the report says so in words and never prints a percentage.
      *
      * Event loops whose waiting is native are the case: 34.4% of thread-time is off the CPU while
-     * reading `RUNNABLE`, and labels cover 13.9%. Printing "0.00%" and "100 pp" there
+     * reading `RUNNABLE`, and labels cover 13.9%. Printing "0.00%" and "100pp" there
      * would read as a measurement, and a reader would rightly distrust shares that are fine.
      */
     @Test
@@ -259,9 +259,9 @@ class RunTest {
         val d = duty(labelled = 0.9846, aggregate = 0.6927, invisible = 0.014, labelledFraction = 0.595)
         assertFalse(d.unbounded)
         val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
-        assertTrue(lines.contains("off by up to 1.56 pp"), "the bound was not printed")
+        assertTrue(lines.contains("off by up to 1.56pp"), "the bound was not printed")
         assertFalse(lines.contains("unchecked"), "printed the diagnosis over a real bound")
-        assertEquals(1.56, d.boundPp, 0.05, "the 1.57 pp bound moved")
+        assertEquals(1.56, d.boundPp, 0.05, "the 1.57pp bound moved")
     }
 
     /**
@@ -314,7 +314,7 @@ class RunTest {
     @Test
     fun `the Careful number is the Runnable part's`() {
         val line = dutyWith(runnable = 0.9).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single()
-        assertTrue("off by up to 11.1 pp" in line, line)
+        assertTrue("off by up to 11.1pp" in line, line)
         assertTrue("only 90.0% of the time inside labels read as Runnable" in line, line)
         assertTrue(dutyWith(runnable = 0.995).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).isEmpty(),
             "a Runnable part on a CPU 99.5% of the time printed a warning")
@@ -373,7 +373,7 @@ class RunTest {
     fun `the bound comes from labelled occupancy and not from every thread`() {
         val starved = duty(labelled = 0.9694, aggregate = 0.1940, labelledFraction = 0.2)
         assertEquals(0.9694, starved.shareDuty, 1e-9)
-        assertEquals(3.16, starved.boundPp, 0.05, "starvation's recorded 3.16 pp moved")
+        assertEquals(3.16, starved.boundPp, 0.05, "starvation's recorded 3.16pp moved")
     }
 
     /** With no per-thread figure the aggregate stands in: a looser bound, not a wrong one. */
@@ -415,13 +415,13 @@ class RunTest {
     /** Four orders of magnitude in one column: a duration picks the unit that keeps it readable. */
     @Test
     fun `durations pick a readable unit`() {
-        assertTrue(duration(20.0).contains("n"), "20 ns should print in nanoseconds")
-        assertTrue(duration(9_000.0).contains("u"), "9 us should print in microseconds")
-        assertTrue(duration(1_500_000.0).contains("m"), "1.5 ms should print in milliseconds")
+        assertTrue(duration(20.0).contains("n"), "20ns should print in nanoseconds")
+        assertTrue(duration(9_000.0).contains("u"), "9us should print in microseconds")
+        assertTrue(duration(1_500_000.0).contains("m"), "1.5ms should print in milliseconds")
         assertEquals("-", duration(Double.NaN))
     }
 
-    /** Thread-time crosses to seconds at a second, so 40 s never prints as "40080.00 ms". */
+    /** Thread-time crosses to seconds at a second, so 40 s never prints as "40080.00ms". */
     @Test
     fun `thread time crosses to seconds at a second`() {
         assertTrue(threadTime(999_000_000.0).endsWith("ms"))
@@ -470,7 +470,7 @@ class RunTest {
     @Test
     fun `a parked sampler says what it freed and the step it got`() {
         assertEquals(
-            "every 1.6 ms (1.0 ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors",
+            "every 1.6ms (1.0ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors",
             sampled(WaitStrategy.PARK, processors = 2, ticks = 626).samplingLine(),
         )
     }
@@ -478,7 +478,7 @@ class RunTest {
     @Test
     fun `a spinning sampler on enough processors says what it holds, with no remedy`() {
         assertEquals(
-            "every 1.0 ms: the sampler keeps one of the 14 processors busy to hold the interval",
+            "every 1.0ms: the sampler keeps one of the 14 processors busy to hold the interval",
             sampled(WaitStrategy.SPIN, processors = 14, ticks = 1_001).samplingLine(),
         )
     }
@@ -486,7 +486,7 @@ class RunTest {
     @Test
     fun `a spinning sampler on few processors names the remedy`() {
         assertEquals(
-            "every 1.0 ms: the sampler keeps one of the 2 processors busy to hold the interval - start(wait = PARK) to free it",
+            "every 1.0ms: the sampler keeps one of the 2 processors busy to hold the interval - start(wait = PARK) to free it",
             sampled(WaitStrategy.SPIN, processors = 2, ticks = 1_001).samplingLine(),
         )
     }
@@ -507,7 +507,7 @@ class RunTest {
             val loaded = RunStore.load(path)
             assertEquals(WaitStrategy.PARK, loaded.wait)
             assertEquals(1_000_000, loaded.askedStepNanos)
-            assertTrue("Sampling      every 1.6 ms (1.0 ms asked)" in loaded.render())
+            assertTrue("Sampling      every 1.6ms (1.0ms asked)" in loaded.render())
 
             RunStore.save(report(emptyList()), path)
             assertEquals(null, RunStore.load(path).samplingLine())

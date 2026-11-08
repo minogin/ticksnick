@@ -190,6 +190,11 @@ runs, and on disk it is a folder of them.
   change that could be noise is marked `?`. Which of code, workload or setup differs between the two
   is the question it answers.
 
+Reports are ASCII. `render(unicode = true)` and `diff(before, after, unicode = true)` print `±`, `µs`,
+`→`, `—`, `…` and `×` instead, for output that is read as Unicode; the CLI takes `--unicode`. On Windows,
+output through a pipe (Gradle, a script) is written in the platform's charset unless the JVM has
+`-Dstdout.encoding=UTF-8`.
+
 A single run renders as a report of its own. It warns that its times have no interval. Its shares of
 the parent are still reliable.
 

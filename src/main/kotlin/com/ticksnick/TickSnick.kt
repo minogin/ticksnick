@@ -15,7 +15,12 @@ object TickSnick {
     @JvmStatic
     fun load(folder: Path): Profile = Profile.load(folder).also { Logo.once() }
 
-    /** [before] -> [after]: each side the mean of its runs, the change with its 95% interval once both have two. */
+    /**
+     * [before] -> [after]: each side the mean of its runs, the change with its 95% interval once both have two.
+     * [unicode] as in [Profile.render].
+     */
     @JvmStatic
-    fun diff(before: Profile, after: Profile): String = ProfileDiff(before, after).render().also { Logo.once() }
+    @JvmOverloads
+    fun diff(before: Profile, after: Profile, unicode: Boolean = false): String =
+        withSymbols(unicode) { ProfileDiff(before, after).render() }.also { Logo.once() }
 }

@@ -139,7 +139,7 @@ class DutyBoundTest {
     fun `the degenerate case is still a fraction without the state read`() {
         val r = bound(*Array(4) { Thread(labelled = 0.139, offCpu = 0.344) }, state = false)
         assertTrue(r.duty >= 0.0, "duty went below zero: ${r.duty}")
-        assertTrue(pp(r.duty) in 0.0..100.0, "bound ${pp(r.duty)} pp is not a percentage")
+        assertTrue(pp(r.duty) in 0.0..100.0, "bound ${pp(r.duty)}pp is not a percentage")
     }
 
     /** With no labelled samples anywhere there is nothing to bound, and NaN says so. */
@@ -180,7 +180,7 @@ class DutyBoundTest {
     fun `plain CPU-bound run - aggregate and labelled agree`() {
         val r = bound(*Array(8) { Thread(labelled = 0.995, offCpu = 0.0105) })
         assertEquals(0.9894, r.duty, 0.002, "the plain CPU-bound regime moved")
-        assertTrue(pp(r.duty) < 2.0, "bound ${pp(r.duty)} pp on a run that never waits")
+        assertTrue(pp(r.duty) < 2.0, "bound ${pp(r.duty)}pp on a run that never waits")
     }
 
     /**
@@ -195,7 +195,7 @@ class DutyBoundTest {
         val parked = Thread(labelled = 0.0, offCpu = 1.0, notRunnable = 1.0)
         val r = bound(working, working, working, *Array(12) { parked })
         assertEquals(0.9694, r.duty, 0.002, "starvation regime moved")
-        assertEquals(3.16, pp(r.duty), 0.25, "the bound is no longer the recorded 3.16 pp")
+        assertEquals(3.16, pp(r.duty), 0.25, "the bound is no longer the recorded 3.16pp")
     }
 
     /**
@@ -211,7 +211,7 @@ class DutyBoundTest {
             Thread(labelled = 1.0, offCpu = 0.606, notRunnable = 0.594, labelledNotRunnable = 0.594)
         })
         assertEquals(0.3940, r.duty, 0.01, "lock regime moved")
-        assertTrue(pp(r.duty) > 50.0, "bound fell to ${pp(r.duty)} pp where the waiting is genuinely labelled")
+        assertTrue(pp(r.duty) > 50.0, "bound fell to ${pp(r.duty)}pp where the waiting is genuinely labelled")
     }
 
     /**
@@ -231,7 +231,7 @@ class DutyBoundTest {
 
         val withState = bound(*threads, state = true)
         assertEquals(0.9846, withState.duty, 0.01, "the search-pool regime no longer reads 98.46%")
-        assertTrue(pp(withState.duty) < 3.0, "bound ${pp(withState.duty)} pp against a recorded 1.57")
+        assertTrue(pp(withState.duty) < 3.0, "bound ${pp(withState.duty)}pp against a recorded 1.57")
 
         val without = bound(*threads, state = false)
         assertTrue(

@@ -81,7 +81,7 @@ internal fun allocationsCareful(before: List<Run>, after: List<Run>): List<Strin
     val b = before.any { it.allocations }
     val a = after.any { it.allocations }
     return if (b == a) emptyList() else listOf(
-        "allocations: counted on one side only - each coarse execution there cost about " +
+        "allocations: counted on one side only${sym.dash}each coarse execution there cost about " +
                 "${COARSE_ALLOCATIONS_NANOS.toInt()} ns more, which a short operation shows in its time"
     )
 }
@@ -119,7 +119,7 @@ internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double): Boolean =
 internal fun tooSmallMessage(name: String, calls: Long, upperNanos: Double): String = String.format(
     // Three lines: the fact, the reason, the fix. Same shape as the coarse floor's message.
     Locale.ROOT,
-    "%s: %,d calls at under %s each, below the %.0f ns floor - label the enclosing loop instead, " +
+    "%s: %,d calls at under %s each, below the %.0fns floor${sym.dash}label the enclosing loop instead, " +
             "op(%s, times = n) { }, or drop it if its share has already answered the question%n" +
             "the hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels",
     name, calls, duration(upperNanos), Run.FLOOR_NANOS, name
@@ -187,18 +187,18 @@ internal fun coarseTooSmallMessage(
     val overhead = contextNanos / meanNanos * 100
     val why = if (shareBound) String.format(
         Locale.ROOT,
-        "accurate per execution (up to %.1f%% overhead), but %,d coarse executions at up to %.0f ns each are over 1%% of the run",
+        "accurate per execution (up to %.1f%% overhead), but %,d coarse executions at up to %.0fns each are over 1%% of the run",
         overhead, count, contextNanos
     ) else String.format(
         Locale.ROOT,
-        "TickSnick may add up to %.0f ns to a coarse execution here, %.0f%% of an operation this size",
+        "TickSnick may add up to %.0fns to a coarse execution here, %.0f%% of an operation this size",
         contextNanos, overhead
     )
     // What the floor is made of only where the flat floor bound: the share condition's number is not
     // a sum of those parts.
     return String.format(
         Locale.ROOT,
-        "%s: %,d coarse executions of %s, a coarse label needs %s here%s - register it fine, registerFine(\"%s\"), " +
+        "%s: %,d coarse executions of %s, a coarse label needs %s here%s${sym.dash}register it fine, registerFine(\"%s\"), " +
                 "and keep the op(...) calls; or put the coarse label around a batch of these%n%s",
         name, count, duration(meanNanos), duration(requiredNanos), if (shareBound) "" else parts, name, why
     )
@@ -215,12 +215,12 @@ internal fun coarseTooSmallMessage(
 internal fun staleContextMessage(worst: String, hits: Long, share: Double): String = String.format(
     Locale.ROOT,
     "%,d samples caught a thread working inside a coarse execution that had already been%n" +
-            "    closed by the thread that opened it - mostly %s. That is %.1f%% of all the%n" +
+            "    closed by the thread that opened it${sym.dash}mostly %s. That is %.1f%% of all the%n" +
             "    thread-time spent inside coarse executions.%n" +
             "    The time belongs to an execution which no longer exists, so it is excluded from%n" +
             "    every number %s reports rather than quietly inflating them.%n" +
             "    Either work was handed to another thread and never waited for, so it outlived the%n" +
-            "    span carrying it - propagate only what the request actually joins - or a span is%n" +
+            "    span carrying it${sym.dash}propagate only what the request actually joins${sym.dash}or a span is%n" +
             "    closed too early, before the work it covers has finished.",
     hits, worst, share * 100, worst
 )
@@ -237,7 +237,7 @@ internal fun mismatchMessage(closed: String, open: String): String = String.form
     "exit(%s) was called while %s was the operation open on this thread.%n" +
             "    One of them now covers work that was never inside it, and the number that comes " +
             "out of%n" +
-            "    that is plausible rather than obviously wrong - which is the direction that costs " +
+            "    that is plausible rather than obviously wrong${sym.dash}which is the direction that costs " +
             "you a day.%n" +
             "    The thread was unwound anyway, so this is one bad label and not every label after " +
             "it.",
@@ -253,7 +253,7 @@ internal fun leakMessage(open: String, thread: String = Thread.currentThread().n
     "%s was still open on thread %s at a point the caller said should be quiescent.%n" +
             "    Every sample taken on that thread between the leak and this check was billed to " +
             "%s,%n" +
-            "    which does not look like an error - it looks like a finding, with a plausible " +
+            "    which does not look like an error${sym.dash}it looks like a finding, with a plausible " +
             "number beside it.%n" +
             "    An operation label placed with enter/exit has no finally: a body that throws leaves it set.",
     open, thread, open
@@ -282,7 +282,7 @@ internal fun isSuspect(hits: Long, stuckHits: Long, stuckInstances: Long, machin
 internal fun duration(nanos: Double): String {
     if (nanos.isNaN()) return "-"
     val unit = durationUnitOf(nanos)
-    return threeSignificantString(nanos / unit.scale) + " " + unit.name
+    return threeSignificantString(nanos / unit.scale) + unit.text
 }
 
 /** The unit [duration] prints [nanos] in. */
@@ -302,7 +302,7 @@ private fun durationUnitOf(nanos: Double): DurationUnit {
 internal fun durationPlusMinus(value: Double, half: Double, signed: Boolean = false): String {
     val unit = durationUnitOf(maxOf(abs(value), half))
     val sign = if (value < 0) "-" else if (signed) "+" else ""
-    return sign + significant(abs(value) / unit.scale) + " +-" + significant(half / unit.scale) + " " + unit.name
+    return sign + significant(abs(value) / unit.scale) + " ${sym.plusMinus}" + significant(half / unit.scale) + unit.text
 }
 
 /** Three significant digits, below 1 as well as above it: `0.444`, `0.00128`, `9.15`, `117`. */
@@ -313,7 +313,10 @@ private fun significant(v: Double): String = when {
 }
 
 /** One rung: the value it takes over at, what to divide by, and what to call it. */
-private class DurationUnit(val from: Double, val scale: Double, val name: String)
+private class DurationUnit(val from: Double, val scale: Double, val name: String) {
+    /** The unit as the report prints it, `us` in ASCII and `µs` in Unicode. */
+    val text: String get() = if (name == "us") sym.micro else name
+}
 
 /**
  * The ladder, and where it stops.
@@ -786,7 +789,7 @@ class Run internal constructor(
         val processors = if (n > 0) "one of the $n processors" else "a processor"
         return if (w == WaitStrategy.SPIN) {
             "every ${stepText(stepNanos)}: the sampler keeps $processors busy to hold the interval" +
-                    if (n in 1 until SPIN_MIN_PROCESSORS) " - start(wait = PARK) to free it" else ""
+                    if (n in 1 until SPIN_MIN_PROCESSORS) "${sym.dash}start(wait = PARK) to free it" else ""
         } else {
             val asked = if (askedStepNanos > 0 && abs(stepNanos / askedStepNanos - 1) > ASKED_STEP_TOLERANCE)
                 " (${stepText(askedStepNanos.toDouble())} asked)" else ""
@@ -795,7 +798,7 @@ class Run internal constructor(
     }
 
     private fun stepText(nanos: Double): String =
-        String.format(Locale.ROOT, if (nanos >= 1_000_000) "%.1f ms" else "%.2f ms", nanos / 1e6)
+        String.format(Locale.ROOT, if (nanos >= 1_000_000) "%.1fms" else "%.2fms", nanos / 1e6)
 
     /** Samples inside a fine label. Self time by construction: the hook keeps the innermost id. */
     internal val fineHits: Long get() = operations.sumOf { it.hits }
@@ -1144,7 +1147,7 @@ class Run internal constructor(
                 // cycle above bounds that second kind, and only in aggregate.
                 waiting <= WAITING_NONE -> String.format(
                     Locale.ROOT,
-                    "%.1f%% of those long samples caught the thread runnable - it is not waiting on anything, " +
+                    "%.1f%% of those long samples caught the thread runnable${sym.dash}it is not waiting on anything, " +
                             "so the share is honest and the operation wants a coarse label for its per-execution " +
                             "statistics (runnable is not the same as scheduled: see the duty cycle above)",
                     (1 - waiting) * 100
@@ -1154,7 +1157,7 @@ class Run internal constructor(
                 // than an alibi drawn from the whole run's budget.
                 waiting >= WAITING_MOSTLY -> String.format(
                     Locale.ROOT,
-                    "%.1f%% of those long samples caught the thread parked or blocked - it is *waiting*, " +
+                    "%.1f%% of those long samples caught the thread parked or blocked${sym.dash}it is *waiting*, " +
                             "not working. Read this share as thread-time: it does not add up across threads the " +
                             "way CPU does, and %s of wall clock had anyone inside it at all",
                     waiting * 100, threadTime(elapsedNanosOf(op))
@@ -1162,7 +1165,7 @@ class Run internal constructor(
 
                 else -> String.format(
                     Locale.ROOT,
-                    "%.1f%% of those long samples caught the thread parked - part working, part waiting, " +
+                    "%.1f%% of those long samples caught the thread parked${sym.dash}part working, part waiting, " +
                             "and the split is measured rather than bounded",
                     waiting * 100
                 )
@@ -1188,7 +1191,7 @@ class Run internal constructor(
             // nothing here can be mostly waiting, at 35% something is.
             else -> String.format(
                 Locale.ROOT,
-                "working or waiting cannot be told - state sampling is off, and the run's whole off-CPU time, %.1f%% " +
+                "working or waiting cannot be told${sym.dash}state sampling is off, and the run's whole off-CPU time, %.1f%% " +
                         "of the thread-time, is enough to account for all of it: read this share as thread-time, not " +
                         "as time on a core",
                 (1 - duty.duty) * 100
@@ -1495,7 +1498,7 @@ class Run internal constructor(
         // reference belongs in output.md where it can be read once rather than skipped thirty times.
         appendLine("  thread-time is sampled and summed across threads over ACTIVE time, NOT CPU")
         appendLine("  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working")
-        appendLine("  concurrency is threads INSIDE at once, running or parked - not a speedup")
+        appendLine("  concurrency is threads INSIDE at once, running or parked${sym.dash}not a speedup")
         appendLine("  a share is where time went, NOT what removing the operation would save")
         if (!full) {
             appendLine("  full notes: docs/output.md")
@@ -1506,19 +1509,19 @@ class Run internal constructor(
         appendLine("  can create work for everything else as well as doing its own. The two numbers are")
         appendLine("  different questions and the gap can be orders of magnitude")
         appendLine("thread-time% and thread-time are the same quantity, relative and absolute: sampled and")
-        appendLine("  summed across threads, with waiting counted in full. NOT CPU - a Careful line under the")
+        appendLine("  summed across threads, with waiting counted in full. NOT CPU${sym.dash}a Careful line under the")
         appendLine("  header says when the gap matters. The share is of every sample, so it is a share of active")
         appendLine("  time and '(no operation)' is the rest; the absolute one is the column to compare between")
         appendLine("  two runs")
         appendLine("wall time = active + paused. Paused is time every thread was stopped: ticks the sampler ran")
         appendLine("  a whole tick late, as far as the JVM's own count of its collections confirms them. A late")
-        appendLine("  tick nobody confirmed stays in active time - the sampler may have been stopped alone. No")
+        appendLine("  tick nobody confirmed stays in active time${sym.dash}the sampler may have been stopped alone. No")
         appendLine("  sample is taken in a pause, so the fine table is ACTIVE time throughout: a pause does not")
         appendLine("  move a share, and thread-time and time per call are scaled to the active tick. The coarse")
         appendLine("  table is WALL time, two timestamps per execution, so a span includes the pauses inside it")
         appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
         appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
-        appendLine("  NOT working - a thread the scheduler merely preempted reads runnable, and so does one")
+        appendLine("  NOT working${sym.dash}a thread the scheduler merely preempted reads runnable, and so does one")
         appendLine("  stopped inside a native call, which the JVM cannot see into. So the left half is an UPPER")
         appendLine("  BOUND on the work and the CPU clock is the only thing that bounds it in turn, which is what")
         appendLine("  the Careful line about it says; the right half is waiting that some other thread caused")
@@ -1526,14 +1529,14 @@ class Run internal constructor(
         appendLine("  which thread-time is. Not latency either: it is every execution's interval unioned, so it")
         appendLine("  says nothing about any single one of them")
         appendLine("concurrency is thread-time / wall-time: the MEAN number of threads inside this operation")
-        appendLine("  while anybody was. The tick cancels - thread-ticks over ticks - so the ratio is a count. It")
+        appendLine("  while anybody was. The tick cancels${sym.dash}thread-ticks over ticks${sym.dash}so the ratio is a count. It")
         appendLine("  is what turns a big thread-time back into real cost: 100 s of waiting is a convoy to break")
         appendLine("  up at 15 and steady contention to design out at 1.7. NOT parallelism: threads inside are")
         appendLine("  not threads executing, and two threads asleep in the same label is a concurrency of 2 with")
         appendLine("  nothing running at all. Multiply by the runnable half for that")
-        appendLine("workers is the most threads ever inside at one tick - the maximum of the series concurrency")
+        appendLine("workers is the most threads ever inside at one tick${sym.dash}the maximum of the series concurrency")
         appendLine("  averages. The column to read against what you DISPATCHED: three submitted and workers 2")
-        appendLine("  means something is off. Detected, not measured, so it is a lower bound - an overlap that")
+        appendLine("  means something is off. Detected, not measured, so it is a lower bound${sym.dash}an overlap that")
         appendLine("  starts and ends between two ticks is one nobody saw")
         appendLine("pool is the distinct threads that ever CALLED the operation, counted by the hook and exact.")
         appendLine("  workers 1 with pool 8 is eight threads queueing through one at a time, which the warnings")
@@ -1543,7 +1546,7 @@ class Run internal constructor(
         if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
             appendLine()
             appendLine("  for coarse operations:")
-            appendLine("  executions, mean and the percentiles are MEASURED, two timestamps per execution - the")
+            appendLine("  executions, mean and the percentiles are MEASURED, two timestamps per execution${sym.dash}the")
             appendLine("    only numbers here that are not sampled. Percentiles are exact up to $EXACT_SPANS executions and")
             appendLine("    within 0.8% past them; a p90 needs 10 executions and a p99 100, and shows - with fewer")
             appendLine("  wall is the part of its root's wall time a row took: its durations summed, divided by")
@@ -1555,7 +1558,7 @@ class Run internal constructor(
             appendLine("    its own Parallel when one execution ran it on several threads at a time")
             appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
             appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
-            appendLine("  'paused' is charged to every span a pause interrupted - not to the span that caused it")
+            appendLine("  'paused' is charged to every span a pause interrupted${sym.dash}not to the span that caused it")
             if (coarseTree.any { t -> t.flatten().any { it.slowest.isNotEmpty() } }) {
                 appendLine("  'slowest:' under a row opened with a key: its longest executions on that path, measured,")
                 appendLine("    wall time with any pause in it")
@@ -1679,23 +1682,23 @@ class Run internal constructor(
             // A leaked label does not look like an error. It looks like a finding: one operation
             // quietly accumulating everybody else's samples, with a plausible number beside it.
             if (imbalances > 0) add(
-                "labels: $imbalances were still open at a point the caller said should be quiescent - " +
+                "labels: $imbalances were still open at a point the caller said should be quiescent${sym.dash}" +
                         "everything after each leak was billed to the leaked operation\n" + NO_FINALLY
             )
             if (openAtEnd > 0) add(
-                "labels: $openAtEnd threads were still inside a hand-placed one when sampling stopped - " +
+                "labels: $openAtEnd threads were still inside a hand-placed one when sampling stopped${sym.dash}" +
                         "nothing can close it now\n" + NO_FINALLY
             )
             if (allocationsMissing) add("allocations: this JVM cannot report allocated bytes, so there is no Allocated column")
             if (untrackedSlots > 0) add(
-                "threads: $untrackedSlots arrived past the $MAX_SLOTS-slot ceiling and were NOT SAMPLED - " +
+                "threads: $untrackedSlots arrived past the $MAX_SLOTS-slot ceiling and were NOT SAMPLED${sym.dash}" +
                         "their thread-time is missing from every number, including the denominators"
             )
             // No warning for threads that exited without Profiler.release(): the sampler skips a
             // thread that has exited and the slot is reclaimed within a second, so nothing above is
             // distorted.
             if (openContextsAtEnd > 0) add(
-                "coarse labels: $openContextsAtEnd executions were still open when sampling stopped - their spans " +
+                "coarse labels: $openContextsAtEnd executions were still open when sampling stopped${sym.dash}their spans " +
                         "are missing, and every sample taken inside them was billed to them"
             )
             // Thread state cannot see a native wait, and on a workload that does nothing else that is
@@ -1703,7 +1706,7 @@ class Run internal constructor(
             // and it is the reader who knows which they have.
             for (c in coarse.filter { it.count > 0 && workingIsContradicted(it) }.sortedByDescending { it.working }) add(
                 String.format(
-                    Locale.ROOT, "%s: on a CPU %.2f, but the measured time on CPU bounds it at %.2f - threads inside were on a CPU %.2f%% " +
+                    Locale.ROOT, "%s: on a CPU %.2f, but the measured time on CPU bounds it at %.2f${sym.dash}threads inside were on a CPU %.2f%% " +
                             "of the time, and a thread stopped in a native call reads Runnable, so Waiting is short by the same amount",
                     c.name, c.working, workingCeilingOf(c), duty.labelledDuty * 100
                 )
@@ -1712,11 +1715,11 @@ class Run internal constructor(
             // different causes with opposite fixes.
             if (staleContextHits > 0) add(
                 String.format(
-                    Locale.ROOT, "coarse labels: %s of the thread-time inside coarse executions (%s) was inside one already closed%s - " +
+                    Locale.ROOT, "coarse labels: %s of the thread-time inside coarse executions (%s) was inside one already closed%s${sym.dash}" +
                             "it is left out of every table",
                     staleContextShare * 100, threadTime(staleContextHits * stepNanos),
                     coarse.maxByOrNull { it.staleHits }?.takeIf { it.staleHits > 0 }?.let { ", mostly under ${it.name}" } ?: ""
-                ) + "\nwork was handed to another thread and never waited for - propagate only what the request joins - or a span closes too early"
+                ) + "\nwork was handed to another thread and never waited for${sym.dash}propagate only what the request joins${sym.dash}or a span closes too early"
             )
             // What limits the whole run: the pauses, the cores, the clock - the clock only when it
             // moved or could not be read, a steady one being the healthy case.
@@ -1726,7 +1729,7 @@ class Run internal constructor(
             // of the program" from "work escaped to another thread".
             if (labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
                 String.format(
-                    Locale.ROOT, "coarse labels: %s of thread-time inside fine operations (%s) was inside no coarse span%s - " +
+                    Locale.ROOT, "coarse labels: %s of thread-time inside fine operations (%s) was inside no coarse span%s${sym.dash}" +
                             "you bracketed part of the program, which is fine, or work is ESCAPING its context onto threads it never reached",
                     labelledOutsideCoarseShare * 100, threadTime(labelledOutsideCoarse * stepNanos),
                     outsideCoarseSuspects().take(4).takeIf { it.isNotEmpty() }?.let { s -> ", mostly " + s.joinToString(", ") { it.name } } ?: ""
@@ -1735,7 +1738,7 @@ class Run internal constructor(
             // A context made by hand rather than by the hook has no path and is in no tree.
             val inTree = coarseTree.flatMap { it.flatten() }.map { it.type }.toSet()
             coarse.filter { (it.count > 0 || it.inclusiveHits > 0) && it.type !in inTree }.takeIf { it.isNotEmpty() }?.let { missing ->
-                add("coarse labels: ${missing.joinToString { it.name }} are not in the tree - their contexts were made outside the hook, so the coarse table has no row for them")
+                add("coarse labels: ${missing.joinToString { it.name }} are not in the tree${sym.dash}their contexts were made outside the hook, so the coarse table has no row for them")
             }
             for (op in suspect()) add(
                 String.format(
@@ -1748,7 +1751,7 @@ class Run internal constructor(
             // The `Workers` and `Pool` columns, read together and said out loud.
             for (op in serialised()) add(
                 "${op.name}: ${plural(op.threads.toLong(), "thread")} ran it and no two were ever inside it " +
-                        "at once - every thread that enters waits for the last one to leave: a serialization point, " +
+                        "at once${sym.dash}every thread that enters waits for the last one to leave: a serialization point, " +
                         "not parallel work"
             )
             // The other end of the same question, and a warning rather than a verdict: a label

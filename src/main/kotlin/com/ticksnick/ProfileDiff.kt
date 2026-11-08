@@ -6,7 +6,7 @@ import kotlin.math.floor
 import kotlin.math.sqrt
 
 /** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative. */
-internal const val RUNS_DIFF_HEADER = "%7s -> %-7s  %-22s %-16s %s"
+internal val RUNS_DIFF_HEADER: String get() = "%7s ${sym.arrow} %-7s  %-22s %-16s %s"
 
 /** The chance a diff may run of showing one false change, across all of it. */
 internal const val FALSE_CHANGE = 0.05
@@ -16,7 +16,7 @@ internal const val NOISE_NOTE = "  ? the change could be noise: the runs differ 
         "more runs of each profile can settle it"
 
 /** The `CAREFUL` line of a diff of one run against one. */
-internal const val ONE_RUN_DIFF_CAREFUL = "times: 1 run on each side, no interval - a change in time may be noise, a run goes faster or " +
+internal val ONE_RUN_DIFF_CAREFUL: String get() = "times: 1 run on each side, no interval${sym.dash}a change in time may be noise, a run goes faster or " +
         "slower as a whole; changes in share of the parent hold"
 
 /**
@@ -73,8 +73,8 @@ internal fun signedPercent(f: Double): String {
  */
 internal fun pointsHalf(points: Double, unit: String): String = when {
     points.isNaN() -> ""
-    points < 9.95 -> String.format(Locale.ROOT, "+-%.1f%s", points, unit)
-    else -> String.format(Locale.ROOT, "+-%.0f%s", points, unit)
+    points < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%s", points, unit)
+    else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%s", points, unit)
 }
 
 /**
@@ -109,7 +109,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
 
     /** Whether a header line printed a `?`, which no table's note may be there to explain. */
     private var headerNoise = false
-    private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change +- 95%" else ""
+    private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change ${sym.plusMinus} 95%" else ""
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
     private fun Profile.active() = Estimate(runs.map { it.activeNanos.toDouble() })
@@ -122,19 +122,19 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val sign = if (c.delta < 0) "-" else "+"
         val absolute = if (c.half.isNaN()) sign + duration(abs(c.delta)) else durationPlusMinus(c.delta, c.half, signed = true)
         headerNoise = headerNoise || c.isNoise(changes)
-        // The change without its unit, the interval with it, and the `?` last: `-27 +-67%?`.
+        // The change without its unit and with its `?`, the interval with the unit: `-27? +-67%`.
         val relative = if (c.relativeHalf.isNaN()) signedPercent(c.relative)
-        else signedPercent(c.relative).removeSuffix("%") + " " + pointsHalf(c.relativeHalf * 100, "%") + (if (c.isNoise(changes)) "?" else "")
+        else signedPercent(c.relative).removeSuffix("%") + (if (c.isNoise(changes)) "?" else "") + " " + pointsHalf(c.relativeHalf * 100, "%")
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 
     fun render(): String = buildString {
         appendLine("=".repeat(width))
-        appendLine(row("Diff", "${before.name} (${before.described()}) -> ${after.name} (${after.described()})"))
+        appendLine(row("Diff", "${before.name} (${before.described()}) ${sym.arrow} ${after.name} (${after.described()})"))
         val rootName = (after.root() ?: before.root())?.name
         carefulBlock(careful(rootName))
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
-        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change +- its 95% interval (Welch's t)"))
+        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change ${sym.plusMinus} its 95% interval (Welch's t)"))
         with(before) { runList("before") }
         with(after) { runList("after", header = false) }
         appendLine(header("Wall time", before.wallTime(), after.wallTime()))
@@ -152,7 +152,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
             appendLine()
-            appendLine("COARSE OPERATIONS - wall time, inclusive, matched by path$overRuns")
+            appendLine("COARSE OPERATIONS${sym.dash}wall time, inclusive, matched by path$overRuns")
             with(coarseText) { rows() }
             if (sharedRows.isNotEmpty()) {
                 appendLine(SHARED_HEADING)
@@ -162,7 +162,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             perSide(before.coarseKeys(), after.coarseKeys())
         }
         appendLine()
-        appendLine("COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change$overRuns")
+        appendLine("COARSE AND FINE OPERATIONS${sym.dash}own thread-time, matched by name, sorted by the change$overRuns")
         with(fineText) { rows() }
         if (fineText.anyNoise) appendLine(NOISE_NOTE)
         perSide(before.fineNotes(), after.fineNotes())
@@ -198,7 +198,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val b = clockMean(before)
         val a = clockMean(after)
         if (b.isNaN() && a.isNaN()) return
-        appendLine(row("Clock", "${before.runs[0].clock.format(b)} -> ${after.runs[0].clock.format(a)}, the mean of each side's runs"))
+        appendLine(row("Clock", "${before.runs[0].clock.format(b)} ${sym.arrow} ${after.runs[0].clock.format(a)}, the mean of each side's runs"))
     }
 
     /** What makes the change mean something other than the code's: printed on top, see [carefulBlock]. */
@@ -209,14 +209,14 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val ofBase = (if (!a.isNaN()) after else before).runs[0].clock.ofBase
         if (!a.isNaN() && !b.isNaN() && (before.runs + after.runs).all { it.clock.ofBase == ofBase } && maxOf(a, b) > minOf(a, b) * (1 + CLOCK_MOVED))
             lines += String.format(
-                Locale.ROOT, "clock: %s -> %s between the sides - up to %.2fx of a time difference is the machine, not the code; shares hold",
+                Locale.ROOT, "clock: %s ${sym.arrow} %s between the sides${sym.dash}up to %.2f${sym.times} of a time difference is the machine, not the code; shares hold",
                 before.runs[0].clock.format(b), after.runs[0].clock.format(a), maxOf(a, b) / minOf(a, b)
             )
         val oneRunEach = before.runs.size == 1 && after.runs.size == 1
         if (oneRunEach) lines += ONE_RUN_DIFF_CAREFUL
         var sides = Warnings()
         for (side in listOf(before, after)) {
-            val interval = if (side.runs.size == 1 && !oneRunEach) listOf("times: 1 run of '${side.name}', no interval - a change may be noise; run it again for one") else emptyList()
+            val interval = if (side.runs.size == 1 && !oneRunEach) listOf("times: 1 run of '${side.name}', no interval${sym.dash}a change may be noise; run it again for one") else emptyList()
             sides += Warnings(interval) + side.warnings(named = true)
         }
         if (rootName != null) {
@@ -224,7 +224,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             val cb = countsOf(before)
             val ca = countsOf(after)
             if (cb.size == 1 && ca.size == 1 && ca != cb)
-                lines += "$rootName: run ${cb[0]} times before, ${ca[0]} after - compare per execution"
+                lines += "$rootName: run ${cb[0]} times before, ${ca[0]} after${sym.dash}compare per execution"
         }
         lines += allocationsCareful(before.runs, after.runs)
         return Warnings(lines + sides.ranked, sides.always)

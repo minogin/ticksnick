@@ -4,6 +4,15 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 ## Unreleased
 
+### How a figure is written
+
+- A unit sticks to its figure, and the one space is between a value and its interval: `3.27s +-77%`,
+  `57 +-0.3%`, `-2.46 +-6.17s`, `+5.3 +-0.6pp`.
+- A change that could be noise has its `?` on the value: `-27? +-67%`, `+5.3? +-0.6pp`.
+- `Profile.render(unicode = true)`, `TickSnick.diff(before, after, unicode = true)` and the CLI's
+  `--unicode` print `±`, `µs`, `→`, `—`, `…` and `×` in place of `+-`, `us`, `->`, ` - `, `...` and `x`.
+  ASCII stays the default.
+
 ### Runs and profiles
 
 - `Profiler.stop()` returns a `Run`, which was `Profile`. `TickSnick.load(folder)` returns a `Profile`,

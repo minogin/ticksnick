@@ -9,8 +9,8 @@ internal const val STAR = " *"
 /** The smallest change of a share a diff can print, in percentage points. */
 internal const val MIN_SHARE_CHANGE = 0.05
 
-/** The width of a `+-` beside a figure, its separating space included: the widest is a change's, `+-4.7 pp?`. */
-internal const val INTERVAL_COLUMN = 10
+/** The width of a `+-` beside a figure, its separating space included: the widest is a change's, `+-4.7pp`. */
+internal const val INTERVAL_COLUMN = 8
 
 /** How a column's figures read. Text only: a [Row] holds raw values, so that another writer can take them. */
 internal enum class Form(val percentage: Boolean = false) {
@@ -387,7 +387,7 @@ internal class DiffText(
         val indent = "  ".repeat(depth) + if (r.own) "$SPLIT_MARK " else ""
         val b = r.before?.foldedRows ?: 0
         val a = r.after?.foldedRows ?: 0
-        if (a > 0 || b > 0) return indent + if (a == b) "and $a more" else "and $b -> $a more"
+        if (a > 0 || b > 0) return indent + if (a == b) "and $a more" else "and $b ${sym.arrow} $a more"
         val pb = r.before?.parents?.coerceAtLeast(1)
         val pa = r.after?.parents?.coerceAtLeast(1)
         val inB = r.before?.present ?: 0
@@ -396,9 +396,9 @@ internal class DiffText(
             when {
                 shared || ((pb ?: 1) <= 1 && (pa ?: 1) <= 1) -> null
                 pb == null || pa == null || pb == pa -> "${pa ?: pb} parents"
-                else -> "$pb -> $pa parents"
+                else -> "$pb ${sym.arrow} $pa parents"
             },
-            "$inB -> $inA runs".takeIf { inB < before.runs || inA < after.runs },
+            "$inB ${sym.arrow} $inA runs".takeIf { inB < before.runs || inA < after.runs },
         )
         return indent + r.name + (if (r.coarse) STAR else "") + if (facts.isEmpty()) "" else " (${facts.joinToString()})"
     }
@@ -458,14 +458,14 @@ internal class DiffText(
         val scale = if (c.form == Form.RUNNABLE_WAITING) 100.0 else 1.0
         // A share that moved by less than it prints is no change, and `+0.0 pp` is not a sign to read.
         if (share && abs((a - b) * scale) < MIN_SHARE_CHANGE) return layout.cell(c, "=", "")
-        val value = if (share) String.format(Locale.ROOT, "%+.1f pp", (a - b) * scale) else signedPercent((a - b) / b)
+        val value = if (share) String.format(Locale.ROOT, "%+.1fpp", (a - b) * scale) else signedPercent((a - b) / b)
         if (!c.interval) return value
         val half = if (share) change.half * scale else change.relativeHalf * 100
         if (half.isNaN()) return layout.cell(c, value, "")
         val isNoise = noise(change)
         anyNoise = anyNoise || isNoise
-        // The change without its unit, the interval with it, and the `?` last: `-22 +-119%?`, `+4.6 +-4.7 pp?`.
-        val unit = if (share) " pp" else "%"
-        return layout.cell(c, value.removeSuffix(unit), pointsHalf(half, unit) + if (isNoise) "?" else "")
+        // The change without its unit and with its `?`, the interval with the unit: `-22? +-119%`, `+4.6? +-4.7pp`.
+        val unit = if (share) "pp" else "%"
+        return layout.cell(c, value.removeSuffix(unit) + if (isNoise) "?" else "", pointsHalf(half, unit))
     }
 }

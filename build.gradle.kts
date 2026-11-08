@@ -31,9 +31,12 @@ tasks.named<Jar>("jar") {
 // `./gradlew cli --args="render profiles/after"`, `--args="diff profiles/before profiles/after"`.
 tasks.register<JavaExec>("cli") {
     group = "application"
-    description = "render a folder of runs, or diff two: --args=\"render <folder>\" | --args=\"diff <before> <after>\""
+    description = "render a folder of runs, or diff two: --args=\"[--unicode] render <folder>\" | --args=\"[--unicode] diff <before> <after>\""
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.ticksnick.Cli")
+    // Gradle reads the program's output as UTF-8; without this, Java writes the platform's charset and
+    // --unicode arrives garbled.
+    jvmArgs("-Dstdout.encoding=UTF-8")
 }
 
 // Test classes that each get a JVM of their own: the registry is process-wide, and the other tests

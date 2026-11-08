@@ -126,7 +126,7 @@ class ProfileDiffTest {
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
-            assertTrue("11.0 s -> 8.00 s" in header && Regex("""-27 \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
+            assertTrue("11.0s -> 8.00s" in header && Regex("""-27\? \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             assertTrue("?" in diffRow(text, "same")[2] && NOISE_NOTE in text, text)
             assertTrue("CAREFUL" !in text, text)
@@ -173,6 +173,68 @@ class ProfileDiffTest {
         } finally {
             dir.toFile().deleteRecursively()
         }
+    }
+
+    /**
+     * Every report shape in both symbol sets: ASCII has nothing above 127, Unicode nothing but its six
+     * symbols, and each table's bars fall in the same columns in both forms. `+-` in Unicode is one character
+     * and `+-` two, so a symbol swapped after the columns were measured would break exactly this.
+     */
+    @Test
+    fun `every report shape lines up in ASCII and in Unicode`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            fun folder(name: String, batches: List<Long>, extra: Boolean): Profile {
+                val d = dir.resolve(name).also { Files.createDirectories(it) }
+                batches.forEachIndexed { i, t ->
+                    val children = listOf(node("left", listOf(t / 3 + i * 1_000_000L), listOf(node("inner", listOf(t / 10)))), node("right", listOf(t / 4))) +
+                        if (extra) listOf(node("only", listOf(t / 5))) else emptyList()
+                    save(d, i, listOf(node("runBatch", listOf(t, t), children)), listOf(stat("work", 10L + i, 1_000), stat("probe", 3L * (i + 1), 50_000)))
+                }
+                return Profile.load(d)
+            }
+            val one = folder("one", listOf(10_000_000_000L), true)
+            val three = folder("three", listOf(10_000_000_000L, 11_000_000_000L, 12_000_000_000L), true)
+            val other = folder("other", listOf(7_000_000_000L, 9_000_000_000L, 8_500_000_000L), false)
+            val otherOne = folder("otherOne", listOf(7_000_000_000L), false)
+            val shapes: List<Pair<String, (Boolean) -> String>> = listOf(
+                "one run" to { u -> one.render(u) },
+                "three runs" to { u -> three.render(u) },
+                "diff 1:1" to { u -> TickSnick.diff(one, otherOne, u) },
+                "diff 3:1" to { u -> TickSnick.diff(three, otherOne, u) },
+                "diff 3:3" to { u -> TickSnick.diff(three, other, u) },
+            )
+            val unicodeSymbols = UNICODE_SYMBOLS.run { plusMinus + micro + arrow + dash + ellipsis + times }.filter { it.code > 127 }.toSet()
+            var sawPlusMinus = false
+            for ((what, render) in shapes) {
+                val ascii = render(false)
+                val unicode = render(true)
+                ascii.lines().forEach { line -> assertTrue(line.all { it.code <= 127 }, "$what, ASCII: $line") }
+                unicode.lines().forEach { line -> assertTrue(line.all { it.code <= 127 || it in unicodeSymbols }, "$what, Unicode: $line") }
+                sawPlusMinus = sawPlusMinus || '±' in unicode
+                for (text in listOf(ascii, unicode)) for (table in bars(text)) assertEquals(1, table.distinct().size, "$what: a table out of line:\n$text")
+                // The check has teeth: the symbol swapped after the columns were measured breaks it.
+                if ('±' in unicode) assertTrue(bars(ascii.replace("+-", "±")).any { it.distinct().size > 1 }, "$what: a late swap went unseen")
+            }
+            assertTrue(sawPlusMinus, "no report shape printed an interval, so the test checked nothing")
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /** Each table's lines as the columns of their bars, one list per table. */
+    private fun bars(text: String): List<List<List<Int>>> {
+        val tables = mutableListOf<MutableList<List<Int>>>()
+        var current: MutableList<List<Int>>? = null
+        for (line in text.lines()) {
+            if (line.startsWith("COARSE") || line.isBlank()) current = null
+            if ('|' !in line && '+' !in line.trim().take(1)) continue
+            val at = line.indices.filter { line[it] == '|' || (line[it] == '+' && line.trim().all { c -> c == '-' || c == '+' }) }
+            if (at.isEmpty()) continue
+            if (current == null) current = mutableListOf<List<Int>>().also { tables += it }
+            current += at
+        }
+        return tables
     }
 
     /** Every table's bars fall at one column, its head and all its rows. */

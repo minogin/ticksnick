@@ -75,7 +75,7 @@ internal fun factsDiffLine(before: List<Map<String, String>>, after: List<Map<St
     namesIn(before + after).mapNotNull { name ->
         val b = valuesOf(name, before)
         val a = valuesOf(name, after)
-        if (b != a) "$name: $b -> $a" else if (all) "$name: $b =" else null
+        if (b != a) "$name: $b ${sym.arrow} $a" else if (all) "$name: $b =" else null
     }.joinToString("; ")
 
 /** The `Tags` and `Setup` lines of a report: one map per run, nothing for what none of them has. */

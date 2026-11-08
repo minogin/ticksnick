@@ -3,7 +3,7 @@ package com.ticksnick
 import java.nio.file.Path
 import kotlin.system.exitProcess
 
-internal const val USAGE = "usage: render <folder> | diff <before folder> <after folder>"
+internal const val USAGE = "usage: [--unicode] render <folder> | [--unicode] diff <before folder> <after folder>"
 
 /**
  * The library jar as a command, for the two things a folder of runs is for - [TickSnick.load] and
@@ -27,11 +27,14 @@ object Cli {
     }
 
     /** [main] without the exit, for the tests: 0 when it printed a report, 2 with a message on stderr. */
-    internal fun run(args: Array<String>): Int = try {
+    internal fun run(all: Array<String>): Int = try {
+        // --unicode: the report in Unicode symbols, for a terminal or file that reads it as such.
+        val unicode = all.firstOrNull() == "--unicode"
+        val args = if (unicode) all.drop(1) else all.toList()
         when {
-            args.size == 2 && args[0] == "render" -> println(TickSnick.load(Path.of(args[1])).render())
+            args.size == 2 && args[0] == "render" -> println(TickSnick.load(Path.of(args[1])).render(unicode))
             args.size == 3 && args[0] == "diff" ->
-                println(TickSnick.diff(TickSnick.load(Path.of(args[1])), TickSnick.load(Path.of(args[2]))))
+                println(TickSnick.diff(TickSnick.load(Path.of(args[1])), TickSnick.load(Path.of(args[2])), unicode))
             else -> throw IllegalArgumentException(USAGE)
         }
         0

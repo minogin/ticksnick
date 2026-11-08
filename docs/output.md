@@ -41,6 +41,9 @@ The common ones:
   more runs into the same folder.
 - `clock: moved during the run` - the CPU's frequency changed, so times and costs per call drift
   with it. Shares are not affected.
+- `labels: TickSnick's hooks may be up to P of the time inside labels` - every fine hook entry and
+  coarse execution at its budget, against the time the labels hold: the labelled code ran up to that
+  much slower than without them. Said above 1%. Fewer, larger labels cost less.
 - `<label>: N calls at under D each, below the Fns floor` - the label is a visible part of what
   it measures. Label the enclosing loop instead, with `op(X, times = n) { }`. The floor is 2 bodies at
   the run's body; `(a default: this run timed no body)` when the run is too short to time one.

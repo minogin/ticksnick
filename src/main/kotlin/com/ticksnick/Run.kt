@@ -87,6 +87,15 @@ internal const val COARSE_ALLOCATIONS_BODIES = 1.2
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01
 
+/** The most one fine hook entry may cost, in bodies: a budget, as [COARSE_BUDGET_BODIES] is. */
+internal const val FINE_BUDGET_BODIES = 0.1
+
+/**
+ * Above this share of the time inside labels, what the hooks may have cost the run is a `CAREFUL` line:
+ * the same 1% as [COARSE_MAX_RUN_SHARE], for every hook together.
+ */
+internal const val HOOKS_MAX_SHARE = 0.01
+
 /** Beside a floor read at [DEFAULT_BODY_NANOS]: the run timed no body of its own. */
 internal const val DEFAULT_FLOOR = " (a default: this run timed no body)"
 
@@ -172,6 +181,25 @@ internal fun tooSmallMessage(fs: List<FineUnderFloor>): String = String.format(
     fs[0].name, rangeText(fs.map { it.calls.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
     rangeText(fs.map { it.upperNanos }, ::duration), rangeText(fs.map { it.floorNanos }) { String.format(Locale.ROOT, "%.0fns", it) },
     if (fs.any { it.default }) DEFAULT_FLOOR else "", fs[0].name
+)
+
+/**
+ * What TickSnick's hooks may have cost a run, at their budgets and the run's body: [fineEntries] times
+ * a fine hook ran, [coarseExecutions] coarse executions, [costNanos] of thread-time in all, out of
+ * [labelledNanos] inside labels. See [Run.hookCost].
+ */
+internal class HookCost(val fineEntries: Long, val coarseExecutions: Long, val costNanos: Double, val labelledNanos: Double) {
+    val share: Double get() = costNanos / labelledNanos
+}
+
+/** The `CAREFUL` line of [HookCost] in one run or several, each figure a range where the runs differ. */
+internal fun hookCostMessage(hs: List<HookCost>): String = String.format(
+    Locale.ROOT,
+    "labels: TickSnick's hooks may be up to %s of the time inside labels, for %s fine hook entries and %s coarse " +
+            "executions${sym.dash}the labelled code ran up to that much slower than without them; fewer, larger labels cost less",
+    rangeText(hs.map { it.share * 100 }, ::percent),
+    rangeText(hs.map { it.fineEntries.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
+    rangeText(hs.map { it.coarseExecutions.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
 )
 
 /** [values] as one figure in [format], or `lo to hi` where they differ. */
@@ -522,7 +550,15 @@ internal class OperationStat internal constructor(
     val longestStuckTicks: Long = 0,
     /** Long executions by length in ticks, [STUCK_BUCKETS] log-2 buckets. See [Sampler.stuckRunHist]. */
     internal val stuckRuns: LongArray = LongArray(STUCK_BUCKETS),
+    /**
+     * How many times the hook ran: [calls] less what batch labels counted beyond one, `op(id, times =
+     * n)` being one entry and n calls. -1 for a run saved without it, read as [calls].
+     */
+    internal val entries: Long = -1,
 ) {
+    /** See [entries]: the hook's runs, or [calls] where a run did not record them. */
+    val hookEntries: Long get() = if (entries < 0) calls else entries
+
     /** The fraction of this operation's occupancy spent inside executions longer than a tick. */
     val stuckShare: Double get() = if (hits == 0L) 0.0 else stuckHits.toDouble() / hits
 
@@ -881,6 +917,22 @@ class Run internal constructor(
 
     /** See [coarseHookScale]. */
     internal val hookScale: Double get() = coarseHookScale(nanoTimeBodies)
+
+    /**
+     * What the hooks may have cost this run, when it is over [HOOKS_MAX_SHARE] of the time inside
+     * labels; null under it, or with no labelled time. Every fine hook entry at [FINE_BUDGET_BODIES]
+     * and every coarse execution at its budget with what the session opted into, at this run's body:
+     * an upper bound, since a hook beside other work often costs less.
+     */
+    internal fun hookCost(): HookCost? {
+        val labelled = labelledNanos
+        if (!(labelled > 0)) return null
+        val fine = operations.sumOf { it.hookEntries }
+        val executions = coarse.sumOf { it.count }
+        val bodies = fine * FINE_BUDGET_BODIES + executions * coarseContextBodies(operations.size, allocations, hookScale)
+        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled)
+        return h.takeIf { it.share > HOOKS_MAX_SHARE }
+    }
 
     /** The flat coarse floor here, in ns. See [coarseFlatFloorBodies]. */
     internal val coarseFlatFloorNanos: Double
@@ -1806,7 +1858,7 @@ class Run internal constructor(
      * All in one place and before any table, not where each is computed: printed there, a warning
      * about a fine operation would sit under the coarse table and read as one about a coarse one.
      */
-    internal fun warnings(floors: Boolean = true): List<String> =
+    internal fun warnings(ranged: Boolean = true): List<String> =
         // Ordered by what each costs the reader: numbers that are missing or inflated first, then
         // what limits the whole run, then labels in the wrong tier, which are honest measurements
         // of the wrong-sized thing.
@@ -1856,6 +1908,8 @@ class Run internal constructor(
             // What limits the whole run: the pauses, the cores, the clock - the clock only when it
             // moved or could not be read, a steady one being the healthy case.
             addAll(pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful())
+            // What the hooks themselves may have cost: a fact about the whole run, like the clock.
+            if (ranged) hookCost()?.let { add(hookCostMessage(listOf(it))) }
             // The one signal for work escaping its context, which neither the floor check nor the
             // balance check can see. Stated with both readings, because it cannot tell "I bracketed part
             // of the program" from "work escaped to another thread".
@@ -1890,11 +1944,11 @@ class Run internal constructor(
             // below the floor cannot move a ranking, so the cost of being wrong about one is the
             // loudest failure this tool has - stopping a run that was fine. Every offender is named;
             // the reader decides.
-            if (floors) for (f in fineUnderFloor()) add(tooSmallMessage(listOf(f)))
+            if (ranged) for (f in fineUnderFloor()) add(tooSmallMessage(listOf(f)))
             // The same boundary from the other side. Unlike the fine floor this one is exact,
             // because the duration it compares is measured rather than inferred — see
             // coarseTooSmall.
-            if (floors) for (c in coarseUnderFloor()) add(coarseTooSmallMessage(listOf(c)))
+            if (ranged) for (c in coarseUnderFloor()) add(coarseTooSmallMessage(listOf(c)))
         }
 
     /**

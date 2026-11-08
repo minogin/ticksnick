@@ -118,6 +118,11 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   slow `nanoTime`. A run saved without a body is read at 25 ns a body, and its floor warnings say so.
 - A label under its floor in several runs of a profile is one warning, its figures as ranges where the
   runs differ: `below the 60ns to 62ns floor (2 of 3 runs)`.
+- `labels: TickSnick's hooks may be up to P of the time inside labels` warns when the hooks, at their
+  budgets and the run's body, may cost more than 1% of the time inside labels. A batch label counts as
+  one hook entry for its n calls; a run saves how many times each fine hook ran.
+- The README says what TickSnick costs: the sampler's core, each label, a hand-off, and what runs in the
+  background.
 
 ### Fixed
 

@@ -558,6 +558,26 @@ class CoarseTest {
         assertTrue("calls at under" in floor[0] && " to " !in floor[0].substringBefore("each"), "the calls and the bound are the same in both runs: ${floor[0]}")
     }
 
+    /**
+     * What the hooks may cost is said once it passes 1% of the time inside labels: 100 M fine entries at
+     * 0.1 bodies of 25 ns are 0.25 s against 1 s labelled, 25%. A tenth of the entries is still 2.5%,
+     * and a thousandth, 0.025%, says nothing.
+     */
+    @Test
+    fun `what the hooks cost is said when it matters`() {
+        fun run(calls: Long, body: Double = 25.0) = report(emptyList(), labelled = 1_000, fineCalls = calls, body = body)
+        val heavy = run(100_000_000).hookCost()!!
+        assertEquals(0.25, heavy.share, 0.01)
+        assertTrue("may be up to 25.0% of the time inside labels" in hookCostMessage(listOf(heavy)), hookCostMessage(listOf(heavy)))
+        assertTrue(run(10_000_000).hookCost() != null)
+        assertTrue(run(100_000).hookCost() == null)
+        val runs = listOf(run(100_000_000), run(100_000_000, body = 30.0))
+        val lines = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs).warnings().ranked
+            .filter { "TickSnick's hooks" in it }
+        assertEquals(1, lines.size, lines.joinToString("\n"))
+        assertTrue("25.0% to 30.0%" in lines[0] && "(2 of 2 runs)" in lines[0], lines[0])
+    }
+
     /** A run's limits are read at its own body: the same bodies, twice the ns on a machine twice as slow. */
     @Test
     fun `the floors follow the run's body`() {

@@ -142,6 +142,7 @@ internal object RunStore {
             text(k + "name", o.name)
             line(k + "hits", o.hits)
             line(k + "calls", o.calls)
+            line(k + "entries", o.entries)
             line(k + "stuckHits", o.stuckHits)
             line(k + "stuckInstances", o.stuckInstances)
             line(k + "waitingHits", o.waitingHits)
@@ -298,6 +299,7 @@ internal object RunStore {
                 long(k + "stuckHits"), long(k + "stuckInstances"), long(k + "waitingHits"),
                 long(k + "stuckWaitingHits"), long(k + "activeTicks"), int(k + "threads"), int(k + "peakInside"),
                 longestStuckTicks = long(k + "longestStuckTicks"),
+                entries = m[k + "entries"]?.toLong() ?: -1,
                 stuckRuns = sparse(k + "stuckRuns", STUCK_BUCKETS),
             )
         }

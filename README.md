@@ -200,6 +200,25 @@ output through a pipe (Gradle, a script) is written in the platform's charset un
 A single run renders as a report of its own. It warns that its times have no interval. Its shares of
 the parent are still reliable.
 
+## What it costs
+
+On a fast current machine, where a body (TickSnick's unit of CPU work) takes about 25 ns:
+
+- **The sampler takes a core.** With 4 or more processors it spins between samples, so one core is
+  busy for the whole session. A program that leaves a core free loses nothing to it; one that uses
+  every core loses that core. `wait = PARK` frees it and samples less exactly.
+- **A fine label:** about 1-3 ns a call, at most 2.5 ns by design. Beside other work it is often
+  hidden altogether. A batch label, `op(X, times = n)`, costs one call for its n.
+- **A coarse label:** about 45-55 ns an execution, at most 100 ns, and 56 bytes for its context. Most
+  of it is two `System.nanoTime()` calls, so it costs more where `nanoTime` is slow, as on some VMs.
+  `Allocated` adds about 30 ns, and each registered fine label about 0.5 ns.
+- **A hand-off** (`captureCoarse` and `withCoarse`): about 7 ns.
+- **In the background:** a body timed once a second, under 0.1% of a core; the CPU clock read from the
+  OS once a second, on Windows by a `typeperf` process; and a few ms at `stop()`.
+- **On your program** the cost is per label entered, not per second of work: a fine label on a 50 ns
+  operation is about 5% of it. The report warns where a label is under its floor, and when the hooks
+  together may cost more than 1% of the time inside labels.
+
 ## Tags and setup
 
 A run reads its own setup at `start`: the Java version, the JVM, the OS, the CPU, the processors, the

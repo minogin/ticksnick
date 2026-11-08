@@ -558,6 +558,12 @@ internal class Sampler(
     /** Calls made since this session began. See [callsAtStart]. */
     internal fun sessionCalls(id: Int): Long = (Profiler.callsOf(id) - callsAtStart[id]).coerceAtLeast(0)
 
+    /** [Profiler.batchExcessOf] when this session began, for the same reason as [callsAtStart]. */
+    private val batchExcessAtStart = LongArray(MAX_OPERATIONS)
+
+    /** Calls counted beyond one by batch labels since this session began. */
+    internal fun sessionBatchExcess(id: Int): Long = (Profiler.batchExcessOf(id) - batchExcessAtStart[id]).coerceAtLeast(0)
+
     /**
      * Threads that had already called each operation when this session started, for the same reason
      * as [callsAtStart]: a warm-up on workers that exit before the measured run would otherwise
@@ -590,6 +596,7 @@ internal class Sampler(
         // Before the first tick, so that no call is counted whose sample could not have been taken.
         try {
             for (id in 0 until MAX_OPERATIONS) callsAtStart[id] = Profiler.callsOf(id)
+            for (id in 0 until MAX_OPERATIONS) batchExcessAtStart[id] = Profiler.batchExcessOf(id)
             for (id in 0 until MAX_OPERATIONS) threadsAtStart[id] = Profiler.threadsOf(id)
         } finally {
             started.countDown()

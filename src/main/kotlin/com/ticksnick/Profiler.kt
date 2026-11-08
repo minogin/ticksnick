@@ -211,7 +211,16 @@ internal class OpSlot(
     /** For a label placed around [n] units of work rather than one. See `op(id, times)`. */
     fun count(id: Int, n: Int) {
         counts[id + COUNT_PAD] += n
+        batchExcess[id] += n - 1
     }
+
+    /**
+     * Per operation, the calls counted beyond one by batch labels: `n - 1` for each `op(id, times = n)`.
+     * Calls less this is how many times the hook ran, which is what TickSnick's cost is counted from.
+     * Written on the batch path only, so the ordinary hook does nothing more.
+     */
+    @JvmField
+    val batchExcess = LongArray(MAX_OPERATIONS)
 
     /**
      * The stack of operations this thread has entered without leaving, for the non-lexical form.
@@ -493,6 +502,9 @@ object Profiler {
 
     /** Calls from threads that have already exited, folded in so a report does not lose them. */
     private val retiredCounts = LongArray(MAX_OPERATIONS)
+
+    /** [OpSlot.batchExcess] of the threads that have exited, guarded by [retiredCounts]. */
+    private val retiredBatchExcess = LongArray(MAX_OPERATIONS)
 
     /**
      * How many threads that have already exited had called each operation at least once.
@@ -1029,6 +1041,7 @@ object Profiler {
                     retiredCounts[id] += n
                     retiredThreads[id]++
                 }
+                retiredBatchExcess[id] += s.batchExcess[id]
             }
         }
         retire(s.coarseRoot)
@@ -1079,6 +1092,7 @@ object Profiler {
                         retiredCounts[id] += n
                         retiredThreads[id]++
                     }
+                    retiredBatchExcess[id] += s.batchExcess[id]
                 }
             }
             retire(s.coarseRoot)
@@ -1109,6 +1123,14 @@ object Profiler {
         synchronized(retiredCounts) { retiredThreads[id] }.let { retired ->
             var live = 0
             forEachSlot { if (it.countOf(id) > 0) live++ }
+            retired + live
+        }
+
+    /** Calls of an operation counted beyond one by batch labels, live threads and exited ones. See [OpSlot.batchExcess]. */
+    internal fun batchExcessOf(id: Int): Long =
+        synchronized(retiredCounts) { retiredBatchExcess[id] }.let { retired ->
+            var live = 0L
+            forEachSlot { live += it.batchExcess[id] }
             retired + live
         }
 
@@ -1201,6 +1223,7 @@ object Profiler {
                 id, nameOf(id), s.counters[id], s.sessionCalls(id), s.stuckHits[id], s.stuckInstances[id],
                 s.waitingHits[id], s.stuckWaitingHits[id], s.activeTicks[id], s.sessionThreads(id),
                 s.peakInside[id],
+                entries = s.sessionCalls(id) - s.sessionBatchExcess(id),
                 longestStuckTicks = s.longestStuckTicks[id],
                 stuckRuns = LongArray(STUCK_BUCKETS) { s.stuckRunHist[id * STUCK_BUCKETS + it] },
             )

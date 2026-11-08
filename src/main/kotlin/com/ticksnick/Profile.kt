@@ -721,16 +721,18 @@ class Profile internal constructor(internal val name: String, internal val files
     }
 
     /**
-     * Each run's own warnings, the same one once, with how many runs said it. A label under its floor
-     * is one warning however many runs said it, its figures as ranges: each run has a floor of its own,
-     * read at its own body, so the runs' lines differ in the figures and would repeat it once per run.
+     * Each run's own warnings, the same one once, with how many runs said it. A label under its floor,
+     * and what the hooks cost, are one warning however many runs said it, their figures as ranges:
+     * each run has a floor and a body of its own, so the runs' lines differ in the figures and would
+     * repeat once per run.
      */
     private fun runWarnings(where: String): List<String> {
         val said = LinkedHashMap<String, Int>()
         for (run in runs) {
             val failure = run.failure?.let { "profiling stopped: $it${sym.dash}this run's numbers are not a result" }
-            for (w in listOfNotNull(failure) + run.warnings(floors = false)) said.merge(w, 1, Int::plus)
+            for (w in listOfNotNull(failure) + run.warnings(ranged = false)) said.merge(w, 1, Int::plus)
         }
+        runs.mapNotNull { it.hookCost() }.takeIf { it.isNotEmpty() }?.let { said[hookCostMessage(it)] = it.size }
         for (fs in runs.flatMap { it.fineUnderFloor() }.groupBy { it.name }.values) said[tooSmallMessage(fs)] = fs.size
         for (cs in runs.flatMap { it.coarseUnderFloor() }.groupBy { it.name to it.shareBound }.values)
             said[coarseTooSmallMessage(cs)] = cs.size

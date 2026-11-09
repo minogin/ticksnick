@@ -62,6 +62,10 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - The report over runs and both diffs show each run's own warnings, which only the report of one run
   did. The same warning from several runs is one line that says how many.
 - A diff shows the warnings of both its profiles, each naming its profile.
+- A failed run, stopped by a leaked label or work billed to a closed execution, is left out of its
+  profile: the report opens with `FAILED: 1 of 4 runs, left out of the profile` and each failed run's
+  file and failure. When every run failed there is no profile, and the report is that banner alone; so is
+  a diff with such a side. A failure is no longer repeated as a `CAREFUL` line.
 - The coarse floor is a fixed 2 us: 5% of the most a coarse execution may cost with nothing opted
   into, 100 ns. Each registered fine label adds up to 0.5 ns and counting allocated bytes up to 30 ns,
   and the floor rises by 20 times that. The warning about an operation under the floor says what it is

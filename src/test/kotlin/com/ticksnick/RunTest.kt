@@ -55,6 +55,7 @@ class RunTest {
         // And a report carrying as many of the optional blocks at once as one can.
         check("render", loadedRun().render())
         check("render(legend)", loadedRun().render(legend = true))
+        check("render, failed", loadedRun(failure = leakMessage("op", "worker-1")).render())
         assertTrue(
             offenders.isEmpty(),
             "non-ASCII in printed output:\n" + offenders.joinToString("\n")
@@ -62,7 +63,7 @@ class RunTest {
     }
 
     /** A report with the warnings, the duty block and both tables all present at once. */
-    private fun loadedRun(): Run {
+    private fun loadedRun(failure: String? = null): Run {
         val fine = OperationStat(0, "work", 100, 1_000_000, 60, 3, 20, 10, 100)
         val c = CoarseStat(
             0, "request", 10, 10_000_000, 100, 2_000_000, Spans(),
@@ -77,7 +78,7 @@ class RunTest {
                 cpuNanos = 20_000_000, wallNanos = 1_000_000_000,
                 minWindowDuty = 0.02, maxWindowDuty = 0.02, anomalies = 1, maxSampleNanos = 200_000,
             ),
-            failure = "something went wrong", imbalances = 2, openAtEnd = 1,
+            failure = failure, imbalances = 2, openAtEnd = 1,
             untrackedSlots = 3, reclaimedSlots = 4, idleWaitingHits = 5,
             coarse = listOf(c), openContextsAtEnd = 1, labelledOutsideCoarse = 60,
             staleContextHits = 20, coarseSampleHits = 100,
@@ -384,17 +385,17 @@ class RunTest {
     }
 
     /**
-     * A stopped session cannot render as though it were a result. The banner leads, and `ok` is
-     * false — everything below it is evidence for the verdict, not a measurement.
+     * A failed run is no result: cut short, and already billed to the wrong operation before the
+     * failure was caught. So it renders as its failure and nothing else, and `ok` is false.
      */
     @Test
-    fun `a stopped session leads with why`() {
+    fun `a failed run renders as its failure and nothing else`() {
         val r = report(listOf(stat("a", hits = 100, calls = 1000)), failure = leakMessage("leaked", "worker-1"))
         assertFalse(r.ok)
         val text = r.render()
-        assertTrue(text.contains("PROFILING STOPPED"), "a stopped session rendered without its banner")
-        assertTrue(text.indexOf("PROFILING STOPPED") < text.indexOf("operation"), "the banner did not lead")
+        assertTrue(text.contains("FAILED: the run, so there is no profile"), text)
         assertTrue(text.contains("leaked"), "the failure did not name the operation")
+        assertFalse(text.contains("Wall time"), "a failed run rendered figures: $text")
     }
 
     /** A leak that did not stop the session is still counted and still printed. */

@@ -57,6 +57,9 @@ internal val ONE_RUN_CAREFUL: String get() = "times: 1 run of '%s', no interval$
 /** How many warnings the `CAREFUL` section prints before it counts the rest instead of listing them. */
 internal const val MAX_CAREFUL = 10
 
+/** The width of the failure banner over a profile with no runs left, which has no table to take it from. */
+internal const val FAILED_WIDTH = 100
+
 /** Over the block of operations under more than one parent, each over all of its rows, right under the tree. */
 internal val SHARED_HEADING: String get() = "Under multiple parents${sym.dash}each over all of them"
 
@@ -175,11 +178,23 @@ internal fun plusMinus(e: Estimate): String {
  * Coarse rows are matched by path and fine rows by name, as in [ProfileDiff]. A row missing from
  * some runs says in how many it was, and its figures are over those.
  */
-class Profile internal constructor(internal val name: String, internal val files: List<Path>, internal val runs: List<Run>) {
+class Profile internal constructor(internal val name: String, allFiles: List<Path>, allRuns: List<Run>) {
     init {
-        require(runs.isNotEmpty()) { "no runs" }
-        require(files.size == runs.size)
+        require(allRuns.isNotEmpty()) { "no runs" }
+        require(allFiles.size == allRuns.size)
     }
+
+    /**
+     * The runs that failed, each by its file and its failure. Not part of the profile: a failed run was
+     * cut short and its numbers are no result. Named in the banner, see [failedBanner].
+     */
+    internal val failed: List<Pair<Path, String>> = allFiles.zip(allRuns).mapNotNull { (file, run) -> run.failure?.let { file to it } }
+
+    /** The runs the profile is made of: every run that did not fail. Empty when they all failed. */
+    internal val runs: List<Run> = allRuns.filter { it.ok }
+
+    /** The files of [runs], in their order. */
+    internal val files: List<Path> = allFiles.filterIndexed { i, _ -> allRuns[i].ok }
 
     private val walls = runs.map { it.wallsOf() }
 
@@ -199,7 +214,30 @@ class Profile internal constructor(internal val name: String, internal val files
     @JvmOverloads
     fun render(unicode: Boolean = false): String = withSymbols(unicode) {
         Logo.once()
-        report(false, (if (runs.size == 1) Warnings(listOf(ONE_RUN_CAREFUL.format(name))) else Warnings()) + warnings())
+        if (runs.isEmpty()) failedBanner()
+        else report(false, (if (runs.size == 1) Warnings(listOf(ONE_RUN_CAREFUL.format(name))) else Warnings()) + warnings())
+    }
+
+    /**
+     * The banner over a profile whose runs failed, in part or all: how many, and each one's file and
+     * failure. Empty when none did. [named] says the profile's name, as a diff does for each side.
+     */
+    internal fun failedBanner(named: Boolean = false, width: Int = if (runs.isEmpty()) FAILED_WIDTH else pageWidth): String {
+        if (failed.isEmpty()) return ""
+        val where = if (named) " in '$name'" else ""
+        val total = failed.size + runs.size
+        return buildString {
+            appendLine("!".repeat(width))
+            appendLine(
+                when {
+                    runs.isNotEmpty() -> "FAILED: ${failed.size} of $total runs$where, left out of the profile"
+                    total == 1 -> "FAILED: the run$where, so there is no profile"
+                    else -> "FAILED: every run$where, so there is no profile"
+                }
+            )
+            for ((file, failure) in failed) appendLine("  ${file.fileName}: $failure")
+            appendLine("!".repeat(width))
+        }
     }
 
     /** One coarse row over the runs: the node at this path in each, null where a run has none. */
@@ -266,14 +304,8 @@ class Profile internal constructor(internal val name: String, internal val files
      * @param careful the warnings, in a `CAREFUL` section: before any number, see [carefulBlock].
      */
     internal fun report(legend: Boolean, careful: Warnings): String = buildString {
-        for (failure in runs.mapNotNull { it.failure }.distinct()) {
-            appendLine("!".repeat(pageWidth))
-            appendLine("PROFILING STOPPED${sym.dash}these numbers were not going to be right:")
-            appendLine("  $failure")
-            appendLine("Everything below is what led to that verdict, not a result. Pass strict=false to")
-            appendLine("profile anyway, which is what to do when the code is not yours to change.")
-            appendLine("!".repeat(pageWidth))
-        }
+        append(failedBanner())
+        if (runs.isEmpty()) return@buildString
         val n = runs.size
         appendLine("=".repeat(pageWidth))
         appendLine(
@@ -728,10 +760,7 @@ class Profile internal constructor(internal val name: String, internal val files
      */
     private fun runWarnings(where: String): List<String> {
         val said = LinkedHashMap<String, Int>()
-        for (run in runs) {
-            val failure = run.failure?.let { "profiling stopped: $it${sym.dash}this run's numbers are not a result" }
-            for (w in listOfNotNull(failure) + run.warnings(ranged = false)) said.merge(w, 1, Int::plus)
-        }
+        for (run in runs) for (w in run.warnings(ranged = false)) said.merge(w, 1, Int::plus)
         runs.mapNotNull { it.hookCost() }.takeIf { it.isNotEmpty() }?.let { said[hookCostMessage(it)] = it.size }
         for (fs in runs.flatMap { it.fineUnderFloor() }.groupBy { it.name }.values) said[tooSmallMessage(fs)] = fs.size
         for (cs in runs.flatMap { it.coarseUnderFloor() }.groupBy { it.name to it.shareBound }.values)

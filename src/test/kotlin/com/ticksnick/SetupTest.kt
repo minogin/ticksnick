@@ -150,11 +150,46 @@ class SetupTest {
     }
 
     @Test
-    fun `a run that stopped early is said in the report over runs`() = inTemp { dir ->
+    fun `a failed run is left out of the profile and named over it`() = inTemp { dir ->
         save(dir, "a", run(failure = "a label leaked"))
         save(dir, "b", run())
         val text = Profile.load(dir).render()
-        assertTrue("profiling stopped: a label leaked" in text && "(1 of 2 runs)" in text, text)
+        assertTrue("FAILED: 1 of 2 runs, left out of the profile" in text, text)
+        assertTrue("a$RUN_EXTENSION: a label leaked" in text, text)
+        assertTrue("1 run of" in text, "the failed run was counted in the profile: $text")
+        assertFalse("profiling stopped" in text, "a failure was repeated as a warning: $text")
+    }
+
+    @Test
+    fun `a folder whose runs all failed has no profile`() = inTemp { dir ->
+        save(dir, "a", run(failure = "a label leaked"))
+        save(dir, "b", run(failure = "a label leaked"))
+        val text = Profile.load(dir).render()
+        assertTrue("FAILED: every run, so there is no profile" in text, text)
+        assertFalse("Wall time" in text, "a profile with no runs left rendered figures: $text")
+    }
+
+    @Test
+    fun `a diff names each side's failed runs over it`() = inTemp { dir ->
+        val before = dir.resolve("before")
+        val after = dir.resolve("after")
+        save(before, "a", run())
+        save(before, "b", run(failure = "a label leaked"))
+        save(after, "a", run())
+        val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
+        assertTrue("FAILED: 1 of 2 runs in 'before', left out of the profile" in text, text)
+        assertTrue(text.indexOf("FAILED") < text.indexOf("Diff"), "the banner did not lead: $text")
+    }
+
+    @Test
+    fun `a diff with a side that has no profile is the banners alone`() = inTemp { dir ->
+        val before = dir.resolve("before")
+        val after = dir.resolve("after")
+        save(before, "a", run())
+        save(after, "a", run(failure = "a label leaked"))
+        val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
+        assertTrue("FAILED: the run in 'after', so there is no profile" in text, text)
+        assertFalse("Diff" in text, "a diff with no profile on one side was drawn: $text")
     }
 
     @Test

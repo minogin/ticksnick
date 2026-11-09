@@ -78,6 +78,14 @@ internal fun pointsHalf(points: Double, unit: String): String = when {
 }
 
 /**
+ * [before] -> [after] as text. The banner of each side's failed runs leads; a side whose runs all failed
+ * has no profile, so the diff is the banners and nothing else.
+ */
+internal fun diffText(before: Profile, after: Profile): String =
+    if (before.runs.isEmpty() || after.runs.isEmpty()) before.failedBanner(named = true) + after.failedBanner(named = true)
+    else ProfileDiff(before, after).render()
+
+/**
  * **Two profiles compared**: each side a folder of runs (see [Profile]), each figure the mean of its
  * side's runs, and the change, with its 95% interval once both sides have two. Operations are matched
  * by name and coarse rows by path.
@@ -129,6 +137,8 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     }
 
     fun render(): String = buildString {
+        append(before.failedBanner(named = true, width = width))
+        append(after.failedBanner(named = true, width = width))
         appendLine("=".repeat(width))
         appendLine(row("Diff", "${before.name} (${before.described()}) ${sym.arrow} ${after.name} (${after.described()})"))
         val rootName = (after.root() ?: before.root())?.name

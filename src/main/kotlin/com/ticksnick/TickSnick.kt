@@ -22,5 +22,5 @@ object TickSnick {
     @JvmStatic
     @JvmOverloads
     fun diff(before: Profile, after: Profile, unicode: Boolean = false): String =
-        withSymbols(unicode) { ProfileDiff(before, after).render() }.also { Logo.once() }
+        withSymbols(unicode) { diffText(before, after) }.also { Logo.once() }
 }

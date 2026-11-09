@@ -127,7 +127,8 @@ Profiler.expectBalanced()   // where no label should be open
 
 `enter` and `exit` have no `finally`, so an exception between them leaves the label set. TickSnick
 counts that as a leak and, by default, stops the session at the first one: every sample after it would
-be charged to the wrong operation. Pass `Profiler.start(strict = false)` when the labels are in code
+be charged to the wrong operation. The run has failed: its report says why and shows no figures, and a
+profile leaves it out. Pass `Profiler.start(strict = false)` when the labels are in code
 you cannot fix. The leaks are still counted and reported.
 
 ### Settings

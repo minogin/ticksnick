@@ -764,7 +764,7 @@ class Profile internal constructor(internal val name: String, internal val files
             val lo = clocks.min()
             val hi = clocks.max()
             if (lo > 0 && (hi - lo) / lo > RUNS_CLOCK_SPREAD) lines +=
-                "clock$where: ${runs[0].clock.format(lo)} to ${runs[0].clock.format(hi)} across the runs${sym.dash}a run's time " +
+                "clock$where: ${rangeText(listOf(lo, hi), runs[0].clock::format)} across the runs${sym.dash}a run's time " +
                         "follows it and the interval includes that; hold the clock still (turbo off) for a tighter one"
         }
         val shared = runs.mapNotNull { it.setup.jvm }.groupingBy { it }.eachCount().values.filter { it > 1 }.sum()

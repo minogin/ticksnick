@@ -82,7 +82,7 @@ internal class ClockTrace internal constructor(
         val end = median(v.takeLast(ends))
         return listOf(
             "clock: moved during the run, ${format(start)}${unit()} at the start, ${format(end)} at the end, " +
-                    "${format(low)} to ${format(high)} for 80% of it${sym.dash}times and per-call costs drift with it; shares hold"
+                    "${rangeText(listOf(low, high), this::format)} for 80% of it${sym.dash}times and per-call costs drift with it; shares hold"
         )
     }
 

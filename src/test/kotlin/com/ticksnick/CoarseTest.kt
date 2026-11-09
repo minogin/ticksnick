@@ -553,9 +553,9 @@ class CoarseTest {
         val profile = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs)
         val floor = profile.warnings().ranked.filter { "floor" in it }
         assertEquals(1, floor.size, floor.joinToString("\n"))
-        assertTrue("below the 50ns to 60ns floor" in floor[0], floor[0])
+        assertTrue("below the 50ns..60ns floor" in floor[0], floor[0])
         assertTrue("(2 of 2 runs)" in floor[0], floor[0])
-        assertTrue("calls at under" in floor[0] && " to " !in floor[0].substringBefore("each"), "the calls and the bound are the same in both runs: ${floor[0]}")
+        assertTrue("calls at under" in floor[0] && ".." !in floor[0].substringBefore("each"), "the calls and the bound are the same in both runs: ${floor[0]}")
     }
 
     /**
@@ -577,7 +577,7 @@ class CoarseTest {
         val lines = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs).warnings().ranked
             .filter { "TickSnick's hooks" in it }
         assertEquals(1, lines.size, lines.joinToString("\n"))
-        assertTrue("25.0% to 30.0%" in lines[0] && "(2 of 2 runs)" in lines[0], lines[0])
+        assertTrue("25.0%..30.0%" in lines[0] && "(2 of 2 runs)" in lines[0], lines[0])
     }
 
     /** A run's limits are read at its own body: the same bodies, twice the ns on a machine twice as slow. */

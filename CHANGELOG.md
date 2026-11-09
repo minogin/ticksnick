@@ -117,7 +117,7 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   2.5 us on a fast machine, more on a slower one or at a lower clock. The coarse floor rises with a
   slow `nanoTime`. A run saved without a body is read at 25 ns a body, and its floor warnings say so.
 - A label under its floor in several runs of a profile is one warning, its figures as ranges where the
-  runs differ: `below the 60ns to 62ns floor (2 of 3 runs)`.
+  runs differ: `below the 60ns..62ns floor (2 of 3 runs)`.
 - `labels: TickSnick's hooks may add up to P to the work inside labels, and up to W to the wall time`
   warns when the hooks, at their budgets and the run's body, may add more than 1% to the work inside
   labels; W is the most they can add to the wall time, all on the run's critical path. A batch label counts as

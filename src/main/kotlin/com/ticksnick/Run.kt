@@ -169,18 +169,18 @@ internal fun tooSmallMessage(
 
 /**
  * One fine label under its floor in one run or several: one line, each figure a range where the runs
- * differ (`under 47.8ns to 50.9ns each, below the 60ns to 62ns floor`), since each run has a floor of
- * its own.
+ * differ (`under 47.8ns..50.9ns each, below the 60ns..62ns floor`), since each run has a floor of its own.
  */
 internal fun tooSmallMessage(fs: List<FineUnderFloor>): String = String.format(
     // Three lines: the fact, the reason, the fix. Same shape as the coarse floor's message.
     Locale.ROOT,
     "%s: %s calls at under %s each, below the %s floor%s${sym.dash}label the enclosing loop instead, " +
             "op(%s, times = n) { }, or drop it if its share has already answered the question%n" +
-            "the hook is a visible fraction of it, the sampler reads it 5-9%% low, and C2 can move work across adjacent short labels",
+            "the hook is a visible fraction of it, the sampler reads it %s low, and C2 can move work across adjacent short labels",
     fs[0].name, rangeText(fs.map { it.calls.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
     rangeText(fs.map { it.upperNanos }, ::duration), rangeText(fs.map { it.floorNanos }) { String.format(Locale.ROOT, "%.0fns", it) },
-    if (fs.any { it.default }) DEFAULT_FLOOR else "", fs[0].name
+    if (fs.any { it.default }) DEFAULT_FLOOR else "", fs[0].name,
+    rangeText(listOf(5.0, 9.0)) { String.format(Locale.ROOT, "%.0f%%", it) },
 )
 
 /**
@@ -211,11 +211,14 @@ internal fun hookCostMessage(hs: List<HookCost>): String = String.format(
     rangeText(hs.map { it.coarseExecutions.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
 )
 
-/** [values] as one figure in [format], or `lo to hi` where they differ. */
+/**
+ * [values] as one figure in [format], or the range `low..high` where they differ, each end with its unit
+ * (`41.0ns..41.7ns`, `950us..1.20ms`). Every range the report prints is written here.
+ */
 internal fun rangeText(values: List<Double>, format: (Double) -> String): String {
     val lo = format(values.min())
     val hi = format(values.max())
-    return if (lo == hi) lo else "$lo to $hi"
+    return if (lo == hi) lo else "$lo..$hi"
 }
 
 /** A fine label under its floor in one run: what its warning says. See [tooSmallMessage]. */

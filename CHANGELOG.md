@@ -152,6 +152,9 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   thread's fine label and its coarse execution one after the other, and a thread that closed both in
   between was charged to the parent: a row with no calls, and an extra parent in `(N parents)`. The
   two are now read as one instant.
+- The check of `Runnable` against CPU time reads a thread from when it is first seen. When another
+  thread had labelled before `start()`, a thread that started labelling after it was left out for up to
+  a second, so a shorter session checked only the earlier, idle thread.
 
 ## 0.5.0 - 2026-10-27
 

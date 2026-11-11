@@ -75,6 +75,43 @@ class CoresTest {
     }
 
     /**
+     * A thread that starts labelling after `start()` has its CPU read from when it is first seen. A
+     * thread that labelled before the session starts the windows at `start()`, and the newcomer used
+     * to wait for the next boundary, a second later: past the end of a short session, so the check
+     * read only the idle thread, 0. A test JVM always has such threads, and the forced collection in
+     * PauseTest failed now and then on it.
+     */
+    @Test
+    fun `a thread that starts labelling after start is read, though another labelled before it`() {
+        val before = Profiler.registerFine("cores.before")
+        val after = Profiler.registerFine("cores.after")
+        op(before) { }
+        val spun = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        Profiler.start(strict = false)
+        // Alive at stop(), outside every label: a thread that has exited reads -1 from its CPU clock.
+        val worker = thread {
+            try {
+                op(after) { spinFor(500_000_000) }
+                spun.countDown()
+                release.await()
+            } finally {
+                Profiler.release()
+            }
+        }
+        val p = try {
+            spun.await()
+            Profiler.stop()
+        } finally {
+            release.countDown()
+            worker.join()
+        }
+        val d = p.duty
+        if (!d.available) return
+        assertTrue(d.cpuNanos > 200_000_000, "the worker's half second of CPU is not in the check: ${d.cpuNanos / 1e6}ms")
+    }
+
+    /**
      * A session shorter than the clock's first reading says nothing about the clock: `typeperf` is
      * stopped before it prints its header, and that is not "no counter found".
      */

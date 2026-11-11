@@ -131,6 +131,9 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - On a JVM that cannot report allocated bytes the session runs without them and the report says so.
   On a virtual thread, where the JVM gives none, a row and every row above it read `-`, never 0, and
   a warning says why.
+- `Allocated` counts the program's bytes only: the label's own context, one per execution, is left
+  out, and an execution under a context borrowed by `propagating()` no longer allocates for its path.
+  An execution that allocates nothing reads 0, where it read 57 bytes, and 217 under a borrowed one.
 
 ### Floors that follow the machine
 

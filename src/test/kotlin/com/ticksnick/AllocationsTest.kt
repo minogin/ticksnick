@@ -89,6 +89,24 @@ class AllocationsTest {
     }
 
     /**
+     * An execution that allocates nothing reads no bytes: TickSnick's own context is taken out, and a
+     * borrowed context's walk allocates nothing. They read 57 and 217 bytes an execution before.
+     */
+    @Test
+    fun `an execution that allocates nothing reads no bytes, TickSnick's own left out`() {
+        Profiler.start(allocations = true)
+        op(outer) {
+            val ctx = captureCoarse()
+            thread { withCoarse(ctx) { repeat(100_000) { op(inner) { } } }; Profiler.release() }.join()
+        }
+        repeat(100_000) { op(inner) { } }
+        val p = Profiler.stop()
+        val nodes = p.coarseTree.flatMap { it.flatten() }.filter { it.name == "alloc.inner" }
+        assertEquals(2, nodes.size)
+        for (n in nodes) assertTrue(p.allocatedPerExecution(n) < 8.0, "${n.count} executions read ${p.allocatedPerExecution(n)} bytes each")
+    }
+
+    /**
      * On a virtual thread the JVM reads -1 for the bytes a thread allocated: the path, and every one
      * above it, read as not known, `-`, and a warning says why - never a 0 for work that did allocate.
      */

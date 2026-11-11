@@ -201,8 +201,9 @@ its executions together, so it follows the tree as `Wall` does: a parent's is it
 exactly. **Per execution** is that over `Executions`, which compares runs of different sizes, as `Mean`
 does. It is bytes allocated, not memory held: an operation can allocate gigabytes and hold none of it.
 What it measures is the collector's work - a young collection comes every time the young generation
-fills - and not how much memory the program needs. Each execution includes about 100 bytes of the label's own, and the first execution
-on a path a few KB more, which matters only for an operation that allocates very little. A thread
+fills - and not how much memory the program needs. The label's own context, one per execution, is left
+out, so an execution that allocates nothing reads 0; the first execution on a path still includes a few
+KB of the label's own, which matters only for an operation that allocates very little. A thread
 counts from its first coarse boundary in the session, so an execution already open at `start` misses
 what it allocates up to there, and one still open at `stop` misses what came after its last.
 

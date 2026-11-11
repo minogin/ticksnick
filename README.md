@@ -210,8 +210,9 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
   every core loses that core. `wait = PARK` frees it and samples less exactly.
 - **A fine label:** about 1-3 ns a call, at most 2.5 ns by design. Beside other work it is often
   hidden altogether. A batch label, `op(X, times = n)`, costs one call for its n.
-- **A coarse label:** about 45-55 ns an execution, at most 100 ns, and 56 bytes for its context. Most
-  of it is two `System.nanoTime()` calls, so it costs more where `nanoTime` is slow, as on some VMs.
+- **A coarse label:** about 45-55 ns an execution, at most 100 ns, and 56 bytes for its context, which
+  `Allocated` leaves out. Most of it is two `System.nanoTime()` calls, so it costs more where
+  `nanoTime` is slow, as on some VMs.
   `Allocated` adds about 30 ns, and each registered fine label about 0.5 ns.
 - **A hand-off** (`captureCoarse` and `withCoarse`): about 7 ns.
 - **In the background:** a body timed once a second, under 0.1% of a core; the CPU clock read from the

@@ -342,12 +342,19 @@ internal class OpSlot(
     }
 
     /**
+     * [resolve]'s scratch, one per thread: made on every call, it was 80 bytes an execution under a
+     * borrowed context, billed to the execution's `Allocated` as if the user's code had allocated it.
+     */
+    private val resolveTypes = IntArray(MAX_COARSE_DEPTH)
+
+    /**
      * The node for [ctx]'s path in this thread's own tree, when the context was made on another
      * thread: a context borrowed from a pool's caller, or closed by a thread that did not open it.
-     * Walks the chain once and creates the path; rare, and bounded by [MAX_COARSE_DEPTH].
+     * Walks the chain and creates the path, bounded by [MAX_COARSE_DEPTH]: on every execution directly
+     * under a borrowed context, about 2 ns, allocating nothing.
      */
     private fun resolve(root: CoarsePath, ctx: CoarseContext): CoarsePath {
-        val types = IntArray(MAX_COARSE_DEPTH)
+        val types = resolveTypes
         var n = 0
         var c: CoarseContext? = ctx
         while (c != null && n < MAX_COARSE_DEPTH) {
@@ -370,6 +377,9 @@ internal class OpSlot(
     internal fun recordSpan(ctx: CoarseContext, nanos: Long): CoarsePath? {
         val node = nodeOf(ctx) ?: return null
         node.record(nanos)
+        // TickSnick's own context, made at this execution's start, is not the user's bytes: taken out when
+        // it was made inside the session, as its bytes were then counted. 0 without `Allocated`.
+        if (ctx.startNanos >= Profiler.startedAt) node.allocated -= Profiler.contextBytes
         return node
     }
 
@@ -561,13 +571,20 @@ object Profiler {
 
     private var sessions = 0
 
+    /** One coarse context's bytes on this JVM, measured at [start], 0 without `Allocated`. See [OpSlot.recordSpan]. */
+    @JvmField @field:JvmSynthetic
+    internal var contextBytes = 0L
+
     private var allocationsMissing = false
 
     /** Whether this JVM can report allocated bytes. A field, so that a test can be a JVM that cannot. */
     @JvmField @field:JvmSynthetic
     internal var allocationsAvailable = AllocationClock.available
 
-    private var startedAt: Long = 0
+    /** When the session started: an execution opened before it made its context outside `Allocated`. */
+    @JvmField @field:JvmSynthetic
+    internal var startedAt: Long = 0
+
     /** The CPU clock over the session. See [ClockTrace]. */
     private var clock: ClockProbe? = null
 
@@ -1232,6 +1249,7 @@ object Profiler {
             tags.forEach { (name, value) -> sessionTags[name] = value.toString() }
         }
         allocationSession = if (allocations && allocationsAvailable) ++sessions else 0
+        contextBytes = if (allocationSession != 0) AllocationClock.contextBytes() else 0L
         allocationsMissing = allocations && !allocationsAvailable
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
@@ -1328,7 +1346,7 @@ object Profiler {
             // saved without these, and such a path still has its calls to show.
             ownFine = n.ownFine ?: LongArray(MAX_OPERATIONS + 1), ownFineCovered = n.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1),
             calls = n.calls ?: LongArray(MAX_OPERATIONS),
-            allocated = n.allocated,
+            allocated = n.allocated.coerceAtLeast(0L),
             allocatedUnknown = n.allocatedUnknown,
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),

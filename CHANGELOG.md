@@ -29,7 +29,7 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - Every report prints `Tags` and `Setup` lines under its warnings. A diff prints every tag and what
   differs in the setup.
 - A folder whose runs differ in a tag, the setup, the sampling interval, the wait strategy or
-  `allocations` gets one `CAREFUL` line, last, and runs of one JVM get another.
+  `allocations` gets one warning, last, and runs of one JVM get another.
 
 ### One set of tables
 
@@ -157,6 +157,21 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - The check of `Runnable` against CPU time reads a thread from when it is first seen. When another
   thread had labelled before `start()`, a thread that started labelling after it was left out for up to
   a second, so a shorter session checked only the earlier, idle thread.
+- `expectBalanced()` judges only labels placed with `enter`. A lexical `op` around it, or a context a
+  task borrowed with `propagating()`, read as a leak. A leak is named by the label `enter` opened.
+- Hand-placed labels nest to any depth: past 64, `exit` no longer undoes the wrong level. An `exit`
+  with no label open is ignored.
+- With `wait = PARK` or `SLEEP`, no pause is counted, charged to a row or taken out of the wall time:
+  the sampler's lateness is the scheduler's, and the report says pauses were not measured.
+- No `Thread-time%` bound where nothing is labelled fine, or where every labelled sample waited.
+- An error in the sampler fails the run; it ended sampling and left a run that read as whole.
+- `stop()` on an interrupted thread finishes the session. `start()` refuses a `tickMillis` of 0 or
+  less and a `jitter` of 1 or more.
+- A batch label, `op(x, times = n)`, is judged against the floor per entry, as its hook runs.
+- `Runnable / Waiting` leaves out a run that did not read the state or never caught the row. A label
+  called and never sampled counts at 0 in `Mean`, as in `Wall`. `Under multiple parents` counts a
+  recursive operation once. A diff's change from 0 is blank, not `+Infinity%`.
+- A damaged run file is refused with a message.
 
 ## 0.5.0 - 2026-10-27
 

@@ -222,7 +222,8 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
 ## Tags and setup
 
 A run reads its own setup at `start`: the Java version, the JVM, the OS, the CPU, the processors, the
-heap, the collector and the `-X` and `-XX` flags. It cannot see what the program did before `start`,
+heap, the collector and the JVM flags that change how it runs: heap, collector, processors and
+compiler, and no others, so no path or secret. It cannot see what the program did before `start`,
 or which workload it was given. Tags say that:
 
 ```kotlin

@@ -35,6 +35,25 @@ class SetupTest {
         assertEquals("gencon", collectorName("scavenge"))
     }
 
+    /**
+     * `Flags` keeps only what changes how the program runs, by name: a path, a log named per run or an
+     * agent's setting never reaches a run file, nor makes runs differ.
+     */
+    @Test
+    fun `only the flags that change how the program runs are kept`() {
+        val kept = listOf(
+            "-Xms14g", "-Xmx14g", "-Xss512k", "-XX:ActiveProcessorCount=6", "-XX:ConcGCThreads=1",
+            "-XX:G1ConcRefinementThreads=1", "-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+UseParallelGC",
+            "-XX:-TieredCompilation", "-XX:TieredStopAtLevel=1", "-XX:+AlwaysPreTouch", "-Xgcpolicy:gencon",
+        )
+        val dropped = listOf(
+            "-XX:HeapDumpPath=C:\\Users\\someone\\dumps", "-Xlog:gc:file=run-3.log", "-XX:ErrorFile=err.log",
+            "-Xbootclasspath/a:agent.jar", "-XX:+UnlockDiagnosticVMOptions", "-XX:+PrintCompilation", "-Xshare:auto",
+        )
+        assertEquals(kept, kept.filter(::keptFlag))
+        assertEquals(emptyList(), dropped.filter(::keptFlag))
+    }
+
     /** OpenJ9 adds its own `options.default` to the JVM's arguments, with the file's local path. */
     @Test
     fun `the options OpenJ9 adds itself are not the user's flags`() {

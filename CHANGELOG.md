@@ -24,8 +24,9 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 - `Profiler.start(tags = mapOf("warmups" to 2))` and `Profiler.tag(name, value)` say what a run cannot
   say by itself.
-- A run saves its setup: Java version, JVM, OS, CPU, processors, heap, collector, `-X` and `-XX` flags,
-  and the JVM's identity.
+- A run saves its setup: Java version, JVM, OS, CPU, processors, heap, collector, the JVM flags that
+  change how it runs (heap, collector, processors and memory pages, compiler) and no others, and the
+  JVM's identity.
 - Every report prints `Tags` and `Setup` lines under its warnings. A diff prints every tag and what
   differs in the setup.
 - A folder whose runs differ in a tag, the setup, the sampling interval, the wait strategy or

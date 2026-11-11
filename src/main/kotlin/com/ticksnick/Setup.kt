@@ -11,6 +11,30 @@ internal const val MAX_VALUES_LISTED = 3
 private const val OPTIONS_FILE = "-Xoptionsfile="
 
 /**
+ * The JVM options a run keeps in `Flags`: only those that change how the program runs - the heap, the
+ * collector, processors and memory pages, the compiler. Opt-in: an option not here is left out, so a
+ * path, a log's name or an agent's setting never reaches a run file nor makes runs differ. `-X` options
+ * by prefix; `-XX` options by name, in either form, `+` or `-`, with any value, `*` matching any run of
+ * characters. See [keptFlag].
+ */
+private val KEPT_X = listOf("-Xms", "-Xmx", "-Xmn", "-Xss", "-Xint", "-Xcomp", "-Xgcpolicy")
+private val KEPT_XX = listOf(
+    "MaxRAMPercentage", "InitialRAMPercentage", "NewRatio", "NewSize", "MaxNewSize",
+    "Use*GC", "ZGenerational", "ParallelGCThreads", "ConcGCThreads", "MaxGCPauseMillis", "G1*", "AlwaysPreTouch",
+    "ActiveProcessorCount", "UseNUMA", "UseLargePages", "UseTransparentHugePages",
+    "TieredCompilation", "TieredStopAtLevel", "CICompilerCount", "UseCompressedOops",
+)
+
+/** Whether [arg], one of the JVM's arguments, is kept in `Flags`. See [KEPT_X]. */
+internal fun keptFlag(arg: String): Boolean {
+    if (!arg.startsWith("-XX:")) return KEPT_X.any { arg.startsWith(it) }
+    val name = arg.removePrefix("-XX:").removePrefix("+").removePrefix("-").substringBefore('=')
+    return KEPT_XX.any { p ->
+        if ('*' !in p) name == p else name.startsWith(p.substringBefore('*')) && name.endsWith(p.substringAfter('*'))
+    }
+}
+
+/**
  * The collector, as the JVM's flag names it, from the name of one of its beans. Parallel's,
  * Serial's and OpenJ9's beans have names of their own, `PS Scavenge`, `Copy` and `scavenge` for
  * gencon; the others start with the collector's: `G1 Young Generation` is G1, `ZGC Minor Cycles` ZGC,
@@ -39,8 +63,8 @@ internal fun userArguments(args: List<String>, read: (Path) -> String = { Files.
  * What a run can say by itself about how and where it ran, read at `start()`. A value is compared
  * between the runs of a folder, so it has to stay the same from one run to the next when nothing changed.
  *
- * **Flags are `-X` and `-XX` only.** That is the heap and the collector. `-D` can hold a password, and
- * a file is meant to be kept and shared; `-javaagent` can carry a port that changes on every launch.
+ * **Flags are the options that change how the program runs**, kept by name ([keptFlag]). `-D` can hold a password, and
+ * a file is meant to be kept and shared; a path, a log's name or an agent's port is not a fact about the run.
  * The program's own arguments are left out for the same reason: what matters in them is a tag.
  *
  * @param facts name to value, in the order they print.
@@ -64,7 +88,7 @@ internal class Setup(val facts: Map<String, String>, val jvm: String?) {
             fact("Processors", Runtime.getRuntime().availableProcessors().toString())
             fact("Heap", bytes(Runtime.getRuntime().maxMemory().toDouble()))
             fact("GC", ManagementFactory.getGarbageCollectorMXBeans().firstOrNull()?.name?.let(::collectorName))
-            fact("Flags", userArguments(runtime.inputArguments).filter { it.startsWith("-X") }.joinToString(" "))
+            fact("Flags", userArguments(runtime.inputArguments).filter(::keptFlag).joinToString(" "))
             return Setup(facts, "${runtime.pid}@${runtime.startTime}")
         }
 

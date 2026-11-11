@@ -19,7 +19,7 @@ class SetupTest {
     fun `values read as one, as the different ones, and past a few as a range or a count`() {
         assertEquals("2", valuesOf(listOf("2", "2")))
         assertEquals("1, 2", valuesOf(listOf("1", "2", "1")))
-        assertEquals("3-10", valuesOf(listOf("10", "3", "7", "4")))
+        assertEquals("3..10", valuesOf(listOf("10", "3", "7", "4")))
         assertEquals("a, b, c and 1 more", valuesOf(listOf("a", "b", "c", "d")))
     }
 

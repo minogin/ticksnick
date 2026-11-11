@@ -15,6 +15,13 @@ internal sealed class Gap {
 
     /** Words: a name, a reason. Part of what makes two warnings the same; empty is a part not printed. */
     class Words(val text: String) : Gap()
+
+    /**
+     * Words that go with the warning without making it a different one: what raised a floor, the
+     * labels it is mostly under. Over runs, the first run's, where they can differ with each run's
+     * body or ranking and would otherwise split one warning into several.
+     */
+    class Note(val text: String) : Gap()
 }
 
 /** A figure gap. */
@@ -22,6 +29,8 @@ internal fun figure(value: Double, format: (Double) -> String): Gap = Gap.Figure
 
 /** A words gap. */
 internal fun words(text: String): Gap = Gap.Words(text)
+/** A note gap: words that do not make a warning a different one. See [Gap.Note]. */
+internal fun note(text: String): Gap = Gap.Note(text)
 
 /** A count, `9,835,008`. */
 internal fun countText(n: Double): String = String.format(Locale.ROOT, "%,.0f", n)
@@ -168,6 +177,7 @@ internal fun mergeWarnings(perRun: List<List<Warning>>, where: String = ""): Lis
 private fun keyOf(w: Warning): List<Any> = listOf<Any>(w.kind) + w.gaps.map {
     when (it) {
         is Gap.Words -> "w:" + it.text
+        is Gap.Note -> "note"
         is Gap.Figure -> if (it.value.isNaN()) "absent" else "figure"
         is Gap.Range -> "range"
     }
@@ -179,6 +189,7 @@ private fun mergeOne(ws: List<Warning>): String {
     val texts = first.gaps.indices.map { i ->
         when (val gap = first.gaps[i]) {
             is Gap.Words -> gap.text
+            is Gap.Note -> gap.text
             is Gap.Figure -> {
                 val values = ws.map { (it.gaps[i] as Gap.Figure).value }.filter { !it.isNaN() }
                 if (values.isEmpty()) "" else rangeText(values, gap.format)

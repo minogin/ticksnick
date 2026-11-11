@@ -93,7 +93,7 @@ internal fun StringBuilder.carefulBlock(warnings: Warnings) {
     appendLine()
     appendLine(WARNINGS_HEADING)
     warnings.ranked.take(MAX_WARNINGS).forEach(::print)
-    if (warnings.ranked.size > MAX_WARNINGS) appendLine("$WARNING_INDENT... and ${warnings.ranked.size - MAX_WARNINGS} more")
+    if (warnings.ranked.size > MAX_WARNINGS) appendLine("$WARNING_INDENT${sym.ellipsis} and ${warnings.ranked.size - MAX_WARNINGS} more")
     warnings.always.forEach(::print)
     appendLine()
 }
@@ -148,7 +148,7 @@ internal class Estimate(val values: List<Double>) {
  * the unit once at the right. Just the duration where there is no interval.
  */
 internal fun durationWithInterval(e: Estimate): String =
-    if (e.half.isNaN()) duration(e.mean) else "${durationPlusMinus(e.mean, e.half)} (${plusMinus(e).removePrefix("+-")})"
+    if (e.half.isNaN()) duration(e.mean) else "${durationPlusMinus(e.mean, e.half)} (${plusMinus(e).removePrefix(sym.plusMinus)})"
 
 /**
  * A percentage's interval, in its points, `+-0.3%`: written after the figure without its unit, `57
@@ -316,7 +316,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             row(
                 "Runs", if (n == 1) "1 run of '$name', one JVM: no interval"
                 else "$n runs of '$name', one JVM each: every figure below is their mean, " +
-                        "${sym.plusMinus} its 95% interval from how much the runs differ (Student's t, ${n - 1} degrees of freedom)"
+                        "${sym.plusMinus} its 95% interval from how much the runs differ (Student's t, ${Run.plural((n - 1).toLong(), "degree")} of freedom)"
             )
         )
         carefulBlock(careful)

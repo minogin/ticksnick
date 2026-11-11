@@ -80,7 +80,7 @@ internal fun valuesOf(values: List<String>): String {
     if (different.size <= MAX_VALUES_LISTED) return different.joinToString(", ")
     if (different.all { it.toDoubleOrNull() != null }) {
         val sorted = different.sortedBy { it.toDouble() }
-        return "${sorted.first()}-${sorted.last()}"
+        return rangeText(sorted.first(), sorted.last())
     }
     return different.take(MAX_VALUES_LISTED).joinToString(", ") + " and ${different.size - MAX_VALUES_LISTED} more"
 }

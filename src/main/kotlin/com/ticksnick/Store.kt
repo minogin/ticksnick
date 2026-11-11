@@ -232,7 +232,19 @@ internal object RunStore {
         return out.toString()
     }
 
-    fun load(path: Path): Run {
+    /**
+     * The run in [path]. A file that is not one, or not one this build reads, or damaged, is refused with
+     * an [IllegalArgumentException] saying so, whatever broke: never a stack trace out of the CLI.
+     */
+    fun load(path: Path): Run = try {
+        loadUnchecked(path)
+    } catch (e: IllegalArgumentException) {
+        throw e
+    } catch (e: Exception) {
+        throw IllegalArgumentException("'$path' is not a readable TickSnick run: $e", e)
+    }
+
+    private fun loadUnchecked(path: Path): Run {
         val lines = Files.readAllLines(path)
         require(lines.isNotEmpty() && lines[0].startsWith("ticksnick-")) { "'$path' is not a TickSnick run" }
         require(lines[0] == RUN_FORMAT) { "'$path' is format '${lines[0]}', this build reads '$RUN_FORMAT'" }
@@ -362,7 +374,7 @@ internal object RunStore {
         return Run(
             operations = operations, idleHits = long("idleHits"), ticks = long("ticks"),
             samplingSpanNanos = long("samplingSpanNanos"), durationNanos = long("durationNanos"),
-            threads = int("threads"), duty = duty, failure = text("failure"), imbalances = int("imbalances"),
+            threads = int("threads"), duty = duty, failure = text("failure") ?: leftOpenFailure(int("imbalances")), imbalances = int("imbalances"),
             stateSampled = bool("stateSampled"), idleWaitingHits = long("idleWaitingHits"),
             openAtEnd = int("openAtEnd"), untrackedSlots = int("untrackedSlots"), reclaimedSlots = int("reclaimedSlots"),
             coarse = coarse, openContextsAtEnd = int("openContextsAtEnd"),

@@ -22,6 +22,13 @@ internal const val NANOTIME_LAP = 2_000
 internal const val NANOTIME_TIMINGS = 9
 
 /**
+ * Untimed laps before them, so that the loop is compiled when it is timed: run once per `stop()`, nine
+ * laps of 2,000 are far under the JIT's threshold, and an interpreted `nanoTime` against a compiled
+ * body reads dearer than it is, past the point where it raises the coarse floor.
+ */
+internal const val NANOTIME_WARMUP = 200
+
+/**
  * One body: [BODY_STEPS] triple xorshift steps on one dependent chain. Pure, so the value must flow
  * out to a field or the work is dead code; a linear map over GF(2), so the JIT cannot fold the steps
  * into fewer.
@@ -108,18 +115,21 @@ internal class BodyProbe {
         return BodyTrace(b.min(), nanoTimeBodies())
     }
 
-    /** One `nanoTime` in bodies: [NANOTIME_TIMINGS] alternating timings, the median ratio. */
+    /** One `nanoTime` in bodies: [NANOTIME_TIMINGS] alternating timings, the median ratio, after [NANOTIME_WARMUP] untimed laps. */
     private fun nanoTimeBodies(): Double {
-        val ratios = DoubleArray(NANOTIME_TIMINGS) {
-            var acc = 0L
-            val t0 = System.nanoTime()
-            for (i in 0 until NANOTIME_LAP) acc += System.nanoTime()
-            val t1 = System.nanoTime()
-            sink = sink xor acc
-            val call = (t1 - t0).toDouble() / NANOTIME_LAP
-            call / lap()
-        }
+        repeat(NANOTIME_WARMUP) { nanoTimeLap() }
+        val ratios = DoubleArray(NANOTIME_TIMINGS) { nanoTimeLap() / lap() }
         ratios.sort()
         return ratios[NANOTIME_TIMINGS / 2]
+    }
+
+    /** One `nanoTime` call, in ns, from a lap of [NANOTIME_LAP]. */
+    private fun nanoTimeLap(): Double {
+        var acc = 0L
+        val t0 = System.nanoTime()
+        for (i in 0 until NANOTIME_LAP) acc += System.nanoTime()
+        val t1 = System.nanoTime()
+        sink = sink xor acc
+        return (t1 - t0).toDouble() / NANOTIME_LAP
     }
 }

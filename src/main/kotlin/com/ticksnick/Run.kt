@@ -158,7 +158,7 @@ internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double, floorNanos: 
 /**
  * What TickSnick's hooks may have cost a run, at their budgets and the run's body: [fineEntries] times
  * a fine hook ran, [coarseExecutions] coarse executions, [costNanos] of thread-time in all, out of
- * [labelledNanos] inside labels and [wallNanos] of the run's active time; [top] the label that cost the
+ * [labelledNanos] inside labels and [wallNanos] of the run's wall time; [top] the label that cost the
  * most, where to start. See [Run.hookCost].
  */
 internal class HookCost(
@@ -183,11 +183,10 @@ internal fun labelsText(names: List<String>, count: Int): String =
  * [values] as one figure in [format], or the range `low..high` where they differ, each end with its unit
  * (`41.0ns..41.7ns`, `950us..1.20ms`). Every range the report prints is written here.
  */
-internal fun rangeText(values: List<Double>, format: (Double) -> String): String {
-    val lo = format(values.min())
-    val hi = format(values.max())
-    return if (lo == hi) lo else "$lo..$hi"
-}
+internal fun rangeText(values: List<Double>, format: (Double) -> String): String = rangeText(format(values.min()), format(values.max()))
+
+/** A range already written at both ends, `3..10`: the one way a range is put together. See [rangeText]. */
+internal fun rangeText(low: String, high: String): String = if (low == high) low else "$low..$high"
 
 
 /**
@@ -271,6 +270,14 @@ internal fun leakMessage(open: String, thread: String = Thread.currentThread().n
  */
 internal fun samplerErrorMessage(e: Throwable): String =
     "the sampler stopped on ${code(e.toString())}, so the rest of the run was not sampled${sym.dash}a TickSnick bug, please report it"
+
+/**
+ * The failure of a run saved by a session that went on past [leaks] labels left open, which no session
+ * does any more: its figures are false all the same, so it loads as failed. Null for none.
+ */
+internal fun leftOpenFailure(leaks: Int): String? =
+    if (leaks <= 0) null
+    else "${Run.plural(leaks.toLong(), "label")} left open, and the session went on past them${sym.dash}put `exit` in a `finally`"
 
 /**
  * Whether one operation's long executions are evidence of anything, given what the machine was
@@ -830,7 +837,8 @@ class Run internal constructor(
         val bodies = fine * FINE_BUDGET_BODIES + executions * perExecution
         val top = (operations.map { it.name to it.hookEntries * FINE_BUDGET_BODIES } + coarse.map { it.name to it.count * perExecution })
             .maxByOrNull { it.second }?.takeIf { it.second > 0 }?.first
-        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled, activeNanos.toDouble(), top)
+        // Over the wall time the report prints, pauses included, as the sentence says.
+        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled, samplingSpanNanos.toDouble(), top)
         return h.takeIf { it.share > HOOKS_MAX_SHARE }
     }
 
@@ -1685,7 +1693,7 @@ class Run internal constructor(
             // balance check can see.
             // Only where a coarse label was used: a run with fine labels alone is all under no coarse row.
             if (coarse.any { it.count > 0 || it.inclusiveHits > 0 } && labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
-                Warning(Kind.OUTSIDE_COARSE, figure(labelledOutsideCoarseShare, ::shareText), words(codeList(outsideCoarseSuspects().take(4).map { it.name })))
+                Warning(Kind.OUTSIDE_COARSE, figure(labelledOutsideCoarseShare, ::shareText), note(codeList(outsideCoarseSuspects().take(4).map { it.name })))
             )
             // Every public way of opening an execution gives it a path, so a row missing from the tree
             // is a defect here, not a misuse.
@@ -1714,7 +1722,7 @@ class Run internal constructor(
                         words(code("registerFine(\"${c.name}\")")),
                     ) else Warning(
                         Kind.COARSE_UNDER_FLOOR, words(code(c.name)), figure(c.meanSpanNanos, ::duration), figure(coarseFlatFloorNanos, ::limitText),
-                        words(coarseFloorRaised(operations.size, allocations, bodyOrDefaultNanos, hookScale)),
+                        note(coarseFloorRaised(operations.size, allocations, bodyOrDefaultNanos, hookScale)),
                         words(code("registerFine(\"${c.name}\")")),
                     )
                 )

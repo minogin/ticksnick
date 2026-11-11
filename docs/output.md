@@ -81,7 +81,7 @@ Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64;
 ```
 
 **Tags** are what the program said about the run. **Setup** is what the run read by itself, and how it
-measured. When runs differ, each name lists its values: `warmups: 1, 2; batches: 3-10`. A run with no
+measured. When runs differ, each name lists its values: `warmups: 1, 2; batches: 3..10`. A run with no
 value for a name shows `-`.
 
 ### The header

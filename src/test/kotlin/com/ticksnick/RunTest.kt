@@ -78,7 +78,7 @@ class RunTest {
                 cpuNanos = 20_000_000, wallNanos = 1_000_000_000,
                 minWindowDuty = 0.02, maxWindowDuty = 0.02, anomalies = 1, maxSampleNanos = 200_000,
             ),
-            failure = failure, imbalances = 2, openAtEnd = 1,
+            failure = failure, imbalances = if (failure == null) 0 else 2, openAtEnd = 1,
             untrackedSlots = 3, reclaimedSlots = 4, idleWaitingHits = 5,
             coarse = listOf(c), openContextsAtEnd = 1, labelledOutsideCoarse = 60,
             staleContextHits = 20, coarseSampleHits = 100,

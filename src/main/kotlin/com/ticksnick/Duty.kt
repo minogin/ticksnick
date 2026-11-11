@@ -230,6 +230,16 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
     private val cpuByIndex = LongArray(MAX_SLOTS)
     private val wallByIndex = LongArray(MAX_SLOTS)
 
+    /**
+     * The sampler's per-slot counts over the counted windows only, the spans [cpuByIndex] and
+     * [wallByIndex] cover. The session's totals would set the samples of a thread's tail, after its last
+     * boundary and never read by its CPU clock, against CPU that leaves it out, and hide its waiting.
+     */
+    private val winHits = LongArray(MAX_SLOTS)
+    private val winLabelled = LongArray(MAX_SLOTS)
+    private val winWaiting = LongArray(MAX_SLOTS)
+    private val winLabelledWaiting = LongArray(MAX_SLOTS)
+
     private var windows = 0
     private var cpuNanos = 0L
     private var wallNanos = 0L
@@ -489,6 +499,12 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
                     cpuByIndex[idx] += d
                     wallByIndex[idx] += span - itsPause
                     hidden += hiddenIn(idx, d, span - itsPause)
+                    hits?.let { h ->
+                        winHits[idx] += h[idx] - prevHits[idx]
+                        winLabelled[idx] += labelled!![idx] - prevLabelled[idx]
+                        winWaiting[idx] += waiting!![idx] - prevWaiting[idx]
+                        winLabelledWaiting[idx] += labelledWaiting!![idx] - prevLabelledWaiting[idx]
+                    }
                 }
             }
         }
@@ -575,7 +591,10 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
     ): Duty = run {
         val b =
             if (available) labelledDuty(
-                slotHits, slotLabelled, slotWaiting, slotLabelledWaiting,
+                // Over the counted windows where each window took its own share of the counts; the
+                // session's totals where it could not, without the state read.
+                if (hits != null) winHits else slotHits, if (hits != null) winLabelled else slotLabelled,
+                if (hits != null) winWaiting else slotWaiting, if (hits != null) winLabelledWaiting else slotLabelledWaiting,
                 cpuByIndex, wallByIndex, stateSampled
             )
             else LabelledDuty(Double.NaN, Double.NaN, Double.NaN)

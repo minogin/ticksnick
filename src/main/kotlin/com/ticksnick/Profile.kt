@@ -449,10 +449,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         fun overRest(f: (Run.OwnRow) -> Double) =
             nodes.map { i -> rows[i]!!.filter { it.name in rest }.sumOf { r -> f(r).takeIf { !it.isNaN() } ?: 0.0 } }
                 .let { v -> Estimate(v.takeIf { it.any { x -> x > 0 } } ?: emptyList()) }
+        // Only what adds up: the folded rows' calls are of different operations, a total of nothing.
         val folded = if (rest.isEmpty()) null else Row(
             FOLDED_ROWS,
             mapOf(
-                EXECUTIONS to overRest { it.calls.coerceAtLeast(0).toDouble() },
                 WALL to overRest { it.wallNanos },
                 PARENT_SHARE to overRest { it.share * 100 },
             ),

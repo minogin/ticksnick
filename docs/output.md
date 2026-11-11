@@ -179,7 +179,8 @@ batch                                    1                          1.16s       
 - **Under multiple parents**, right under the tree and above the keys, has each such operation, coarse or fine, over all of its
   rows: `visit` 300 ms and 1,100 calls, under `plan` and `cleanup` together. It is sorted by Wall, so a
   label spread over three rows ranks by its whole, and not by its largest part.
-- `and 1 more` folds the small rows into one row, with their calls and time in the same columns. Small rows with calls are drawn while they
+- `and 1 more` folds the small rows into one row, with their time in the same columns: only what adds up,
+  so not their calls, which are of different operations. Small rows with calls are drawn while they
   fit within six rows.
 
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns

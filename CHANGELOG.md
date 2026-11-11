@@ -39,7 +39,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - A report prints the same lines however many runs are behind it. One run gains `Runs`, the run list and
   its root row; several gain `Cores`, `Sampling` and `Sampled`.
 - A diff has everything a report has. A row is three lines: before, after, and the change.
-- `and N more` is a row, with the calls and time of the rows it folds.
+- `and N more` is a row, with the time of the rows it folds: what adds up. Their calls, of different
+  operations, are left blank.
 - Work outside a span, a label not in the tree, a closed execution and `on a CPU` over what the CPU
   allows are warnings now, so they reach a report of several runs and a diff.
 - The coarse table has groups, `Load` and `Long`, as the fine table has. `Runnable / Waiting` moved into

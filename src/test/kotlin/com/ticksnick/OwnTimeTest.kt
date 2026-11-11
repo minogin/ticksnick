@@ -7,6 +7,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -70,6 +71,29 @@ class OwnTimeTest {
 
     private fun assertNear(expected: Double, actual: Double, tolerance: Double, what: String) =
         assertTrue(kotlin.math.abs(actual - expected) <= tolerance, "$what: expected $expected +/- $tolerance, was $actual")
+
+    /**
+     * A row that groups others shows only what adds up: `and N more` has the time of the labels it
+     * folds, and not their calls, which are of different operations and total nothing.
+     */
+    @Test
+    fun `the folded row has the time of what it folds and not their calls`() {
+        val job = Profiler.registerCoarse(JOB)
+        val big = Profiler.registerFine("own.big")
+        val tiny = (0 until 9).map { Profiler.registerFine("own.tiny$it") }
+        Profiler.start()
+        repeat(20) {
+            op(job) {
+                op(big) { spinFor(10 * ms) }
+                for (t in tiny) repeat(100) { op(t) { } }
+            }
+        }
+        val p = Profiler.stop()
+        val profile = Profile("p", listOf(java.nio.file.Path.of("0.tsr")), listOf(p))
+        val folded = assertNotNull(profile.coarseTable.rows.flatMap { it.children }.firstOrNull { it.foldedRows > 0 }, "nothing was folded: ${p.render()}")
+        assertTrue(EXECUTIONS !in folded.figures, "the folded row added up calls of different operations")
+        assertTrue(WALL in folded.figures)
+    }
 
     /**
      * A job half on its own thread and half handed to two helpers, on two drivers at once - a fine

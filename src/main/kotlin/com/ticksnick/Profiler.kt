@@ -942,11 +942,10 @@ object Profiler {
         return scope
     }
 
-    /** One closing call that did not match what was open. Counted with the leaks, and fatal under strict. */
+    /** One closing call that did not match what was open. Counted with the leaks, and fatal. */
     private fun mismatch(closed: String, open: String) {
         imbalances.incrementAndGet()
-        leakedNames += open
-        sampler?.let { if (it.strict) it.fail(mismatchMessage(closed, open)) }
+        sampler?.fail(mismatchMessage(closed, open))
     }
 
     /** How many hand-placed labels this thread has entered and not left. */
@@ -977,15 +976,14 @@ object Profiler {
             else -> return true
         }
         imbalances.incrementAndGet()
-        leakedNames += leaked
         s.flushCounts(ctx)
         s.setContextOpaque(null)
         s.depth = 0
         s.setOpaque(NO_OP)
-        // Fatal under strict, and it is the only thing that is. Resetting the slot stops the leak
-        // spreading, but it cannot give back the samples already billed to the wrong operation —
-        // so continuing means reporting a share that was manufactured by a bug.
-        sampler?.let { if (it.strict) it.fail(leakMessage(leaked)) }
+        // Fatal. Resetting the slot stops the leak spreading, but it cannot give back the samples
+        // already billed to the wrong operation - so continuing means reporting a share that was
+        // manufactured by a bug.
+        sampler?.fail(leakMessage(leaked))
         return false
     }
 
@@ -1008,9 +1006,6 @@ object Profiler {
      * per arm in one JVM hits this on every round after the first.
      */
     private var imbalancesAtStart = 0
-
-    /** The labels behind [imbalances] in the current session, by name, for its warning. Cleared when a session begins. */
-    private val leakedNames: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     /** [untrackedSlots] as it stood when the current session began. See [Run.untrackedSlots]. */
     private var untrackedAtStart = 0
@@ -1164,8 +1159,9 @@ object Profiler {
     /**
      * Starts sampling. One sampler at a time.
      *
-     * [strict] stops the session if a label leaks or is closed out of order, since either bills
-     * samples to the wrong operation. Switch it off to profile code you do not own and cannot fix.
+     * A label left open or closed out of order stops the session, and so does work billed to closed
+     * coarse executions: each bills samples to the wrong operation, and a run whose figures are false
+     * fails rather than reports. There is no switch to profile anyway.
      *
      * [wait] is [WaitStrategy.SPIN] from [SPIN_MIN_PROCESSORS] processors and [WaitStrategy.PARK]
      * below, unless given.
@@ -1185,7 +1181,6 @@ object Profiler {
         tickMillis: Double = 1.0,
         wait: WaitStrategy = defaultWait(),
         jitter: Double = 0.25,
-        strict: Boolean = true,
         sampleState: Boolean = true,
         allocations: Boolean = false,
         tags: Map<String, Any> = emptyMap(),
@@ -1202,10 +1197,9 @@ object Profiler {
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()
-        leakedNames.clear()
         untrackedAtStart = untrackedSlots()
         reclaimedAtStart = reclaimedSlots()
-        sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
+        sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, sampleState = sampleState)
             .also { it.start() }
         clock = ClockProbe().also { it.start() }
         bodyProbe = BodyProbe().also { it.start() }
@@ -1318,7 +1312,6 @@ object Profiler {
             clock = clockTrace,
             bodyNanos = bodyTrace.nanos,
             nanoTimeBodies = bodyTrace.nanoTimeBodies,
-            leakedNames = leakedNames.sorted(),
             openAtEndNames = openSpanNames(),
             openContextsAtEndByName = openContextsByName(),
             wait = s.wait,

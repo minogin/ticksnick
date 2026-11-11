@@ -402,27 +402,23 @@ class RunTest {
         assertFalse(text.contains("Wall time"), "a failed run rendered figures: $text")
     }
 
-    /** A leak that did not stop the session is still counted and still printed. */
+    /**
+     * A label still open at `stop()` is a warning, not a failure: the thread may still be working in
+     * it. Named, or counted for a run saved without the names.
+     */
     @Test
-    fun `a non-fatal leak is still reported`() {
-        val r = Run(
+    fun `a label still open at stop is a warning`() {
+        fun run(names: List<String>) = Run(
             operations = listOf(stat("a", hits = 100, calls = 1000)),
             idleHits = 0, ticks = 20_000, samplingSpanNanos = 20_000_000_000,
             durationNanos = 20_000_000_000, threads = 8, duty = duty(),
-            imbalances = 3, stateSampled = true,
+            stateSampled = true, openAtEnd = 2, openAtEndNames = names,
         )
-        assertTrue(r.ok, "a counted leak invalidated a non-strict report")
-        // A run saved without the names still says how many.
-        assertTrue(r.render().contains("  3 labels: entered and never exited - an exception skipped the `exit`"), "the leak count was not printed")
-        val named = Run(
-            operations = listOf(stat("a", hits = 100, calls = 1000)),
-            idleHits = 0, ticks = 20_000, samplingSpanNanos = 20_000_000_000,
-            durationNanos = 20_000_000_000, threads = 8, duty = duty(),
-            imbalances = 3, stateSampled = true, leakedNames = listOf("parse", "visit"), openAtEnd = 1, openAtEndNames = listOf("merge"),
-        )
-        val text = named.render()
-        assertTrue(text.contains("  `parse`, `visit`: entered and never exited - "), text)
-        assertTrue(text.contains("  `merge`: entered and never exited by `stop()` - "), text)
+        assertTrue(run(emptyList()).ok)
+        val counted = run(emptyList()).render()
+        assertTrue(counted.contains("  2 labels: entered and never exited by `stop()` - an exception skipped the `exit`"), counted)
+        val named = run(listOf("merge", "parse")).render()
+        assertTrue(named.contains("  `merge`, `parse`: entered and never exited by `stop()` - "), named)
     }
 
     // ---------------------------------------------------------------- formatting

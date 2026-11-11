@@ -209,31 +209,20 @@ class RegistryTest {
     }
 
     /**
-     * The one fatal condition, and the check that it is fatal *only* under strict.
-     *
-     * Asserting only that a leak stops the session would still pass if `strict` were wired to
-     * nothing, which is why both directions are here.
+     * A leak stops the session and names the label, and nothing makes it a warning: every sample
+     * after it is billed to the leaked label, and a run whose figures are false fails.
      */
     @Test
-    fun `a leak stops the session under strict and only under strict`() {
+    fun `a leak stops the session and names the label`() {
         val id = Profiler.registerFine("test:fatal")
 
-        Profiler.start(tickMillis = 1.0, strict = true)
+        Profiler.start(tickMillis = 1.0)
         onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
-        val strict = Profiler.stop()
-        assertTrue(strict.failure != null, "a leak did not stop a strict session")
-        assertTrue(
-            strict.failure!!.contains("test:fatal"),
-            "the failure did not name the operation that leaked: ${strict.failure}"
-        )
-        assertFalse(strict.ok)
-
-        Profiler.start(tickMillis = 1.0, strict = false)
-        onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
-        val lenient = Profiler.stop()
-        assertNull(lenient.failure, "a leak stopped a non-strict session")
-        assertTrue(lenient.ok)
-        assertEquals(1, lenient.imbalances, "the second session inherited the first session's leak")
+        val run = Profiler.stop()
+        val failure = assertNotNull(run.failure, "a leak did not stop the session")
+        assertTrue("test:fatal" in failure, "the failure did not name the operation that leaked: $failure")
+        assertFalse(run.ok)
+        assertEquals(1, run.imbalances)
     }
 
     /**
@@ -250,11 +239,11 @@ class RegistryTest {
     fun `a clean session does not inherit an earlier session's leaks`() {
         val id = Profiler.registerFine("test:inherited")
 
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         onOwnThread { Profiler.enter(id); Profiler.expectBalanced() }
         assertEquals(1, Profiler.stop().imbalances, "the leak was not counted at all")
 
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         onOwnThread { op(id) { } }
         val clean = Profiler.stop()
         assertEquals(0, clean.imbalances, "a session with no leak reported ${clean.imbalances}")
@@ -272,7 +261,7 @@ class RegistryTest {
     fun `closing the wrong operation is counted and named`() {
         val a = Profiler.registerFine("test:crossed-a")
         val b = Profiler.registerFine("test:crossed-b")
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
@@ -285,26 +274,26 @@ class RegistryTest {
     }
 
     @Test
-    fun `a crossed exit stops the session under strict and names both operations`() {
-        val a = Profiler.registerFine("test:strict-open")
-        val b = Profiler.registerFine("test:strict-closed")
-        Profiler.start(tickMillis = 1.0, strict = true)
+    fun `a crossed exit stops the session and names both operations`() {
+        val a = Profiler.registerFine("test:mismatch-open")
+        val b = Profiler.registerFine("test:mismatch-closed")
+        Profiler.start(tickMillis = 1.0)
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
             Profiler.release()
         }
         val report = Profiler.stop()
-        val failure = assertNotNull(report.failure, "a crossed exit did not stop a strict session")
-        assertTrue("test:strict-closed" in failure, "the message did not name what was closed")
-        assertTrue("test:strict-open" in failure, "the message did not name what was open")
+        val failure = assertNotNull(report.failure, "a crossed exit did not stop the session")
+        assertTrue("test:mismatch-closed" in failure, "the message did not name what was closed")
+        assertTrue("test:mismatch-open" in failure, "the message did not name what was open")
     }
 
     @Test
     fun `closing a coarse execution that is not the one open is caught too`() {
         val a = Profiler.registerCoarse("test:coarse-open")
         val b = Profiler.registerCoarse("test:coarse-closed")
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
@@ -491,7 +480,7 @@ class RegistryTest {
             }, "threads-worker-$i")
         }
 
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         workers.forEach { it.start() }
         called.await()
         val r = Profiler.stop()
@@ -514,7 +503,7 @@ class RegistryTest {
     fun `threads that have exited are still counted`() {
         val id = Profiler.registerFine("test:threads-retired")
 
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         repeat(3) { i ->
             onOwnThread("retired-worker-$i") {
                 repeat(5) { op(id) { } }
@@ -541,7 +530,7 @@ class RegistryTest {
 
         repeat(3) { i -> onOwnThread("warmup-worker-$i") { op(id) { }; Profiler.release() } }
 
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         onOwnThread("measured-worker") { op(id) { }; Profiler.release() }
         val r = Profiler.stop()
 
@@ -556,7 +545,7 @@ class RegistryTest {
     @Test
     fun `a call made right after start is counted`() {
         val id = Profiler.registerFine("test:right-after-start")
-        Profiler.start(tickMillis = 1.0, strict = false)
+        Profiler.start(tickMillis = 1.0)
         op(id) { }
         val r = Profiler.stop()
 

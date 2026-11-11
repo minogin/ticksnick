@@ -77,7 +77,7 @@ class ClockTest {
     @Test
     fun `the clock survives a save and a load, and a file without one loads as not recorded`() {
         val id = Profiler.registerFine("clock-store")
-        Profiler.start(strict = false)
+        Profiler.start()
         val until = System.nanoTime() + 50_000_000
         while (System.nanoTime() < until) op(id) { Thread.onSpinWait() }
         val profile = Profiler.stop()

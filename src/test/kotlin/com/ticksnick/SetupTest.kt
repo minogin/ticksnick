@@ -113,7 +113,7 @@ class SetupTest {
 
     @Test
     fun `runs that differ show their values and get one line, last`() = inTemp { dir ->
-        save(dir, "a", run(tags = mapOf("warmups" to "1", "batches" to "3"), setup = setup("12 GB", "1@1"), imbalances = 1))
+        save(dir, "a", run(tags = mapOf("warmups" to "1", "batches" to "3"), setup = setup("12 GB", "1@1"), openAtEnd = 1))
         save(dir, "b", run(tags = mapOf("warmups" to "2", "batches" to "10"), setup = setup("18 GB", "2@2")))
         val lines = Profile.load(dir).render().lines()
         assertTrue(lines.any { it.startsWith("Tags") && it.endsWith("warmups: 1, 2; batches: 3, 10") }, lines.joinToString("\n"))
@@ -151,9 +151,9 @@ class SetupTest {
 
     @Test
     fun `a run's own warning reaches the report over runs, once, with how many said it`() = inTemp { dir ->
-        save(dir, "a", run(imbalances = 1))
-        save(dir, "b", run(imbalances = 1))
-        save(dir, "c", run(imbalances = 2))
+        save(dir, "a", run(openAtEnd = 1))
+        save(dir, "b", run(openAtEnd = 1))
+        save(dir, "c", run(openAtEnd = 2))
         val lines = Profile.load(dir).render().lines()
         // Saved without the names, a run says how many: different counts are different words.
         assertEquals(1, lines.count { "  1 label: entered and never exited" in it }, lines.joinToString("\n"))
@@ -208,10 +208,10 @@ class SetupTest {
     fun `a diff repeats each side's warnings, naming the side`() = inTemp { dir ->
         val before = dir.resolve("before")
         val after = dir.resolve("after")
-        save(before, "a", run(imbalances = 1, tags = mapOf("warmups" to "1")))
+        save(before, "a", run(openAtEnd = 1, tags = mapOf("warmups" to "1")))
         save(before, "b", run(tags = mapOf("warmups" to "2")))
-        save(after, "a", run(imbalances = 2))
-        save(after, "b", run(imbalances = 2))
+        save(after, "a", run(openAtEnd = 2))
+        save(after, "b", run(openAtEnd = 2))
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         assertTrue("(1 of 2 runs in 'before')" in text, text)
         assertTrue("(2 of 2 runs in 'after')" in text, text)
@@ -223,8 +223,8 @@ class SetupTest {
         val before = dir.resolve("before")
         val after = dir.resolve("after")
         for (i in 1..MAX_WARNINGS + 2) {
-            save(before, "a$i", run(imbalances = i, tags = mapOf("warmups" to "$i")))
-            save(after, "a$i", run(imbalances = 100 + i, tags = mapOf("batches" to "$i")))
+            save(before, "a$i", run(openAtEnd = i, tags = mapOf("warmups" to "$i")))
+            save(after, "a$i", run(openAtEnd = 100 + i, tags = mapOf("batches" to "$i")))
         }
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         assertTrue("more" in text.lines().first { it.contains("... and") }, text)
@@ -239,8 +239,8 @@ class SetupTest {
     fun `the diff of one run on each side repeats their warnings too`() = inTemp { dir ->
         val before = dir.resolve("before")
         val after = dir.resolve("after")
-        run(imbalances = 1).save(before)
-        run(imbalances = 2).save(after)
+        run(openAtEnd = 1).save(before)
+        run(openAtEnd = 2).save(after)
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         assertTrue("(in 'before')" in text && "(in 'after')" in text, text)
     }
@@ -292,7 +292,7 @@ class SetupTest {
     private fun run(
         tags: Map<String, String> = emptyMap(),
         setup: Setup = Setup.NONE,
-        imbalances: Int = 0,
+        openAtEnd: Int = 0,
         failure: String? = null,
         allocations: Boolean = false,
         askedStepNanos: Long = 0,
@@ -306,7 +306,7 @@ class SetupTest {
             anomalies = 0, maxSampleNanos = 200_000,
         ),
         failure = failure,
-        imbalances = imbalances,
+        openAtEnd = openAtEnd,
         coarse = listOf(CoarseStat(0, "runBatch", 1, 1_000_000_000, 1_000_000_000, 1_000_000_000, Spans(), 10, 10, 10, 10, 10, 10, LongArray(MAX_OPERATIONS + 1))),
         coarseTree = listOf(
             CoarseNode(0, "runBatch", 1, 1_000_000, 1_000_000, 1_000_000, Spans.of(listOf(1_000_000L)), 10, 10, LongArray(MAX_OPERATIONS + 1), 0, emptyList())

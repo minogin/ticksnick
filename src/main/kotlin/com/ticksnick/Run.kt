@@ -790,8 +790,6 @@ class Run internal constructor(
     internal val bodyNanos: Double = Double.NaN,
     /** One `System.nanoTime()`, in bodies; NaN for a run that did not time it. See [BodyProbe]. */
     internal val nanoTimeBodies: Double = Double.NaN,
-    /** The labels behind [imbalances], by name; empty for a run saved without them. */
-    internal val leakedNames: List<String> = emptyList(),
     /** The labels behind [openAtEnd], by name; empty for a run saved without them. */
     internal val openAtEndNames: List<String> = emptyList(),
     /** The coarse labels behind [openContextsAtEnd], each with how many were open; empty for a run saved without them. */
@@ -1625,8 +1623,7 @@ class Run internal constructor(
         buildList {
             // A leaked label does not look like an error. It looks like a finding: one operation
             // quietly accumulating everybody else's samples, with a plausible number beside it.
-            if (imbalances > 0) add(Warning(Kind.LABELS_LEFT_OPEN, words(labelsText(leakedNames, imbalances)), words("")))
-            if (openAtEnd > 0) add(Warning(Kind.LABELS_LEFT_OPEN, words(labelsText(openAtEndNames, openAtEnd)), words(" by `stop()`")))
+            if (openAtEnd > 0) add(Warning(Kind.LABELS_LEFT_OPEN, words(labelsText(openAtEndNames, openAtEnd))))
             if (allocationsMissing) add(Warning(Kind.ALLOCATIONS_UNAVAILABLE))
             if (untrackedSlots > 0) add(Warning(Kind.THREADS_UNSAMPLED, figure(untrackedSlots.toDouble(), ::countText)))
             // No warning for threads that exited without Profiler.release(): the sampler skips a

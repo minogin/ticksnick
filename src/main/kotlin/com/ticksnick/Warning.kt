@@ -43,7 +43,7 @@ internal fun codeList(names: List<String>): String = names.joinToString(", ") { 
 internal enum class Kind(val text: (List<String>) -> String) {
     // Numbers missing or false.
     LABELS_LEFT_OPEN({ g ->
-        "${g[0]}: entered and never exited${g[1]}${sym.dash}an exception skipped the `exit`, so later time went to it; put `exit` in a `finally`"
+        "${g[0]}: entered and never exited by `stop()`${sym.dash}an exception skipped the `exit`, so later time went to it; put `exit` in a `finally`"
     }),
     ALLOCATIONS_UNAVAILABLE({ _ -> "Allocated: not shown${sym.dash}this JVM cannot count allocated bytes per thread; HotSpot can" }),
     THREADS_UNSAMPLED({ g ->

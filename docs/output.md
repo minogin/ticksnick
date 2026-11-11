@@ -52,8 +52,8 @@ The common ones:
   run's body, rounded up.
 - `` `request`: its executions, 1.2us, are under the recommended 3.0us `` - the operation is too short
   for a coarse label. Register it fine; the `op` calls stay the same. What raises the floor is named.
-- `` `parse`: entered and never exited `` - a label set with `enter` was not closed, so later time
-  went to it. Put `exit` in a `finally`.
+- `` `parse`: entered and never exited by `stop()` `` - a label set with `enter` was still open when the
+  session stopped, so the time after its missed `exit` may have gone to it. Put `exit` in a `finally`.
 - `Thread-time%: may be off by up to N pp` and the `Runnable` warnings - some time inside labels read
   as Runnable may have been waiting, so a share of time may differ from a share of CPU. The second line
   splits it: waiting for a free core (run fewer threads) or in I/O, native calls or other programs
@@ -70,7 +70,7 @@ several runs is one line ending in `(2 of 4 runs)`, its figures as ranges, `1.04
 shows the warnings of both its profiles, `(2 of 4 runs in 'naive')`.
 
 A run that **failed** is not a warning: a label left open or work billed to a closed execution stopped
-it, under `strict`. It is saved and left out of its profile, and the report opens with a `FAILED`
+it, since its figures would be false. It is saved and left out of its profile, and the report opens with a `FAILED`
 banner naming it; when no run is left, the banner is the whole report.
 
 ### Tags and Setup

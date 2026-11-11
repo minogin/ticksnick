@@ -11,7 +11,7 @@ class BodyTest {
     /** A session long enough for a timing has a body, and `nanoTime` in bodies, both plausible. */
     @Test
     fun `a session times a body and nanoTime`() {
-        Profiler.start(strict = false)
+        Profiler.start()
         Thread.sleep(300)
         val run = Profiler.stop()
         assertTrue(run.bodyTimed, "no body timed in 300 ms")
@@ -22,7 +22,7 @@ class BodyTest {
     /** Saved and loaded, a run keeps its body, so it renders with the same floors later. */
     @Test
     fun `the body survives a save`() {
-        Profiler.start(strict = false)
+        Profiler.start()
         Thread.sleep(300)
         val run = Profiler.stop()
         val loaded = Run.load(run.save(Files.createTempDirectory("body")))
@@ -35,7 +35,7 @@ class BodyTest {
     @Test
     fun `a batch label is one hook entry`() {
         val batch = Profiler.registerFine("batchOfMany")
-        Profiler.start(strict = false)
+        Profiler.start()
         var x = 0L
         repeat(1_000) { op(batch, times = 500) { x += it } }
         val run = Profiler.stop()

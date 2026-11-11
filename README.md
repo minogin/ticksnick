@@ -126,10 +126,10 @@ Profiler.expectBalanced()   // where no label should be open
 ```
 
 `enter` and `exit` have no `finally`, so an exception between them leaves the label set. TickSnick
-counts that as a leak and, by default, stops the session at the first one: every sample after it would
-be charged to the wrong operation. The run has failed: its report says why and shows no figures, and a
-profile leaves it out. Pass `Profiler.start(strict = false)` when the labels are in code
-you cannot fix. The leaks are still counted and reported.
+counts that as a leak and stops the session at the first one: every sample after it would be charged
+to the wrong operation. The run has failed: its report says why and shows no figures, and a profile
+leaves it out. TickSnick never reports figures it knows are false, so there is no switch to profile
+anyway. Where the labels are in code you cannot fix, label one level up, where a `finally` fits.
 
 ### Settings
 
@@ -143,7 +143,6 @@ you cannot fix. The leaks are still counted and reported.
   interval grows longer and less regular. The report's `Sampling` line says which one ran.
 - `jitter` (0.25): each interval varies at random by up to this fraction, so sampling does not fall
   in step with a loop in the program.
-- `strict` (true): stop at the first leaked label, see above.
 - `sampleState` (true): record whether each sampled thread was running or waiting.
 - `allocations` (false): count the bytes allocated under each coarse operation, for the report's
   `Allocated` column. It adds about 30 ns to each coarse execution. It needs a JVM that reports

@@ -144,7 +144,6 @@ internal object RunStore {
                 text("$key.$i.value", n.toString())
             }
         }
-        names("leakedNames", p.leakedNames.associateWith { 1 })
         names("openAtEndNames", p.openAtEndNames.associateWith { 1 })
         names("openContextsAtEndByName", p.openContextsAtEndByName)
 
@@ -377,7 +376,6 @@ internal object RunStore {
             tags = pairs("tags", "tag"),
             bodyNanos = m["body.nanos"]?.toDouble() ?: Double.NaN,
             nanoTimeBodies = m["body.nanoTimeBodies"]?.toDouble() ?: Double.NaN,
-            leakedNames = pairs("leakedNames", "leakedNames").keys.toList(),
             openAtEndNames = pairs("openAtEndNames", "openAtEndNames").keys.toList(),
             openContextsAtEndByName = pairs("openContextsAtEndByName", "openContextsAtEndByName").mapValues { it.value.toIntOrNull() ?: 0 },
         )

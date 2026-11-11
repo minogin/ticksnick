@@ -57,7 +57,7 @@ class CallsPerParentTest {
 
     /** One batch of [plans] plans, each followed by a cleanup. About 115 ms per plan. */
     private fun run(plans: Int): Run {
-        Profiler.start(strict = false)
+        Profiler.start()
         op(batch) {
             repeat(plans) {
                 op(plan) {

@@ -72,12 +72,14 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   during a run and across runs. A root operation run a different number of times is named among what
   the runs differ in. Two are gone: threads that ran a label one at a time, which the `Workers` and
   `Pool` columns show, and CPU clock readings dropped for going backwards.
-- A label left open is named, `` `parse`: entered and never exited ``, and so is a coarse label still
-  open at `stop()`; a run saves their names.
+- A label still open at `stop()` is named, `` `parse`: entered and never exited by `stop()` ``, and so
+  is a coarse execution still open; a run saves their names.
 - A failed run, stopped by a leaked label or work billed to a closed execution, is left out of its
   profile: the report opens with `FAILED: 1 of 4 runs, left out of the profile` and each failed run's
   file and failure. When every run failed there is no profile, and the report is that banner alone; so is
   a diff with such a side. A failure is not a warning, and is not repeated as one.
+- `Profiler.start(strict = false)` is gone: a leaked label, a crossed `exit` and work billed to closed
+  executions always fail the run, since its figures would be false.
 - The floors are recommended limits, rounded up to two digits, the second 0 or 5, and the check uses
   the rounded figure: `` `request`: its executions, 1.2us, are under the recommended 3.0us (Allocated
   adds 600ns) ``. The coarse floor is 100 bodies, about 2.5 us; each registered fine label and counting

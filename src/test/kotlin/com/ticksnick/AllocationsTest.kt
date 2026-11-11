@@ -80,7 +80,7 @@ class AllocationsTest {
 
     @Test
     fun `a row counts what ran under it, its coarse children included`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested()
         val p = Profiler.stop()
 
@@ -91,7 +91,7 @@ class AllocationsTest {
     /** The thread that opened the execution does not allocate this; a thread working under it does. */
     @Test
     fun `bytes allocated on a thread that carries the context count under the row`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(5) {
             fork()
         }
@@ -105,7 +105,7 @@ class AllocationsTest {
 
     @Test
     fun `a session that did not ask counts nothing and draws no column`() {
-        Profiler.start(strict = false)
+        Profiler.start()
         nested()
         val p = Profiler.stop()
 
@@ -116,11 +116,11 @@ class AllocationsTest {
     /** A thread's total runs from its birth, and what it allocated before the session is not the session's. */
     @Test
     fun `a session starts from what the thread had already allocated`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested(1)
         Profiler.stop()
         sink = ByteArray(8 * MB)
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested(1)
         val p = Profiler.stop()
 
@@ -129,10 +129,10 @@ class AllocationsTest {
 
     @Test
     fun `the column is drawn in line, saved, and diffed`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested()
         val a = Profiler.stop()
-        Profiler.start(strict = false)
+        Profiler.start()
         nested()
         val off = Profiler.stop()
 
@@ -163,10 +163,10 @@ class AllocationsTest {
         val before = Files.createTempDirectory("alloc-before")
         val after = Files.createTempDirectory("alloc-after")
         repeat(2) {
-            Profiler.start(strict = false, allocations = true)
+            Profiler.start(allocations = true)
             nested()
             Profiler.stop().save(before)
-            Profiler.start(strict = false, allocations = true)
+            Profiler.start(allocations = true)
             nested()
             Profiler.stop().save(after)
         }
@@ -184,7 +184,7 @@ class AllocationsTest {
         val keyed = Profiler.registerCoarse("alloc.keyed")
         fun once() = op(keyed, key = { "k" }) { sink = ByteArray(MB) }
         once()
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(5) { once() }
         val p = Profiler.stop()
 
@@ -202,7 +202,7 @@ class AllocationsTest {
             Profiler.exit(outer)
         }
         once()
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(5) { once() }
         val p = Profiler.stop()
 
@@ -214,7 +214,7 @@ class AllocationsTest {
     fun `a scope counts what ran inside it`() {
         fun once() = Profiler.coarse(outer).use { sink = ByteArray(MB) }
         once()
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(5) { once() }
         val p = Profiler.stop()
 
@@ -224,7 +224,7 @@ class AllocationsTest {
     /** The leak is caught at the check: what ran up to it was the execution's, and what ran after is nobody's. */
     @Test
     fun `a leaked execution keeps what ran under it up to the check`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         op(outer) { sink = ByteArray(MB) }
         Profiler.enter(outer)
         sink = ByteArray(MB)
@@ -241,7 +241,7 @@ class AllocationsTest {
     fun `a JVM that cannot report them runs without and says so`() {
         Profiler.allocationsAvailable = false
         val p = try {
-            Profiler.start(strict = false, allocations = true)
+            Profiler.start(allocations = true)
             nested()
             Profiler.stop()
         } finally {
@@ -262,7 +262,7 @@ class AllocationsTest {
     /** One line on the normal path, where the warning must not appear. */
     @Test
     fun `a JVM that can report them does not warn`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested()
         assertFalse("cannot count" in Profiler.stop().render())
     }
@@ -277,7 +277,7 @@ class AllocationsTest {
             op(other) { op(inner) { sink = ByteArray(2 * MB) } }
         }
         both()
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(3) { both() }
         val lines = Profiler.stop().render().lines()
 
@@ -291,7 +291,7 @@ class AllocationsTest {
     @Test
     fun `a fine row stays in line and leaves the column empty`() {
         val fine = Profiler.registerFine("alloc.fine")
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(30) { op(outer) { op(fine) { spin(2_000_000) } } }
         val lines = Profiler.stop().render().lines()
 
@@ -302,7 +302,7 @@ class AllocationsTest {
 
     @Test
     fun `the rule reaches the end of the table`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested()
         val lines = Profiler.stop().render().lines()
 
@@ -318,7 +318,7 @@ class AllocationsTest {
     fun `an execution open at the start counts from the thread's first boundary`() {
         Profiler.enter(outer)
         sink = ByteArray(8 * MB)
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         sink = ByteArray(MB)
         Profiler.exit(outer)
         op(outer) { sink = ByteArray(MB) }
@@ -330,7 +330,7 @@ class AllocationsTest {
 
     @Test
     fun `an execution open at the stop does not disturb the rows or the next session`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         op(outer) { sink = ByteArray(MB) }
         Profiler.enter(outer)
         sink = ByteArray(4 * MB)
@@ -340,7 +340,7 @@ class AllocationsTest {
         assertEquals(1, p.openContextsAtEnd)
         assertBytes(MB.toDouble(), p.allocatedPerExecution(p.node("alloc.outer")), "the one that closed")
 
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         nested(1)
         val next = Profiler.stop()
         assertBytes(3.0 * MB, next.allocatedPerExecution(next.node("alloc.outer")), "the next session")
@@ -357,7 +357,7 @@ class AllocationsTest {
     fun `threads on one path at once add up`() {
         val threads = 4
         val gate = CountDownLatch(threads)
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         List(threads) {
             thread {
                 gate.countDown()
@@ -374,7 +374,7 @@ class AllocationsTest {
     @Test
     fun `forks running at once under one execution add up`() {
         val forks = 4
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(3) {
             op(outer) {
                 val ctx = captureCoarse()
@@ -397,7 +397,7 @@ class AllocationsTest {
 
     @Test
     fun `a thread that has gone keeps what it counted`() {
-        Profiler.start(strict = false, allocations = true)
+        Profiler.start(allocations = true)
         repeat(3) {
             thread {
                 op(outer) { sink = ByteArray(MB) }
@@ -413,7 +413,7 @@ class AllocationsTest {
     // --- comparing ----------------------------------------------------------------------------
 
     private fun session(allocations: Boolean, body: () -> Unit = { nested() }): Run {
-        Profiler.start(strict = false, allocations = allocations)
+        Profiler.start(allocations = allocations)
         body()
         return Profiler.stop()
     }
@@ -507,7 +507,7 @@ class AllocationsTest {
     }
 
     private fun emptySave(allocations: Boolean): java.nio.file.Path {
-        Profiler.start(strict = false, allocations = allocations)
+        Profiler.start(allocations = allocations)
         return Profiler.stop().save(Files.createTempDirectory("alloc-floor"))
     }
 }

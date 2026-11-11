@@ -50,7 +50,7 @@ class CoresTest {
         val spin = Profiler.registerFine("cores.spin")
         val bean = java.lang.management.ManagementFactory.getThreadMXBean()
         val used = java.util.concurrent.atomic.AtomicLong()
-        Profiler.start(strict = false)
+        Profiler.start()
         Thread.sleep(200)
         val workers = (1..2).map {
             thread {
@@ -88,7 +88,7 @@ class CoresTest {
         op(before) { }
         val spun = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)
-        Profiler.start(strict = false)
+        Profiler.start()
         // Alive at stop(), outside every label: a thread that has exited reads -1 from its CPU clock.
         val worker = thread {
             try {
@@ -120,7 +120,7 @@ class CoresTest {
         val os = System.getProperty("os.name").lowercase()
         if (!os.startsWith("windows") && !os.startsWith("linux")) return
         val tick = Profiler.registerFine("cores.short")
-        Profiler.start(strict = false)
+        Profiler.start()
         op(tick) { spinFor(200_000_000) }
         val p = Profiler.stop()
         assertTrue(p.clock.careful().isEmpty(), "a 0.2s session warned about the clock: ${p.clock.careful()}")

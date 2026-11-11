@@ -74,17 +74,11 @@ internal class Sampler(
     private val jitterFraction: Double = 0.25,
     dutyWindowNanos: Long = DutyCycle.DEFAULT_WINDOW_NANOS,
     /**
-     * Whether a leaked label stops the session.
-     *
-     * A label left open at a point the caller declared quiescent does not make a number imprecise,
-     * it makes it *someone else's*: every sample after the leak is billed to the leaked operation,
-     * and the result looks exactly like a finding. There is no rerun in which that becomes valid,
-     * so under strict the session stops at the first one rather than spending twenty minutes
-     * producing an answer that was never going to be right.
-     *
-     * Off for code you do not own and cannot fix — the leak is then still counted and reported.
+     * Whether work billed to finished coarse executions stops the session. Always, from
+     * [Profiler.start]: a run whose figures are false fails. Off only for a measurement of how much
+     * work escapes, made by constructing a sampler directly, which is not a profile anyone reads.
      */
-    val strict: Boolean = true,
+    private val staleStops: Boolean = true,
     /**
      * Whether each hit also records whether the owning thread was runnable.
      *
@@ -890,9 +884,9 @@ internal class Sampler(
                 Profiler.reclaimDeadSlots()
                 nextReclaim = now + RECLAIM_NANOS
                 // Once a second and not per tick: it divides two running totals, and the answer
-                // cannot become interesting in a millisecond. Under strict this is the second thing
-                // that stops a session, and the only one the sampler decides for itself.
-                if (strict) checkStaleContexts()
+                // cannot become interesting in a millisecond. This is the second thing that stops a
+                // session, and the only one the sampler decides for itself.
+                if (staleStops) checkStaleContexts()
             }
 
             if (prev == 0L) {

@@ -62,7 +62,7 @@ public final class JavaCaller {
 
     /** The setting from Java, through a scope and a pair: 1 MB in the plan and 2 MB in a level inside it. */
     static Run allocating(int plans) {
-        Profiler.start(1.0, WaitStrategy.PARK, 0.25, false, true, true);
+        Profiler.start(1.0, WaitStrategy.PARK, 0.25, true, true);
         for (int i = 0; i < plans; i++) {
             try (var plan = Profiler.coarse(PLAN)) {
                 held = new byte[1 << 20];

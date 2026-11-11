@@ -81,7 +81,7 @@ class OwnTimeTest {
         val a = Profiler.registerFine("own.a")
         val b = Profiler.registerFine("own.b")
         val helpers = Executors.newFixedThreadPool(4).propagating()
-        Profiler.start(strict = false)
+        Profiler.start()
         val drivers = (1..2).map {
             thread {
                 repeat(60) {
@@ -110,7 +110,7 @@ class OwnTimeTest {
         val part = Profiler.registerCoarse(PART)
         val merge = Profiler.registerFine("own.merge")
         val pool = Executors.newFixedThreadPool(3).propagating()
-        Profiler.start(strict = false)
+        Profiler.start()
         repeat(60) {
             op(request) {
                 (1..3).map { pool.submit(Callable { op(part) { spinFor(6 * ms) } }) }.forEach { it.get() }
@@ -134,7 +134,7 @@ class OwnTimeTest {
     fun `executions side by side divide their fine rows as they divide themselves`() {
         val request = Profiler.registerCoarse(JOB)
         val work = Profiler.registerFine("own.sidework")
-        Profiler.start(strict = false)
+        Profiler.start()
         val threads = (1..4).map { thread { repeat(60) { op(request) { op(work) { spinFor(4 * ms) } } } } }
         threads.forEach { it.join() }
         val p = Profiler.stop()
@@ -153,7 +153,7 @@ class OwnTimeTest {
         val request = Profiler.registerCoarse(JOB)
         val part = Profiler.registerCoarse(PART)
         val work = Profiler.registerFine("own.spread")
-        Profiler.start(strict = false)
+        Profiler.start()
         repeat(60) {
             op(request) {
                 op(part) { op(work) { spinFor(4 * ms) } }
@@ -186,7 +186,7 @@ class OwnTimeTest {
         val request = Profiler.registerCoarse(JOB)
         val part = Profiler.registerCoarse(PART)
         val last = Profiler.registerFine("own.last")
-        Profiler.start(strict = false, tickMillis = 0.1)
+        Profiler.start(tickMillis = 0.1)
         val until = System.nanoTime() + 3_000 * ms
         while (System.nanoTime() < until) {
             op(request) { repeat(10_000) { op(part) { op(last) { sink = sink * 31 + 1 } } } }
@@ -202,7 +202,7 @@ class OwnTimeTest {
     fun `a fine label on a thread that does not carry the context is not under the request`() {
         val request = Profiler.registerCoarse(JOB)
         val work = Profiler.registerFine("own.plainwork")
-        Profiler.start(strict = false)
+        Profiler.start()
         repeat(40) { op(request) { thread { op(work) { spinFor(4 * ms) } }.join() } }
         val p = Profiler.stop()
 

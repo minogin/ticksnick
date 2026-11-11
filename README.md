@@ -10,8 +10,8 @@ half a billion times, or a 30-second batch. TickSnick reports, per label:
   about 2 ns, so the cheapest operations can carry one.
 - **for longer operations, every execution timed**: counts, percentiles, the slowest executions, and
   a tree of which operation ran inside which, across threads.
-- **how far to trust each number**: the sampling noise, GC pauses, the CPU clock, threads that waited
-  rather than ran.
+- **how far to trust each number**: how much the runs differ, GC pauses, the CPU clock, threads that
+  waited rather than ran.
 
 Apache-2.0. Java 21 or later. Its only dependency is the Kotlin standard library.
 

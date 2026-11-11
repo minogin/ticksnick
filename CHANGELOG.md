@@ -44,8 +44,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   allows are warnings now, so they reach a report of several runs and a diff.
 - The coarse table has groups, `Load` and `Long`, as the fine table has. `Runnable / Waiting` moved into
   `Load`, before `Mean`.
-- The fine table has no `Trust` group: `Hits` and `Noise` are gone. The `+-` includes sampling noise, and
-  the `Sampled` line says how many samples there are.
+- The fine table has no `Trust` group: `Hits` and `Noise` are gone. The `Sampled` line says how many
+  samples there are.
 - `Execs` is `Long calls`, and `Per call` is `Thread-time per call` in every table.
 - `Allocated` is a group of two columns: `Total`, which adds up down the tree, and `Per execution`.
 - `+-` is on what says how much, `Runnable / Waiting` included, and not on percentiles, `Max`, or the

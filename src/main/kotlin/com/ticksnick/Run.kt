@@ -96,12 +96,6 @@ internal const val FINE_BUDGET_BODIES = 0.1
  */
 internal const val HOOKS_MAX_SHARE = 0.01
 
-/** Beside a floor read at [DEFAULT_BODY_NANOS]: the run timed no body of its own. */
-internal const val DEFAULT_FLOOR = " (a default: this run timed no body)"
-
-/** The second line of a leaked-label warning: the usual cause. */
-internal const val NO_FINALLY = "a label placed with enter/exit has no finally: a body that throws leaves it set"
-
 /** Bytes to three significant digits, as [duration] prints a time: `48 B`, `2.10 MB`. Powers of 1,024. */
 internal fun bytes(v: Double): String {
     if (v.isNaN()) return "-"
@@ -122,14 +116,15 @@ internal fun bytes(v: Double): String {
     return String.format(Locale.ROOT, "%.${digits(x)}f %s", x, units[u])
 }
 
-/** The `CAREFUL` line of a comparison where only one side counted allocated bytes. */
-internal fun allocationsCareful(before: List<Run>, after: List<Run>): List<String> {
+/** The warning of a comparison where only one side counted allocated bytes. */
+internal fun allocationsCareful(before: List<Run>, after: List<Run>): List<Warning> {
     val b = before.any { it.allocations }
     val a = after.any { it.allocations }
     return if (b == a) emptyList() else listOf(
-        "allocations: counted on one side only${sym.dash}each coarse execution there cost about " +
-                "${duration(COARSE_ALLOCATIONS_BODIES * (after + before).first { it.allocations }.bodyOrDefaultNanos)} more, " +
-                "which a short operation shows in its time"
+        Warning(
+            Kind.ALLOCATIONS_ONE_SIDE,
+            figure(COARSE_ALLOCATIONS_BODIES * (after + before).first { it.allocations }.bodyOrDefaultNanos, ::duration),
+        )
     )
 }
 
@@ -160,36 +155,14 @@ internal fun isTooSmall(hits: Long, calls: Long, stepNanos: Double, floorNanos: 
     calls > 0 && impliedUpperNanos(hits, calls, stepNanos) * Run.FLOOR_BIAS_ALLOWANCE < floorNanos
 
 /**
- * What to tell someone whose label is below the floor. Both reasons, because the second is the one
- * they cannot check for themselves.
- */
-internal fun tooSmallMessage(
-    name: String, calls: Long, upperNanos: Double, floorNanos: Double = Run.FLOOR_NANOS, default: Boolean = false,
-): String = tooSmallMessage(listOf(FineUnderFloor(name, calls, upperNanos, floorNanos, default)))
-
-/**
- * One fine label under its floor in one run or several: one line, each figure a range where the runs
- * differ (`under 47.8ns..50.9ns each, below the 60ns..62ns floor`), since each run has a floor of its own.
- */
-internal fun tooSmallMessage(fs: List<FineUnderFloor>): String = String.format(
-    // Three lines: the fact, the reason, the fix. Same shape as the coarse floor's message.
-    Locale.ROOT,
-    "%s: %s calls at under %s each, below the %s floor%s${sym.dash}label the enclosing loop instead, " +
-            "op(%s, times = n) { }, or drop it if its share has already answered the question%n" +
-            "the hook is a visible fraction of it, the sampler reads it %s low, and C2 can move work across adjacent short labels",
-    fs[0].name, rangeText(fs.map { it.calls.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
-    rangeText(fs.map { it.upperNanos }, ::duration), rangeText(fs.map { it.floorNanos }) { String.format(Locale.ROOT, "%.0fns", it) },
-    if (fs.any { it.default }) DEFAULT_FLOOR else "", fs[0].name,
-    rangeText(listOf(5.0, 9.0)) { String.format(Locale.ROOT, "%.0f%%", it) },
-)
-
-/**
  * What TickSnick's hooks may have cost a run, at their budgets and the run's body: [fineEntries] times
  * a fine hook ran, [coarseExecutions] coarse executions, [costNanos] of thread-time in all, out of
- * [labelledNanos] inside labels and [wallNanos] of the run's active time. See [Run.hookCost].
+ * [labelledNanos] inside labels and [wallNanos] of the run's active time; [top] the label that cost the
+ * most, where to start. See [Run.hookCost].
  */
 internal class HookCost(
     val fineEntries: Long, val coarseExecutions: Long, val costNanos: Double, val labelledNanos: Double, val wallNanos: Double,
+    val top: String? = null,
 ) {
     /** Of the work inside labels: what the hooks add to it. */
     val share: Double get() = costNanos / labelledNanos
@@ -201,15 +174,9 @@ internal class HookCost(
     val wallShare: Double get() = costNanos / wallNanos
 }
 
-/** The `CAREFUL` line of [HookCost] in one run or several, each figure a range where the runs differ. */
-internal fun hookCostMessage(hs: List<HookCost>): String = String.format(
-    Locale.ROOT,
-    "labels: TickSnick's hooks may add up to %s to the work inside labels, and up to %s to the wall time where that " +
-            "work is the run's critical path, for %s fine hook entries and %s coarse executions${sym.dash}fewer, larger labels cost less",
-    rangeText(hs.map { it.share * 100 }, ::percent), rangeText(hs.map { it.wallShare * 100 }, ::percent),
-    rangeText(hs.map { it.fineEntries.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
-    rangeText(hs.map { it.coarseExecutions.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) },
-)
+/** Labels by name in a warning, or how many when the run saved no names: `` `a`, `b` `` or `3 labels`. */
+internal fun labelsText(names: List<String>, count: Int): String =
+    if (names.isEmpty()) "$count label" + (if (count == 1) "" else "s") else codeList(names)
 
 /**
  * [values] as one figure in [format], or the range `low..high` where they differ, each end with its unit
@@ -219,22 +186,6 @@ internal fun rangeText(values: List<Double>, format: (Double) -> String): String
     val lo = format(values.min())
     val hi = format(values.max())
     return if (lo == hi) lo else "$lo..$hi"
-}
-
-/** A fine label under its floor in one run: what its warning says. See [tooSmallMessage]. */
-internal class FineUnderFloor(
-    val name: String, val calls: Long, val upperNanos: Double, val floorNanos: Double, val default: Boolean,
-)
-
-/**
- * A coarse label under its floor in one run: what its warning says. [shareBound] when it is the 1% of
- * the run that binds rather than the flat floor. See [coarseTooSmallMessage].
- */
-internal class CoarseUnderFloor(
-    val name: String, val count: Long, val meanNanos: Double, val requiredNanos: Double, val contextNanos: Double,
-    val flatFloorNanos: Double, val parts: String, val default: Boolean,
-) {
-    val shareBound: Boolean get() = requiredNanos > flatFloorNanos
 }
 
 
@@ -257,22 +208,19 @@ internal fun coarseFlatFloorBodies(fineLabels: Int, allocations: Boolean = false
             (COARSE_PER_FINE_LABEL_BODIES * fineLabels + if (allocations) COARSE_ALLOCATIONS_BODIES else 0.0) / COARSE_MAX_OVERHEAD
 
 /**
- * What the flat coarse floor is made of, for the warning about an operation under it, at a body of
- * [bodyNanos]: ` (2.50us, + 600ns for Allocated, + 200ns for 20 fine labels)`, or nothing when nothing
- * adds to it.
+ * What raises the flat coarse floor, for the warning about an operation under it, at a body of
+ * [bodyNanos], each rounded up as the floor is: `Allocated adds 600ns, 20 fine labels add 200ns`, or
+ * nothing when nothing does. Beside the execution's mean, it says whether turning one off would do.
  */
-internal fun coarseFloorParts(fineLabels: Int, allocations: Boolean, bodyNanos: Double = DEFAULT_BODY_NANOS, hookScale: Double = 1.0): String {
-    val added = buildList {
-        if (hookScale > 1.0) add("+ ${duration(COARSE_FLOOR_BODIES * (hookScale - 1) * bodyNanos)} for a slow nanoTime")
-        if (allocations) add("+ ${duration(COARSE_ALLOCATIONS_BODIES / COARSE_MAX_OVERHEAD * bodyNanos)} for Allocated")
+internal fun coarseFloorRaised(fineLabels: Int, allocations: Boolean, bodyNanos: Double = DEFAULT_BODY_NANOS, hookScale: Double = 1.0): String =
+    buildList {
+        if (hookScale > 1.0) add("a slow `nanoTime` adds ${limitText(recommendedLimit(COARSE_FLOOR_BODIES * (hookScale - 1) * bodyNanos))}")
+        if (allocations) add("Allocated adds ${limitText(recommendedLimit(COARSE_ALLOCATIONS_BODIES / COARSE_MAX_OVERHEAD * bodyNanos))}")
         if (fineLabels > 0) add(
-            "+ ${duration(COARSE_PER_FINE_LABEL_BODIES * fineLabels / COARSE_MAX_OVERHEAD * bodyNanos)} for $fineLabels fine label" +
-                    if (fineLabels == 1) "" else "s"
+            "$fineLabels fine label" + (if (fineLabels == 1) " adds " else "s add ") +
+                    limitText(recommendedLimit(COARSE_PER_FINE_LABEL_BODIES * fineLabels / COARSE_MAX_OVERHEAD * bodyNanos))
         )
-    }
-    if (added.isEmpty()) return ""
-    return " (" + (listOf(duration(COARSE_FLOOR_BODIES * bodyNanos)) + added).joinToString(", ") + ")"
-}
+    }.joinToString(", ")
 
 /**
  * The shortest a coarse operation may be, given how much of the run it holds, the flat floor
@@ -292,112 +240,29 @@ internal fun coarseFloorNanos(share: Double, flatFloorNanos: Double, contextNano
     maxOf(flatFloorNanos, contextNanos / COARSE_MAX_RUN_SHARE * share)
 
 /**
- * What to tell someone whose coarse label is on something too small to carry a context.
- *
- * Names the measured duration rather than an inferred one, and says which of the two conditions
- * bound, because the remedies differ: below the flat floor the label is simply in the wrong tier,
- * while an operation that fails only the share condition is big enough to measure and too big a
- * fraction of the run to afford measuring.
+ * The failure of work billed to executions that had already finished (docs `warnings.md`,
+ * `stale-failure`). Names the coarse type, because its numbers were about to be wrong and the reader
+ * has no other way to know which.
  */
-internal fun coarseTooSmallMessage(
-    name: String, count: Long, meanNanos: Double, requiredNanos: Double, contextNanos: Double, flatFloorNanos: Double,
-    parts: String = "", default: Boolean = false,
-): String = coarseTooSmallMessage(listOf(CoarseUnderFloor(name, count, meanNanos, requiredNanos, contextNanos, flatFloorNanos, parts, default)))
+internal fun staleContextMessage(worst: String, share: Double): String =
+    "${shareText(share)} of the coarse time, mostly ${code(worst)}'s, came from tasks it handed off that ran on after it ended" +
+            "${sym.dash}wait for the tasks inside its block"
 
 /**
- * One coarse label under its floor in one run or several, all bound by the same condition: one line,
- * each figure a range where the runs differ. What the floor is made of is said only when every run
- * made it of the same parts.
+ * The failure of a label closed while another was open (`exit-mismatch`). Names both, because the
+ * pair is the point: one of them covers work that was never inside it.
  */
-internal fun coarseTooSmallMessage(cs: List<CoarseUnderFloor>): String {
-    // Which of the two conditions bound decides what the reader is being told, and they are
-    // different complaints with different remedies. Saying "the number would describe the
-    // instrument" about an operation whose per-execution overhead is a comfortable 4% is simply
-    // false, and a warning that misdiagnoses is worse than one that does not fire.
-    //
-    // Three lines: the fact, the reason, the fix.
-    //
-    // The fix names the registration, not a call: `op` takes both tiers, so the call site is already
-    // right.
-    val shareBound = cs[0].shareBound
-    val overheads = cs.map { it.contextNanos / it.meanNanos * 100 }
-    val count = rangeText(cs.map { it.count.toDouble() }) { String.format(Locale.ROOT, "%,.0f", it) }
-    val context = rangeText(cs.map { it.contextNanos }) { String.format(Locale.ROOT, "%.0fns", it) }
-    val why = if (shareBound) String.format(
-        Locale.ROOT,
-        "accurate per execution (up to %s overhead), but %s coarse executions at up to %s each are over 1%% of the run",
-        rangeText(overheads) { String.format(Locale.ROOT, "%.1f%%", it) }, count, context
-    ) else String.format(
-        Locale.ROOT,
-        "TickSnick may add up to %s to a coarse execution here, %s of an operation this size",
-        context, rangeText(overheads) { String.format(Locale.ROOT, "%.0f%%", it) }
-    )
-    val parts = cs.map { it.parts }.distinct().singleOrNull() ?: ""
-    // What the floor is made of only where the flat floor bound: the share condition's number is not
-    // a sum of those parts.
-    return String.format(
-        Locale.ROOT,
-        "%s: %s coarse executions of %s, a coarse label needs %s here%s${sym.dash}register it fine, registerFine(\"%s\"), " +
-                "and keep the op(...) calls; or put the coarse label around a batch of these%n%s",
-        cs[0].name, count, rangeText(cs.map { it.meanNanos }, ::duration), rangeText(cs.map { it.requiredNanos }, ::duration),
-        (if (shareBound) "" else parts) + if (cs.any { it.default }) DEFAULT_FLOOR else "", cs[0].name, why
-    )
-}
+internal fun mismatchMessage(closed: String, open: String): String =
+    "${code("exit($closed)")} while ${code(open)} was open, so time went to the wrong label${sym.dash}" +
+            "an exception skipped an `exit`, or an `exit` names the wrong label; put `exit` in a `finally`"
 
 /**
- * What to tell someone whose work is being billed to executions that have already finished.
- *
- * Names the coarse type, because that is the one whose numbers were about to be wrong and the reader
- * has no other way to know which. Says what to do, because unlike a leak there are two quite
- * different causes and they want opposite fixes: a task that was never meant to be part of the
- * request, and a request that closed before the work it was waiting for.
+ * The failure of a label left open (`leak`). Names it, because its share is the one now wrong and the
+ * reader has no other way to know which.
  */
-internal fun staleContextMessage(worst: String, hits: Long, share: Double): String = String.format(
-    Locale.ROOT,
-    "%,d samples caught a thread working inside a coarse execution that had already been%n" +
-            "    closed by the thread that opened it${sym.dash}mostly %s. That is %.1f%% of all the%n" +
-            "    thread-time spent inside coarse executions.%n" +
-            "    The time belongs to an execution which no longer exists, so it is excluded from%n" +
-            "    every number %s reports rather than quietly inflating them.%n" +
-            "    Either work was handed to another thread and never waited for, so it outlived the%n" +
-            "    span carrying it${sym.dash}propagate only what the request actually joins${sym.dash}or a span is%n" +
-            "    closed too early, before the work it covers has finished.",
-    hits, worst, share * 100, worst
-)
-
-/**
- * What to tell someone who closed a label that was not the one open.
- *
- * Names both, because the interesting part is the pair: closing `parse` while `serialize` is open
- * means one of them is covering work that was never inside it, and which one depends on how the two
- * were meant to nest.
- */
-internal fun mismatchMessage(closed: String, open: String): String = String.format(
-    Locale.ROOT,
-    "exit(%s) was called while %s was the operation open on this thread.%n" +
-            "    One of them now covers work that was never inside it, and the number that comes " +
-            "out of%n" +
-            "    that is plausible rather than obviously wrong${sym.dash}which is the direction that costs " +
-            "you a day.%n" +
-            "    The thread was unwound anyway, so this is one bad label and not every label after " +
-            "it.",
-    closed, open
-)
-
-/**
- * What to tell someone whose label leaked. Names the operation that was open, because that is the
- * one whose share is now wrong and the reader has no other way to know which.
- */
-internal fun leakMessage(open: String, thread: String = Thread.currentThread().name): String = String.format(
-    Locale.ROOT,
-    "%s was still open on thread %s at a point the caller said should be quiescent.%n" +
-            "    Every sample taken on that thread between the leak and this check was billed to " +
-            "%s,%n" +
-            "    which does not look like an error${sym.dash}it looks like a finding, with a plausible " +
-            "number beside it.%n" +
-            "    An operation label placed with enter/exit has no finally: a body that throws leaves it set.",
-    open, thread, open
-)
+internal fun leakMessage(open: String, thread: String = Thread.currentThread().name): String =
+    "${code(open)} was still open at `expectBalanced()` on thread ${code(thread)}, so the time after its missed `exit` went to it" +
+            "${sym.dash}put `exit` in a `finally`"
 
 /**
  * Whether one operation's long executions are evidence of anything, given what the machine was
@@ -423,6 +288,14 @@ internal fun duration(nanos: Double): String {
     if (nanos.isNaN()) return "-"
     val unit = durationUnitOf(nanos)
     return threeSignificantString(nanos / unit.scale) + unit.text
+}
+
+/** A recommended limit as [recommendedLimit] makes it, in its two digits: `3.0us`, `60ns`, `150ns`. */
+internal fun limitText(nanos: Double): String {
+    if (nanos.isNaN()) return "-"
+    val unit = durationUnitOf(nanos)
+    val v = nanos / unit.scale
+    return String.format(Locale.ROOT, if (v >= 10) "%.0f" else "%.1f", v) + unit.text
 }
 
 /** The unit [duration] prints [nanos] in. */
@@ -917,6 +790,12 @@ class Run internal constructor(
     internal val bodyNanos: Double = Double.NaN,
     /** One `System.nanoTime()`, in bodies; NaN for a run that did not time it. See [BodyProbe]. */
     internal val nanoTimeBodies: Double = Double.NaN,
+    /** The labels behind [imbalances], by name; empty for a run saved without them. */
+    internal val leakedNames: List<String> = emptyList(),
+    /** The labels behind [openAtEnd], by name; empty for a run saved without them. */
+    internal val openAtEndNames: List<String> = emptyList(),
+    /** The coarse labels behind [openContextsAtEnd], each with how many were open; empty for a run saved without them. */
+    internal val openContextsAtEndByName: Map<String, Int> = emptyMap(),
 ) {
     /** Whether this run timed a body of its own; without one its limits are read at [DEFAULT_BODY_NANOS]. */
     internal val bodyTimed: Boolean get() = bodyNanos > 0
@@ -924,8 +803,8 @@ class Run internal constructor(
     /** One body in ns: this run's, or [DEFAULT_BODY_NANOS]. */
     internal val bodyOrDefaultNanos: Double get() = if (bodyTimed) bodyNanos else DEFAULT_BODY_NANOS
 
-    /** The shortest a fine operation may be here, in ns: [FINE_FLOOR_BODIES] at this run's body. */
-    internal val fineFloorNanos: Double get() = FINE_FLOOR_BODIES * bodyOrDefaultNanos
+    /** The shortest a fine operation may be here, in ns: [FINE_FLOOR_BODIES] at this run's body, as a [recommendedLimit]. */
+    internal val fineFloorNanos: Double get() = recommendedLimit(FINE_FLOOR_BODIES * bodyOrDefaultNanos)
 
     /** See [coarseHookScale]. */
     internal val hookScale: Double get() = coarseHookScale(nanoTimeBodies)
@@ -941,14 +820,17 @@ class Run internal constructor(
         if (!(labelled > 0)) return null
         val fine = operations.sumOf { it.hookEntries }
         val executions = coarse.sumOf { it.count }
-        val bodies = fine * FINE_BUDGET_BODIES + executions * coarseContextBodies(operations.size, allocations, hookScale)
-        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled, activeNanos.toDouble())
+        val perExecution = coarseContextBodies(operations.size, allocations, hookScale)
+        val bodies = fine * FINE_BUDGET_BODIES + executions * perExecution
+        val top = (operations.map { it.name to it.hookEntries * FINE_BUDGET_BODIES } + coarse.map { it.name to it.count * perExecution })
+            .maxByOrNull { it.second }?.takeIf { it.second > 0 }?.first
+        val h = HookCost(fine, executions, bodies * bodyOrDefaultNanos, labelled, activeNanos.toDouble(), top)
         return h.takeIf { it.share > HOOKS_MAX_SHARE }
     }
 
-    /** The flat coarse floor here, in ns. See [coarseFlatFloorBodies]. */
+    /** The flat coarse floor here, in ns, as a [recommendedLimit]. See [coarseFlatFloorBodies]. */
     internal val coarseFlatFloorNanos: Double
-        get() = coarseFlatFloorBodies(operations.size, allocations, hookScale) * bodyOrDefaultNanos
+        get() = recommendedLimit(coarseFlatFloorBodies(operations.size, allocations, hookScale) * bodyOrDefaultNanos)
 
     /** [setup] and how the session measured: what the runs of a folder should agree on, by name. */
     internal val facts: Map<String, String>
@@ -1121,19 +1003,6 @@ class Run internal constructor(
      */
     internal fun poolOf(op: OperationStat): String = if (op.threads <= 0) "-" else op.threads.toString()
 
-    /**
-     * Operations every thread queues through one at a time.
-     *
-     * `Workers 1` beside `Pool 8` is a serialization point: eight threads run it and no two are
-     * ever inside together, which is the contention term of a scalability model showing up in a
-     * table of shares. It is a *warning* and not a verdict because `Workers` is sampled - a burst
-     * between two ticks is a burst nobody saw - so it asks for enough hits that a second thread
-     * would have been caught if there had been one.
-     */
-    internal fun serialised(): List<OperationStat> = operations
-        .filter { it.threads > 1 && it.peakInside == 1 && it.hits >= MIN_HITS_FOR_SERIAL }
-        .sortedByDescending { it.threads }
-
     /** Thread-time spent inside any label. */
     internal val labelledNanos: Double get() = labelledHits * stepNanos
 
@@ -1180,30 +1049,6 @@ class Run internal constructor(
         get() = if (duty.available) (1 - duty.duty) * (labelledHits + unlabelledHits) else Double.NaN
 
     /**
-     * How much of an operation's long-running time was certainly spent *running*, as a fraction.
-     *
-     * The question this answers is the one the long-execution signal cannot answer on its own, and
-     * it decides what the reader should do about it. An execution that outlived a tick was either
-     * waiting for something or working for a millisecond, and those want opposite responses: the
-     * first means the share is occupancy and not CPU, the second means the share is honest and the
-     * operation merely belongs in the coarse tier.
-     *
-     * The answer is arithmetic on two numbers already in the report. The whole run had only
-     * [offCpuSamples] of stalling in it, from every cause together, so an operation whose long
-     * executions occupy more than that must have been *running* for the difference — whatever the
-     * rest of the run was doing, and without attributing a single sample to anybody.
-     *
-     * A lower bound and deliberately a loose one: it charges the operation with every stall in the
-     * run, including stalls that happened somewhere else entirely. When it still comes out high, it
-     * is certain.
-     */
-    internal fun runningFloorOf(op: OperationStat): Double {
-        val offCpu = offCpuSamples
-        if (offCpu.isNaN() || op.stuckHits == 0L) return Double.NaN
-        return 1 - min(1.0, offCpu / op.stuckHits)
-    }
-
-    /**
      * The most an execution can plausibly have cost, from the sampling alone.
      *
      * The hit count is a count of rare events, so its upper confidence bound is
@@ -1228,17 +1073,6 @@ class Run internal constructor(
     internal fun tooSmall(): List<OperationStat> = operations
         .filter { isTooSmall(it.hits, it.calls, stepNanos, fineFloorNanos) }
         .sortedByDescending { it.calls }
-
-    /**
-     * What one execution appears to have cost, from the sampling alone: `hits × step / calls`.
-     *
-     * The smell test the person who wrote the code can apply and the tool cannot. An operation
-     * known to be 20 ns showing 500 ns here is stalling on something, and no amount of share
-     * arithmetic would have said so. It is occupancy per call, not CPU per call, and it inherits
-     * the same bound as every other number here.
-     */
-    internal fun impliedNanosOf(op: OperationStat): Double =
-        if (op.calls == 0L) Double.NaN else op.hits * stepNanos / op.calls
 
     /**
      * The run-wide rate of executions caught spanning a tick. Reported, but *not* what an operation
@@ -1310,78 +1144,6 @@ class Run internal constructor(
     internal fun suspect(): List<OperationStat> = operations
         .filter { isSuspect(it.hits, it.stuckHits, it.stuckInstances, machineFloor) }
         .sortedByDescending { it.stuckShare }
-
-    /**
-     * What to do about an operation whose executions outlive a tick - which is not one answer.
-     *
-     * Labels flagged by this signal can still have *correct* shares, agreeing with an independent
-     * stack profiler to about a percentage point, so stopping the run over them would throw away a
-     * good measurement. A long execution is never fatal. What differs is the advice, and
-     * [runningFloorOf] decides which advice applies.
-     */
-    internal fun verdictFor(op: OperationStat): String {
-        // Sampled state answers this directly and per operation, so it is asked first. The
-        // aggregate below is only the fallback for a session that turned state sampling off.
-        if (stateSampled && op.stuckHits > 0) {
-            val waiting = op.stuckWaitingHits.toDouble() / op.stuckHits
-            return when {
-                // "Runnable", not "on a core" — the distinction is the whole known limit of this
-                // signal. A thread the scheduler preempted is still runnable, so this rules out
-                // waiting on another thread and does not rule out waiting for a core. The duty
-                // cycle above bounds that second kind, and only in aggregate.
-                waiting <= WAITING_NONE -> String.format(
-                    Locale.ROOT,
-                    "%.1f%% of those long samples caught the thread runnable${sym.dash}it is not waiting on anything, " +
-                            "so the share is honest and the operation wants a coarse label for its per-execution " +
-                            "statistics (runnable is not the same as scheduled: see the duty cycle above)",
-                    (1 - waiting) * 100
-                )
-
-                // The claim the aggregate test cannot make: a measurement of this operation rather
-                // than an alibi drawn from the whole run's budget.
-                waiting >= WAITING_MOSTLY -> String.format(
-                    Locale.ROOT,
-                    "%.1f%% of those long samples caught the thread parked or blocked${sym.dash}it is *waiting*, " +
-                            "not working. Read this share as thread-time: it does not add up across threads the " +
-                            "way CPU does, and %s of wall clock had anyone inside it at all",
-                    waiting * 100, threadTime(elapsedNanosOf(op))
-                )
-
-                else -> String.format(
-                    Locale.ROOT,
-                    "%.1f%% of those long samples caught the thread parked${sym.dash}part working, part waiting, " +
-                            "and the split is measured rather than bounded",
-                    waiting * 100
-                )
-            }
-        }
-
-        val running = runningFloorOf(op)
-        return when {
-            running.isNaN() ->
-                "with no duty cycle there is no way to say whether it was working or waiting"
-
-            running >= RUNNING_CERTAIN -> String.format(
-                Locale.ROOT,
-                "at least %.0f%% of that was on CPU, so it is working and not waiting: the share is honest, and " +
-                        "the operation wants a coarse label for its per-execution statistics",
-                running * 100
-            )
-
-            // Not "it is waiting" — that is a claim this test cannot make without sampled state.
-            // The whole run's off-CPU time is a single budget and it is charged in full against
-            // every operation separately, so a small operation will always come out ambiguous
-            // however innocent it is. What the reader can act on is the size of that budget: at 4%
-            // nothing here can be mostly waiting, at 35% something is.
-            else -> String.format(
-                Locale.ROOT,
-                "working or waiting cannot be told${sym.dash}state sampling is off, and the run's whole off-CPU time, %.1f%% " +
-                        "of the thread-time, is enough to account for all of it: read this share as thread-time, not " +
-                        "as time on a core",
-                (1 - duty.duty) * 100
-            )
-        }
-    }
 
     /**
      * The whole report as text.
@@ -1606,18 +1368,6 @@ class Run internal constructor(
     internal fun coarseTooSmall(): List<CoarseStat> = coarse
         .filter { it.count > 0 && it.meanSpanNanos < coarseFloorNanosOf(it) }
         .sortedByDescending { it.count }
-
-    /** Coarse labels under their floor here, as their warnings say them. See [coarseTooSmall]. */
-    internal fun coarseUnderFloor(): List<CoarseUnderFloor> = coarseTooSmall().map { c ->
-        CoarseUnderFloor(
-            c.name, c.count, c.meanSpanNanos, coarseFloorNanosOf(c), coarseContextNanos, coarseFlatFloorNanos,
-            coarseFloorParts(operations.size, allocations, bodyOrDefaultNanos, hookScale), !bodyTimed,
-        )
-    }
-
-    /** Fine labels under their floor here, as their warnings say them. See [tooSmall]. */
-    internal fun fineUnderFloor(): List<FineUnderFloor> =
-        tooSmall().map { FineUnderFloor(it.name, it.calls, impliedUpperNanosOf(it), fineFloorNanos, !bodyTimed) }
 
     /**
      * Of the thread-time inside a fine label, the fraction that fell under **no** coarse span.
@@ -1870,103 +1620,92 @@ class Run internal constructor(
      * All in one place and before any table, not where each is computed: printed there, a warning
      * about a fine operation would sit under the coarse table and read as one about a coarse one.
      */
-    internal fun warnings(ranged: Boolean = true): List<String> =
-        // Ordered by what each costs the reader: numbers that are missing or inflated first, then
-        // what limits the whole run, then labels in the wrong tier, which are honest measurements
-        // of the wrong-sized thing.
+    internal fun warnings(): List<Warning> =
+        // The kinds' order is the section's (see Kind); this is only what fires and with what.
         buildList {
             // A leaked label does not look like an error. It looks like a finding: one operation
             // quietly accumulating everybody else's samples, with a plausible number beside it.
-            if (imbalances > 0) add(
-                "labels: $imbalances were still open at a point the caller said should be quiescent${sym.dash}" +
-                        "everything after each leak was billed to the leaked operation\n" + NO_FINALLY
-            )
-            if (openAtEnd > 0) add(
-                "labels: $openAtEnd threads were still inside a hand-placed one when sampling stopped${sym.dash}" +
-                        "nothing can close it now\n" + NO_FINALLY
-            )
-            if (allocationsMissing) add("allocations: this JVM cannot report allocated bytes, so there is no Allocated column")
-            if (untrackedSlots > 0) add(
-                "threads: $untrackedSlots arrived past the $MAX_SLOTS-slot ceiling and were NOT SAMPLED${sym.dash}" +
-                        "their thread-time is missing from every number, including the denominators"
-            )
+            if (imbalances > 0) add(Warning(Kind.LABELS_LEFT_OPEN, words(labelsText(leakedNames, imbalances)), words("")))
+            if (openAtEnd > 0) add(Warning(Kind.LABELS_LEFT_OPEN, words(labelsText(openAtEndNames, openAtEnd)), words(" by `stop()`")))
+            if (allocationsMissing) add(Warning(Kind.ALLOCATIONS_UNAVAILABLE))
+            if (untrackedSlots > 0) add(Warning(Kind.THREADS_UNSAMPLED, figure(untrackedSlots.toDouble(), ::countText)))
             // No warning for threads that exited without Profiler.release(): the sampler skips a
             // thread that has exited and the slot is reclaimed within a second, so nothing above is
             // distorted.
-            if (openContextsAtEnd > 0) add(
-                "coarse labels: $openContextsAtEnd executions were still open when sampling stopped${sym.dash}their spans " +
-                        "are missing, and every sample taken inside them was billed to them"
-            )
-            // Thread state cannot see a native wait, and on a workload that does nothing else that is
-            // not a rounding error. Named per type, because the figure is right on a CPU-bound operation
-            // and it is the reader who knows which they have.
-            for (c in coarse.filter { it.count > 0 && workingIsContradicted(it) }.sortedByDescending { it.working }) add(
-                String.format(
-                    Locale.ROOT, "%s: on a CPU %.2f, but the measured time on CPU bounds it at %.2f${sym.dash}threads inside were on a CPU %.2f%% " +
-                            "of the time, and a thread stopped in a native call reads Runnable, so Waiting is short by the same amount",
-                    c.name, c.working, workingCeilingOf(c), duty.labelledDuty * 100
-                )
-            )
-            // Attribution invented, not lost: stated with the remedy, because there are two quite
-            // different causes with opposite fixes.
+            if (openContextsAtEnd > 0) {
+                if (openContextsAtEndByName.isEmpty())
+                    add(Warning(Kind.COARSE_OPEN_AT_END, words(""), figure(openContextsAtEnd.toDouble(), ::countText)))
+                else for ((name, n) in openContextsAtEndByName)
+                    add(Warning(Kind.COARSE_OPEN_AT_END, words(code(name)), figure(n.toDouble(), ::countText)))
+            }
+            // Attribution invented, not lost.
             if (staleContextHits > 0) add(
-                String.format(
-                    Locale.ROOT, "coarse labels: %s of the thread-time inside coarse executions (%s) was inside one already closed%s${sym.dash}" +
-                            "it is left out of every table",
-                    staleContextShare * 100, threadTime(staleContextHits * stepNanos),
-                    coarse.maxByOrNull { it.staleHits }?.takeIf { it.staleHits > 0 }?.let { ", mostly under ${it.name}" } ?: ""
-                ) + "\nwork was handed to another thread and never waited for${sym.dash}propagate only what the request joins${sym.dash}or a span closes too early"
-            )
-            // What limits the whole run: the pauses, the cores, the clock - the clock only when it
-            // moved or could not be read, a steady one being the healthy case.
-            addAll(pause.careful() + duty.careful(activeNanos, reclaimedSlots) + clock.careful())
-            // What the hooks themselves may have cost: a fact about the whole run, like the clock.
-            if (ranged) hookCost()?.let { add(hookCostMessage(listOf(it))) }
-            // The one signal for work escaping its context, which neither the floor check nor the
-            // balance check can see. Stated with both readings, because it cannot tell "I bracketed part
-            // of the program" from "work escaped to another thread".
-            if (labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
-                String.format(
-                    Locale.ROOT, "coarse labels: %s of thread-time inside fine operations (%s) was inside no coarse span%s${sym.dash}" +
-                            "you bracketed part of the program, which is fine, or work is ESCAPING its context onto threads it never reached",
-                    labelledOutsideCoarseShare * 100, threadTime(labelledOutsideCoarse * stepNanos),
-                    outsideCoarseSuspects().take(4).takeIf { it.isNotEmpty() }?.let { s -> ", mostly " + s.joinToString(", ") { it.name } } ?: ""
+                Warning(
+                    Kind.STALE_TIME, figure(staleContextShare, ::shareText),
+                    words(coarse.maxByOrNull { it.staleHits }?.takeIf { it.staleHits > 0 }?.let { code(it.name) } ?: ""),
                 )
             )
-            // A context made by hand rather than by the hook has no path and is in no tree.
+            addAll(pause.careful(wait, samplingSpanNanos))
+            // Thread state cannot see a native wait. Run-wide from the duty cycle, or a coarse row
+            // whose Runnable the CPU time contradicts: one warning, naming the worst row.
+            val contradicted = coarse.filter { it.count > 0 && workingIsContradicted(it) }
+                .maxByOrNull { it.working / workingCeilingOf(it) }
+            val fromDuty = duty.careful(activeNanos, reclaimedSlots)
+            for (w in fromDuty) add(
+                if (w.kind == Kind.RUNNABLE_OFF_CPU && contradicted != null) Warning(w.kind, w.gaps[0], words(code(contradicted.name))) else w
+            )
+            if (contradicted != null && fromDuty.none { it.kind == Kind.RUNNABLE_OFF_CPU }) add(
+                Warning(
+                    Kind.RUNNABLE_OFF_CPU, figure(1 - workingCeilingOf(contradicted) / contradicted.working, ::shareText),
+                    words(code(contradicted.name)),
+                )
+            )
+            addAll(clock.careful())
+            hookCost()?.let { h ->
+                add(Warning(Kind.HOOKS_COST, words(h.top?.let(::code) ?: ""), figure(h.share, ::shareText), figure(h.wallShare, ::shareText)))
+            }
+            // The one signal for work escaping its context, which neither the floor check nor the
+            // balance check can see.
+            if (labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
+                Warning(Kind.OUTSIDE_COARSE, figure(labelledOutsideCoarseShare, ::shareText), words(codeList(outsideCoarseSuspects().take(4).map { it.name })))
+            )
+            // Every public way of opening an execution gives it a path, so a row missing from the tree
+            // is a defect here, not a misuse.
             val inTree = coarseTree.flatMap { it.flatten() }.map { it.type }.toSet()
             coarse.filter { (it.count > 0 || it.inclusiveHits > 0) && it.type !in inTree }.takeIf { it.isNotEmpty() }?.let { missing ->
-                add("coarse labels: ${missing.joinToString { it.name }} are not in the tree${sym.dash}their contexts were made outside the hook, so the coarse table has no row for them")
+                add(Warning(Kind.COARSE_NOT_IN_TREE, words(codeList(missing.map { it.name }))))
             }
             for (op in suspect()) add(
-                String.format(
-                    Locale.ROOT,
-                    "%s: %,d executions lasted over a tick (%s of its thread-time against a %s machine floor, %s per call) -",
-                    op.name, op.stuckInstances, percent(op.stuckShare * 100), percent(machineFloor * 100),
-                    duration(impliedNanosOf(op))
-                ) + "\n" + verdictFor(op)
+                Warning(
+                    Kind.LONG_CALLS, words(code(op.name)), figure(op.stuckShare, ::shareText), figure(stepNanos, ::duration),
+                    words(code("registerCoarse(\"${op.name}\")")),
+                )
             )
-            // The `Workers` and `Pool` columns, read together and said out loud.
-            for (op in serialised()) add(
-                "${op.name}: ${plural(op.threads.toLong(), "thread")} ran it and no two were ever inside it " +
-                        "at once${sym.dash}every thread that enters waits for the last one to leave: a serialization point, " +
-                        "not parallel work"
+            // A label below the floor cannot move a ranking, so it is a warning and never a failure:
+            // every offender is named; the reader decides.
+            for (op in tooSmall()) add(
+                Warning(Kind.FINE_UNDER_FLOOR, words(code(op.name)), figure(fineFloorNanos, ::limitText), words(code("op(${op.name}, times = n) { }")))
             )
-            // The other end of the same question, and a warning rather than a verdict: a label
-            // below the floor cannot move a ranking, so the cost of being wrong about one is the
-            // loudest failure this tool has - stopping a run that was fine. Every offender is named;
-            // the reader decides.
-            if (ranged) for (f in fineUnderFloor()) add(tooSmallMessage(listOf(f)))
-            // The same boundary from the other side. Unlike the fine floor this one is exact,
-            // because the duration it compares is measured rather than inferred — see
-            // coarseTooSmall.
-            if (ranged) for (c in coarseUnderFloor()) add(coarseTooSmallMessage(listOf(c)))
+            // The same boundary from the other side, exact: the duration it compares is measured.
+            for (c in coarseTooSmall()) {
+                val floor = coarseFloorNanosOf(c)
+                add(
+                    if (floor > coarseFlatFloorNanos) Warning(
+                        Kind.COARSE_OVER_SHARE, words(code(c.name)), figure(coarseContextNanos / c.meanSpanNanos * shareOf(c), ::shareText),
+                        words(code("registerFine(\"${c.name}\")")),
+                    ) else Warning(
+                        Kind.COARSE_UNDER_FLOOR, words(code(c.name)), figure(c.meanSpanNanos, ::duration), figure(floor, ::limitText),
+                        words(coarseFloorRaised(operations.size, allocations, bodyOrDefaultNanos, hookScale)),
+                        words(code("registerFine(\"${c.name}\")")),
+                    )
+                )
+            }
         }
 
     /**
      * This run as a report of its own. See [Profile.report].
      */
-    internal fun render(legend: Boolean = false, careful: Warnings = Warnings(warnings())): String = table.report(legend, careful)
+    internal fun render(legend: Boolean = false, careful: Warnings = table.warnings()): String = table.report(legend, careful)
 
     /**
      * Writes this run as a new file in [folder], named by the time it is saved -
@@ -2043,14 +1782,8 @@ class Run internal constructor(
         /** Below this many ticks, an empty table is the run being short rather than a finding. */
         internal const val MIN_TICKS_FOR_A_TABLE = 50
 
-        /**
-         * Hits below which `Peak 1` is not evidence of anything.
-         *
-         * A peak of one drawn from a handful of samples is what a *short* operation looks like, not
-         * what a serialized one looks like. At 25 hits a second thread present a tenth of the time
-         * would have been caught nine times in ten.
-         */
-        internal const val MIN_HITS_FOR_SERIAL = 25
+        /** Reads a run written by [save]. */
+        internal fun load(path: java.nio.file.Path): Run = RunStore.load(path)
 
         /**
          * `1 thread` rather than `1 threads`.
@@ -2058,9 +1791,6 @@ class Run internal constructor(
          * A report that cannot count is a report a reader trusts slightly less, and the places this
          * matters are exactly the small runs where every other number is already marginal.
          */
-        /** Reads a run written by [save]. */
-        internal fun load(path: java.nio.file.Path): Run = RunStore.load(path)
-
         internal fun plural(n: Long, noun: String): String =
             if (n == 1L) "1 $noun" else String.format(Locale.ROOT, "%,d ${noun}s", n)
 
@@ -2069,28 +1799,6 @@ class Run internal constructor(
 
         /** Hits below which an operation's rate of long executions is too noisy to enter the median. */
         internal const val MEDIAN_MIN_HITS = 100L
-
-        /**
-         * How much of an operation's long-running time must be *certainly* on CPU before the report
-         * says it is working rather than waiting.
-         *
-         * A judgement, and a cautious one, because the bound behind it is already conservative — it
-         * charges the operation with every stall in the whole run. A slow CPU-bound operation can
-         * clear it at 91%; one that does nothing but wait on a lock comes nowhere near.
-         */
-        internal const val RUNNING_CERTAIN = 0.5
-
-        /**
-         * Below this share of waiting among an operation's long samples, it was working.
-         *
-         * Not zero, because one sample in a thousand catching a GC pause or a page fault is not
-         * the operation waiting on anything, and a verdict that hedged over it would hedge over
-         * every operation on a real machine.
-         */
-        internal const val WAITING_NONE = 0.05
-
-        /** Above this share, calling it waiting rather than working is the honest description. */
-        internal const val WAITING_MOSTLY = 0.5
     }
 }
 

@@ -152,7 +152,7 @@ class AllocationsTest {
         val both = diffRow(diffOf(a, a), "alloc.outer")
         assertTrue("3.00 MB" in both[0] && "3.00 MB" in both[1], both.toString())
         val oneSide = diffOf(off, a)
-        assertTrue("CAREFUL" in oneSide && "allocations: counted on one side only" in oneSide, oneSide)
+        assertTrue("WARNINGS" in oneSide && "  Allocated: counted on one side only - it adds about" in oneSide, oneSide)
         val outer = diffRow(oneSide, "alloc.outer")
         assertTrue("MB" !in outer[0] && "3.00 MB" in outer[1], outer.toString())
     }
@@ -250,7 +250,7 @@ class AllocationsTest {
         assertFalse(p.allocations)
         assertEquals(0L, p.node("alloc.outer").allocated)
         fun checked(text: String) {
-            assertTrue("CAREFUL       allocations: this JVM cannot report allocated bytes" in text, text)
+            assertTrue("  Allocated: not shown - this JVM cannot count allocated bytes per thread; HotSpot can" in text, text)
             assertFalse("Per execution" in text.lines().first { it.startsWith("Coarse operation") }, text)
         }
         checked(p.render())
@@ -264,7 +264,7 @@ class AllocationsTest {
     fun `a JVM that can report them does not warn`() {
         Profiler.start(strict = false, allocations = true)
         nested()
-        assertFalse("cannot report" in Profiler.stop().render())
+        assertFalse("cannot count" in Profiler.stop().render())
     }
 
     // --- the table ------------------------------------------------------------------------
@@ -427,7 +427,7 @@ class AllocationsTest {
             session(false).save(after)
         }
         val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
-        assertTrue("allocations: counted on one side only" in diff, diff)
+        assertTrue("Allocated: counted on one side only" in diff, diff)
         val row = diffRow(diff, "alloc.outer")
         assertTrue("3.00 MB" in row[0] && "MB" !in row[1], row.toString())
     }

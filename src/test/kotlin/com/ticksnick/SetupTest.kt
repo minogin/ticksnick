@@ -85,7 +85,7 @@ class SetupTest {
         val lines = TickSnick.load(folder).render().lines()
         val tags = lines.indexOfFirst { it.startsWith("Tags") }
         val setup = lines.indexOfFirst { it.startsWith("Setup") }
-        assertTrue(lines.indexOfFirst { it.startsWith("CAREFUL") } in 0 until tags && tags < setup, lines.joinToString("\n"))
+        assertTrue(lines.indexOf("WARNINGS") in 0 until tags && tags < setup, lines.joinToString("\n"))
         assertTrue(setup < lines.indexOfFirst { it.startsWith("Wall time") }, lines.joinToString("\n"))
         assertEquals("warmups: 2", lines[tags].removePrefix("Tags").trim())
         assertTrue("Heap: 18 GB" in lines[setup], lines[setup])
@@ -97,7 +97,7 @@ class SetupTest {
         save(dir, "b", run(tags = mapOf("warmups" to "2"), setup = setup("18 GB", "2@2")))
         val text = Profile.load(dir).render()
         assertTrue(text.lines().any { it.startsWith("Tags") && it.endsWith("warmups: 2") }, text)
-        assertTrue("CAREFUL" !in text, text)
+        assertTrue("WARNINGS" !in text, text)
     }
 
     @Test
@@ -110,7 +110,7 @@ class SetupTest {
         val mix = lines.filter { "they differ in" in it }
         assertEquals(1, mix.size, lines.joinToString("\n"))
         assertTrue("warmups, batches, Heap" in mix[0], mix[0])
-        assertTrue(lines.indexOf(mix[0]) > lines.indexOfFirst { "labels: 1 were still open" in it }, lines.joinToString("\n"))
+        assertTrue(lines.indexOf(mix[0]) > lines.indexOfFirst { "1 label: entered and never exited" in it }, lines.joinToString("\n"))
     }
 
     @Test
@@ -135,7 +135,7 @@ class SetupTest {
         save(dir, "b", run(setup = setup("18 GB", "1@1")))
         save(dir, "c", run(setup = setup("18 GB", "2@2")))
         val text = Profile.load(dir).render()
-        assertTrue("2 of 3 came from one JVM" in text, text)
+        assertTrue("  Runs: 2 of 3 shared a JVM - the +- is too narrow; give each run its own JVM" in text, text)
     }
 
     @Test
@@ -144,9 +144,10 @@ class SetupTest {
         save(dir, "b", run(imbalances = 1))
         save(dir, "c", run(imbalances = 2))
         val lines = Profile.load(dir).render().lines()
-        assertEquals(1, lines.count { "labels: 1 were still open" in it }, lines.joinToString("\n"))
-        assertTrue(lines.any { "labels: 1 were still open" in it && "(2 of 3 runs)" in it }, lines.joinToString("\n"))
-        assertTrue(lines.any { "labels: 2 were still open" in it && "(1 of 3 runs)" in it }, lines.joinToString("\n"))
+        // Saved without the names, a run says how many: different counts are different words.
+        assertEquals(1, lines.count { "  1 label: entered and never exited" in it }, lines.joinToString("\n"))
+        assertTrue(lines.any { "  1 label: entered and never exited" in it && "(2 of 3 runs)" in it }, lines.joinToString("\n"))
+        assertTrue(lines.any { "  2 labels: entered and never exited" in it && "(1 of 3 runs)" in it }, lines.joinToString("\n"))
     }
 
     @Test
@@ -203,23 +204,23 @@ class SetupTest {
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         assertTrue("(1 of 2 runs in 'before')" in text, text)
         assertTrue("(2 of 2 runs in 'after')" in text, text)
-        assertTrue("runs in 'before': they differ in warmups" in text, text)
+        assertTrue("Runs in 'before': they differ in warmups" in text, text)
     }
 
     @Test
     fun `a long section cannot hide that a profile is mixed`() = inTemp { dir ->
         val before = dir.resolve("before")
         val after = dir.resolve("after")
-        for (i in 1..MAX_CAREFUL + 2) {
+        for (i in 1..MAX_WARNINGS + 2) {
             save(before, "a$i", run(imbalances = i, tags = mapOf("warmups" to "$i")))
             save(after, "a$i", run(imbalances = 100 + i, tags = mapOf("batches" to "$i")))
         }
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
         assertTrue("more" in text.lines().first { it.contains("... and") }, text)
-        assertTrue("runs in 'before': they differ in warmups" in text, text)
-        assertTrue("runs in 'after': they differ in batches" in text, text)
+        assertTrue("Runs in 'before': they differ in warmups" in text, text)
+        assertTrue("Runs in 'after': they differ in batches" in text, text)
         val report = TickSnick.load(before).render()
-        assertTrue("runs: they differ in warmups" in report, report)
+        assertTrue("Runs: they differ in warmups" in report, report)
         assertTrue(report.lines().indexOfFirst { "... and" in it } < report.lines().indexOfFirst { "they differ in" in it }, report)
     }
 

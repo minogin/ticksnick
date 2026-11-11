@@ -300,12 +300,10 @@ class CoarseTest {
             instanceTicks = 1_000, activeTicks = 1_000, name = "query",
         )
         val text = report(listOf(bad), labelledDuty = 0.01).render()
-        assertTrue(text.lines().any { it.startsWith("CAREFUL       query: on a CPU") }, "the warning did not appear, or did not name the operation: $text")
-        // The block carries both readings: the figure, and what the measured time on CPU allows.
-        assertTrue(
-            Regex("""on a CPU 3\.00, but the measured time on CPU bounds it at 0\.0\d""").containsMatchIn(text),
-            "the warning did not print value over ceiling"
-        )
+        val line = text.lines().firstOrNull { it.startsWith("  Runnable: ") && "mostly under `query`" in it }
+        assertTrue(line != null, "the warning did not appear, or did not name the operation: $text")
+        // What the CPU time allows of the row's Runnable time: 3.00 threads against well under 0.1.
+        assertTrue(Regex("""Runnable: 9\d\.\d% of it inside labels was not on a CPU""").containsMatchIn(line), line)
     }
 
     @Test
@@ -523,7 +521,7 @@ class CoarseTest {
     fun `the floor is 100 bodies with nothing opted into`() {
         assertEquals(100.0, coarseFlatFloorBodies(0), 1e-9)
         assertEquals(2_500.0, coarseFloorNanos(0.01, coarseFlatFloorBodies(0) * DEFAULT_BODY_NANOS, coarseContextBodies(0) * DEFAULT_BODY_NANOS), 1e-9)
-        assertEquals("", coarseFloorParts(0, false))
+        assertEquals("", coarseFloorRaised(0, false))
     }
 
     /**
@@ -539,7 +537,7 @@ class CoarseTest {
         val scale = coarseHookScale(40.0)
         assertEquals((80.0 + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES), scale, 1e-12)
         assertEquals(100.0 * scale, coarseFlatFloorBodies(0, hookScale = scale), 1e-9)
-        assertTrue("for a slow nanoTime" in coarseFloorParts(0, false, hookScale = scale))
+        assertTrue("a slow `nanoTime` adds" in coarseFloorRaised(0, false, hookScale = scale))
     }
 
     /**
@@ -551,11 +549,10 @@ class CoarseTest {
         fun run(body: Double) = report(emptyList(), labelled = 1_000, fineCalls = 100_000_000, body = body)
         val runs = listOf(run(25.0), run(30.0))
         val profile = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs)
-        val floor = profile.warnings().ranked.filter { "floor" in it }
+        val floor = profile.warnings().ranked.filter { "recommended" in it }
         assertEquals(1, floor.size, floor.joinToString("\n"))
-        assertTrue("below the 50ns..60ns floor" in floor[0], floor[0])
+        assertTrue(floor[0].startsWith("`fine`: its calls are under the recommended 50ns..60ns"), floor[0])
         assertTrue("(2 of 2 runs)" in floor[0], floor[0])
-        assertTrue("calls at under" in floor[0] && ".." !in floor[0].substringBefore("each"), "the calls and the bound are the same in both runs: ${floor[0]}")
     }
 
     /**
@@ -568,26 +565,44 @@ class CoarseTest {
         fun run(calls: Long, body: Double = 25.0) = report(emptyList(), labelled = 1_000, fineCalls = calls, body = body)
         val heavy = run(100_000_000).hookCost()!!
         assertEquals(0.25, heavy.share, 0.01)
-        assertTrue("may add up to 25.0% to the work inside labels" in hookCostMessage(listOf(heavy)), hookCostMessage(listOf(heavy)))
+        val said = run(100_000_000).warnings().single { it.kind == Kind.HOOKS_COST }.text()
+        assertTrue(said.startsWith("The labels, mostly `fine`, may add up to 25.0% to the work inside them"), said)
         // 0.25 s of a run active for 1,000 s: the most the wall time can grow.
         assertEquals(0.00025, heavy.wallShare, 0.00001)
         assertTrue(run(10_000_000).hookCost() != null)
         assertTrue(run(100_000).hookCost() == null)
         val runs = listOf(run(100_000_000), run(100_000_000, body = 30.0))
         val lines = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs).warnings().ranked
-            .filter { "TickSnick's hooks" in it }
+            .filter { it.startsWith("The labels") }
         assertEquals(1, lines.size, lines.joinToString("\n"))
         assertTrue("25.0%..30.0%" in lines[0] && "(2 of 2 runs)" in lines[0], lines[0])
     }
 
-    /** A run's limits are read at its own body: the same bodies, twice the ns on a machine twice as slow. */
+    /**
+     * A run's limits are read at its own body, and rounded up as recommended limits: 2 bodies of 61.5 ns
+     * are 123 ns, recommended as 150 ns; 100 are 6.15 us, recommended as 6.5 us.
+     */
     @Test
     fun `the floors follow the run's body`() {
         val fast = report(listOf(stat(count = 1, sumNanos = 1_000_000, hits = 1, running = 1)), body = 25.0)
         val slow = report(listOf(stat(count = 1, sumNanos = 1_000_000, hits = 1, running = 1)), body = 61.5)
         assertEquals(50.0, fast.fineFloorNanos, 1e-9)
-        assertEquals(123.0, slow.fineFloorNanos, 1e-9)
-        assertEquals(2 * slow.coarseFlatFloorNanos / 123.0, 2 * fast.coarseFlatFloorNanos / 50.0, 1e-9)
+        assertEquals(150.0, slow.fineFloorNanos, 1e-9)
+        assertEquals(recommendedLimit(coarseFlatFloorBodies(1) * 25.0), fast.coarseFlatFloorNanos, 1e-9)
+        assertEquals(recommendedLimit(coarseFlatFloorBodies(1) * 61.5), slow.coarseFlatFloorNanos, 1e-9)
+    }
+
+    /** Up, to two digits, the second 0 or 5, so that the check and the text agree. */
+    @Test
+    fun `a recommended limit is rounded up`() {
+        assertEquals(3_000.0, recommendedLimit(2_610.0), 1e-9)
+        assertEquals(60.0, recommendedLimit(56.0), 1e-9)
+        assertEquals(150.0, recommendedLimit(123.0), 1e-9)
+        assertEquals(200.0, recommendedLimit(200.0), 1e-9)
+        assertEquals(50.0, recommendedLimit(50.0), 1e-9)
+        assertEquals("3.0us", limitText(3_000.0))
+        assertEquals("60ns", limitText(60.0))
+        assertEquals("150ns", limitText(150.0))
     }
 
     /** Every registered fine label adds its price to each coarse execution, so the floor rises with them. */
@@ -595,19 +610,19 @@ class CoarseTest {
     fun `the floor rises with the fine labels registered`() {
         assertEquals(100.4, coarseFlatFloorBodies(1), 1e-9)
         assertEquals(200.0, coarseFlatFloorBodies(250), 1e-9)
-        assertEquals(" (2.50us, + 600ns for Allocated, + 200ns for 20 fine labels)", coarseFloorParts(20, true))
+        assertEquals("Allocated adds 600ns, 20 fine labels add 200ns", coarseFloorRaised(20, true))
     }
 
     @Test
     fun `a coarse label on a 200 ns operation is reported`() {
         val r = report(coarse = listOf(stat(count = 1_000_000, sumNanos = 200_000_000, hits = 200, running = 200)))
         assertEquals(listOf("req"), r.coarseTooSmall().map { it.name })
-        val msg = coarseTooSmallMessage("req", 1_000_000, 200.0, r.coarseFloorNanosOf(r.coarse[0]), r.coarseContextNanos, r.coarseFlatFloorNanos)
-        // "200 ns" and not "200.0 ns": durations print to three significant digits, so the fourth
+        val msg = r.warnings().single { it.kind == Kind.COARSE_UNDER_FLOOR }.text()
+        // "200ns" and not "200.0ns": durations print to three significant digits, so the fourth
         // one - which for a sampled or bucketed number is noise - never reaches the page.
-        assertTrue(msg.contains("200ns"), "the message does not name the measured duration: $msg")
-        assertTrue(msg.contains("registerFine(\"req\")"), "the message does not say what to do instead: $msg")
-        assertTrue(msg.lines().size == 2, "two lines - the fact and the fix, then the reason: $msg")
+        assertTrue(msg.startsWith("`req`: its executions, 200ns, are under the recommended ${limitText(r.coarseFlatFloorNanos)}"), msg)
+        assertTrue(msg.contains("`registerFine(\"req\")`"), "the message does not say what to do instead: $msg")
+        assertTrue(msg.lines().size == 1, "one line: $msg")
     }
 
     @Test
@@ -644,19 +659,21 @@ class CoarseTest {
 
     // --- the Allocated column ---------------------------------------------------------
 
-    /** 2.8 us clears 100.4 bodies and not 124.4 at the default body: the same operation, the same run, one setting apart. */
+    /**
+     * 3.2 us clears 100.4 bodies at the default body, 2.51 us recommended as 3.0 us, and not 124.4,
+     * 3.11 us recommended as 3.5 us: the same operation, the same run, one setting apart.
+     */
     @Test
     fun `counting allocations flags an operation the floor would otherwise pass`() {
-        val c = stat(count = 1_000_000, sumNanos = 2_800_000_000, hits = 1_000, running = 1_000)
+        val c = stat(count = 1_000_000, sumNanos = 3_200_000_000, hits = 1_000, running = 1_000)
         assertTrue(report(listOf(c)).coarseTooSmall().isEmpty())
 
         val counted = report(listOf(c), allocations = true)
         assertEquals(listOf("req"), counted.coarseTooSmall().map { it.name })
         val text = counted.render()
-        assertTrue("TickSnick may add up to 131ns to a coarse execution here" in text, text)
         assertTrue(
-            "needs 3.11us here (2.50us, + 600ns for Allocated, + 10.0ns for 1 fine label) (a default: this run timed no body)" in text,
-            "the floor does not say what it is made of: $text"
+            "`req`: its executions, 3.20us, are under the recommended 3.5us (Allocated adds 600ns, 1 fine label adds 10ns)" in text,
+            "the floor does not say what raises it: $text"
         )
     }
 
@@ -734,8 +751,9 @@ class CoarseTest {
         assertEquals(0.75, r.labelledOutsideCoarseShare)
         assertEquals(listOf("fine"), r.outsideCoarseSuspects().map { it.name })
         val text = r.render()
-        assertTrue(text.lines().any { it.startsWith("CAREFUL") && "inside no coarse span" in it }, "the report does not mention it")
-        assertTrue(text.contains("ESCAPING"), "the report does not name the dangerous reading")
+        val line = text.lines().firstOrNull { it.startsWith("  75.0% of the fine labels' time") }
+        assertTrue(line != null && "mostly `fine`, is under no coarse row" in line, "the report does not mention it: $text")
+        assertTrue("wrap their tasks with `propagating()`" in line, "the report does not say what to do on other threads: $line")
     }
 
     @Test

@@ -50,27 +50,28 @@ class ClockTest {
         assertEquals(emptyList(), report(200.0, 205.0, 198.0, 202.0, 201.0, 199.0, 203.0).careful())
         val moved = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).careful()
         assertEquals(1, moved.size)
-        assertTrue("205% of base at the start, 135% at the end" in moved[0], moved[0])
+        assertEquals(
+            "CPU clock: moved 135%..205% during the run - times drift with it, shares hold; turbo off holds it still",
+            moved[0].text(),
+        )
         // One second caught in a collection is not a trend.
         assertEquals(emptyList(), report(200.0, 200.0, 200.0, 200.0, 120.0, 200.0, 200.0, 200.0, 200.0, 200.0).careful())
         // Too few samples to say anything.
         assertEquals(emptyList(), report(205.0, 135.0).careful())
         val mac = ClockTrace(DoubleArray(0), ofBase = true, notMeasured = "macOS reads the CPU clock only as root")
-        assertEquals(listOf("clock: not measured - macOS reads the CPU clock only as root"), mac.careful())
+        assertEquals(
+            listOf("CPU clock: not measured (macOS reads the CPU clock only as root) - times may drift unseen; shares hold"),
+            mac.careful().map { it.text() },
+        )
         assertEquals(emptyList(), ClockTrace.NOT_RECORDED.careful())
     }
 
     @Test
-    fun `the diff compares the two runs' clocks and warns when they differ`() {
-        val fast = report(205.0, 205.0, Double.NaN, 205.0)
-        val slow = report(135.0, 135.0, 135.0)
-        val differ = ClockTrace.diffLines(fast, slow)
-        assertEquals(1, differ.size)
-        assertTrue("205% -> 135% of base" in differ[0], differ[0])
-        assertTrue("1.52x" in ClockTrace.diffCareful(fast, slow).single())
-        assertEquals(emptyList(), ClockTrace.diffCareful(fast, report(200.0, 200.0)))
-        assertTrue("- -> 135%" in ClockTrace.diffLines(ClockTrace.NOT_RECORDED, slow)[0])
-        assertEquals(emptyList(), ClockTrace.diffLines(ClockTrace.NOT_RECORDED, ClockTrace.NOT_RECORDED))
+    fun `a clock that moved in several runs is one warning, its outer range`() {
+        val a = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).careful()
+        val b = report(215.0, 216.0, 214.0, 215.0, 215.0, 150.0, 140.0, 140.0, 141.0, 139.0, 140.0).careful()
+        val merged = mergeWarnings(listOf(a, b)).single().second
+        assertTrue(merged.startsWith("CPU clock: moved 135%..215% during the run") && "(2 of 2 runs)" in merged, merged)
     }
 
     @Test

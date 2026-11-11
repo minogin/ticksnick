@@ -60,16 +60,29 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 ### Warnings
 
 - The report over runs and both diffs show each run's own warnings, which only the report of one run
-  did. The same warning from several runs is one line that says how many.
+  did. The same warning from several runs is one line that says how many, its figures as ranges:
+  `may be off by up to 1.14pp..1.56pp (2 of 2 runs)`.
 - A diff shows the warnings of both its profiles, each naming its profile.
+- The warnings are a `WARNINGS` section under a heading, each two spaces in and its cause further in,
+  in place of `CAREFUL` on every line. Every warning is reworded to say what happened, why it matters
+  and what to do, for someone new to TickSnick; its subject is a name the report shows, and code is in
+  backticks: `` `visit`: 12.0% of its time is in calls over 1.00ms, which its per-call time hides -
+  register it coarse, `registerCoarse("visit")` ``. Several became one: the pause warnings, the
+  one-run warnings of a report and a diff, the checks of Runnable against CPU time, the clock moving
+  during a run and across runs. A root operation run a different number of times is named among what
+  the runs differ in. Two are gone: threads that ran a label one at a time, which the `Workers` and
+  `Pool` columns show, and CPU clock readings dropped for going backwards.
+- A label left open is named, `` `parse`: entered and never exited ``, and so is a coarse label still
+  open at `stop()`; a run saves their names.
 - A failed run, stopped by a leaked label or work billed to a closed execution, is left out of its
   profile: the report opens with `FAILED: 1 of 4 runs, left out of the profile` and each failed run's
   file and failure. When every run failed there is no profile, and the report is that banner alone; so is
-  a diff with such a side. A failure is no longer repeated as a `CAREFUL` line.
-- The coarse floor is a fixed 2 us: 5% of the most a coarse execution may cost with nothing opted
-  into, 100 ns. Each registered fine label adds up to 0.5 ns and counting allocated bytes up to 30 ns,
-  and the floor rises by 20 times that. The warning about an operation under the floor says what it is
-  made of: `needs 2.61 us here (2.00 us, + 600 ns for Allocated, + 10.0 ns for 1 fine label)`.
+  a diff with such a side. A failure is not a warning, and is not repeated as one.
+- The floors are recommended limits, rounded up to two digits, the second 0 or 5, and the check uses
+  the rounded figure: `` `request`: its executions, 1.2us, are under the recommended 3.0us (Allocated
+  adds 600ns) ``. The coarse floor is 100 bodies, about 2.5 us; each registered fine label and counting
+  allocated bytes raise it, and the warning names what raised it.
+- The run list's `clock` and a diff's `Clock` line are `CPU clock`.
 
 ### Callable from Java
 

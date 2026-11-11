@@ -129,7 +129,7 @@ class ProfileDiffTest {
             assertTrue("11.0s -> 8.00s" in header && Regex("""-27\? \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             assertTrue("?" in diffRow(text, "same")[2] && NOISE_NOTE in text, text)
-            assertTrue("CAREFUL" !in text, text)
+            assertTrue("WARNINGS" !in text, text)
         } finally {
             dir.toFile().deleteRecursively()
         }
@@ -145,7 +145,7 @@ class ProfileDiffTest {
             listOf(7L, 8L).forEachIndexed { i, t -> save(after, i, listOf(node("runBatch", listOf(t, t)))) }
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             val lines = text.lines()
-            assertTrue(lines[2].isEmpty() && lines[3].startsWith("CAREFUL       times: 1 run of 'before', no interval") && lines[4].isEmpty(), "a section of its own, right under the title: $text")
+            assertTrue(lines[2].isEmpty() && lines[3] == "WARNINGS" && lines[4].startsWith("  Runs: 1 in 'before', no interval") && lines[5].isEmpty(), "a section of its own, right under the title: $text")
             val header = text.lines().first { it.startsWith("runBatch ") }
             assertTrue("-25%" in header && "?" !in header && "+-" !in header.substringAfter("-25%"), header)
             assertTrue("NaN" !in text, text)
@@ -320,7 +320,7 @@ class ProfileDiffTest {
             val folder = dir.resolve("runs").also { Files.createDirectories(it) }
             repeat(2) { RunStore.save(profile(emptyList(), listOf(stat("work", 10, 10)), stale = 5), folder.resolve("2026-10-25T16-1$it-00$RUN_EXTENSION")) }
             val text = Profile.load(folder).render()
-            assertTrue(text.lines().any { it.startsWith("CAREFUL") && "already closed" in it && "(2 of 2 runs)" in it }, text)
+            assertTrue(text.lines().any { it.startsWith("  ") && "of the coarse time came from tasks" in it && "(2 of 2 runs)" in it }, text)
         } finally {
             dir.toFile().deleteRecursively()
         }

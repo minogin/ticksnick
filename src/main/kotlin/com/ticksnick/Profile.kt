@@ -50,12 +50,14 @@ internal const val RUN_EXECUTIONS_LISTED = 10
  */
 internal const val RUNS_CLOCK_SPREAD = 0.10
 
-/** The `CAREFUL` line of a folder with one run in it. */
-internal val ONE_RUN_CAREFUL: String get() = "times: 1 run of '%s', no interval${sym.dash}the next JVM can run faster or slower as a whole; " +
-        "shares of all but the smallest rows hold"
+/** How many warnings the `WARNINGS` section prints before it counts the rest instead of listing them. */
+internal const val MAX_WARNINGS = 10
 
-/** How many warnings the `CAREFUL` section prints before it counts the rest instead of listing them. */
-internal const val MAX_CAREFUL = 10
+/** The heading of the warnings section, once, in capitals like the tables' headings. */
+internal const val WARNINGS_HEADING = "WARNINGS"
+
+/** How far a warning starts in; its further lines three times as far. */
+internal const val WARNING_INDENT = "  "
 
 /** The width of the failure banner over a profile with no runs left, which has no table to take it from. */
 internal const val FAILED_WIDTH = 100
@@ -71,31 +73,33 @@ internal const val COARSE_NAME_WIDTH = 30
 internal const val FINE_NAME_WIDTH = 26
 
 /**
- * **Every warning of every report, as a section of its own right under its first line**: before any
+ * **Every warning of every report, as a `WARNINGS` section right under its first line**: before any
  * number, because a reader stops at the first one, and a blank line either side, because a
  * warning among the figures goes unseen: a diff that reads -56% at clocks of 99% and 197% must say
  * so before the -56%.
  *
- * A warning with line breaks continues under its own text. Capped at [MAX_CAREFUL], the rest
- * counted: a section that runs to fifty is one a reader learns to skip. The caller orders them by
- * what each costs the reader, worst first. [Warnings.always] come after the cap and are not cut.
+ * The heading once; each warning two spaces in and its further lines six, so one ends where the next
+ * begins. Capped at [MAX_WARNINGS], the rest counted: a section that runs to fifty is one a reader
+ * learns to skip. The caller orders them, worst first. [Warnings.always] come after the cap and are
+ * not cut.
  */
 internal fun StringBuilder.carefulBlock(warnings: Warnings) {
     if (warnings.ranked.isEmpty() && warnings.always.isEmpty()) return
     fun print(w: String) {
         val lines = w.lines()
-        appendLine(row("CAREFUL", lines.first().trim()))
-        for (line in lines.drop(1)) appendLine(row("", line.trim()))
+        appendLine(WARNING_INDENT + lines.first().trim())
+        for (line in lines.drop(1)) appendLine(WARNING_INDENT + WARNING_INDENT + WARNING_INDENT + line.trim())
     }
     appendLine()
-    warnings.ranked.take(MAX_CAREFUL).forEach(::print)
-    if (warnings.ranked.size > MAX_CAREFUL) appendLine(row("", "... and ${warnings.ranked.size - MAX_CAREFUL} more"))
+    appendLine(WARNINGS_HEADING)
+    warnings.ranked.take(MAX_WARNINGS).forEach(::print)
+    if (warnings.ranked.size > MAX_WARNINGS) appendLine("$WARNING_INDENT... and ${warnings.ranked.size - MAX_WARNINGS} more")
     warnings.always.forEach(::print)
     appendLine()
 }
 
 /**
- * What a `CAREFUL` section prints: [ranked] worst first, up to its cap, and [always] after them.
+ * What a `WARNINGS` section prints: [ranked] worst first, up to its cap, and [always] after them.
  * A profile whose runs are mixed is one line in [always]: last, so a mix that was meant pushes out
  * nothing, and past the cap, so a long section cannot hide that a profile is not one.
  */
@@ -215,7 +219,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     fun render(unicode: Boolean = false): String = withSymbols(unicode) {
         Logo.once()
         if (runs.isEmpty()) failedBanner()
-        else report(false, (if (runs.size == 1) Warnings(listOf(ONE_RUN_CAREFUL.format(name))) else Warnings()) + warnings())
+        else report(false, warnings())
     }
 
     /**
@@ -741,65 +745,37 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * names it lists, and is in [Warnings.always].
      */
     internal fun warnings(named: Boolean = false): Warnings {
+        // A profile whose runs all failed has none: its banner says so, and nothing else is printed.
+        if (runs.isEmpty()) return Warnings()
         val where = if (named) " in '$name'" else ""
-        val mixed = mixedNames(tagMaps) + mixedNames(setupMaps)
+        val root = root()
+        val mixed = mixedNames(tagMaps) + mixedNames(setupMaps) + listOfNotNull(
+            root?.takeIf { r -> runs.indices.map { r.nodes[it]?.count ?: 0L }.distinct().size > 1 }?.let { "${code(it.name)} executions" }
+        )
         return Warnings(
-            intervalWarnings(root(), where) + runWarnings(where),
-            if (mixed.isEmpty()) emptyList() else listOf(
-                "runs$where: they differ in ${mixed.joinToString(", ")}${sym.dash}" +
-                        "a folder is same code, same workload, same setup; move a run that differs out of it"
-            ),
+            intervalWarnings(where).map { it.text() } + mergeWarnings(runs.map { it.warnings() }, where).map { it.second },
+            if (mixed.isEmpty()) emptyList() else listOf(Warning(Kind.RUNS_MIXED, words(where), words(mixed.joinToString(", "))).text()),
         )
     }
 
     /**
-     * Each run's own warnings, the same one once, with how many runs said it. A label under its floor,
-     * and what the hooks cost, are one warning however many runs said it, their figures as ranges:
-     * each run has a floor and a body of its own, so the runs' lines differ in the figures and would
-     * repeat once per run.
+     * What makes the interval mean something other than chance, about the runs together: one run,
+     * which has none; a clock that was not the same in all of them; runs of one JVM, which are not
+     * independent. Before the runs' own warnings, since every figure rests on it.
      */
-    private fun runWarnings(where: String): List<String> {
-        val said = LinkedHashMap<String, Int>()
-        for (run in runs) for (w in run.warnings(ranged = false)) said.merge(w, 1, Int::plus)
-        runs.mapNotNull { it.hookCost() }.takeIf { it.isNotEmpty() }?.let { said[hookCostMessage(it)] = it.size }
-        for (fs in runs.flatMap { it.fineUnderFloor() }.groupBy { it.name }.values) said[tooSmallMessage(fs)] = fs.size
-        for (cs in runs.flatMap { it.coarseUnderFloor() }.groupBy { it.name to it.shareBound }.values)
-            said[coarseTooSmallMessage(cs)] = cs.size
-        return said.map { (warning, count) ->
-            val place = when {
-                runs.size > 1 -> " ($count of ${runs.size} runs$where)"
-                where.isEmpty() -> ""
-                else -> " (${where.trim()})"
-            }
-            val lines = warning.lines()
-            (listOf(lines.first() + place) + lines.drop(1)).joinToString("\n")
-        }
-    }
-
-    /**
-     * What makes the interval mean something other than chance: runs that do not look like one setup,
-     * a clock that was not the same in all of them, and runs of one JVM, which are not independent.
-     */
-    private fun intervalWarnings(root: Matched?, where: String): List<String> {
-        val lines = mutableListOf<String>()
-        if (root != null) {
-            val counts = runs.indices.map { root.nodes[it]?.count ?: 0L }
-            if (counts.distinct().size > 1) lines +=
-                "${root.name}$where: the runs ran it ${counts.joinToString(", ")} times${sym.dash}" +
-                        "a folder is same code, same workload, same setup; move a run that is not out of it"
-        }
+    private fun intervalWarnings(where: String): List<Warning> = buildList {
+        if (runs.size == 1) add(Warning(Kind.ONE_RUN, words(name)))
         val clocks = runs.map { it.clock.mean }
         if (clocks.all { !it.isNaN() } && runs.all { it.clock.ofBase == runs[0].clock.ofBase }) {
             val lo = clocks.min()
             val hi = clocks.max()
-            if (lo > 0 && (hi - lo) / lo > RUNS_CLOCK_SPREAD) lines +=
-                "clock$where: ${rangeText(listOf(lo, hi), runs[0].clock::format)} across the runs${sym.dash}a run's time " +
-                        "follows it and the interval includes that; hold the clock still (turbo off) for a tighter one"
+            if (lo > 0 && (hi - lo) / lo > RUNS_CLOCK_SPREAD)
+                add(Warning(Kind.CLOCK_MOVED, words(where), Gap.Range(lo, hi, runs[0].clock::format), words("across the runs")))
         }
         val shared = runs.mapNotNull { it.setup.jvm }.groupingBy { it }.eachCount().values.filter { it > 1 }.sum()
-        if (shared > 0) lines +=
-            "runs$where: $shared of ${runs.size} came from one JVM${sym.dash}the interval counts them as independent, so it reads too narrow"
-        return lines
+        if (shared > 0) add(
+            Warning(Kind.RUNS_ONE_JVM, words(where), figure(shared.toDouble(), ::countText), figure(runs.size.toDouble(), ::countText))
+        )
     }
 
     /**
@@ -817,15 +793,15 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         val indent = "              " + if (side.isEmpty()) "" else String.format(Locale.ROOT, "%-7s", side)
         if (header) appendLine(
             String.format(
-                Locale.ROOT, "              %s%-4s %-28s %10s %8s   %s", if (side.isEmpty()) "" else " ".repeat(7),
-                "run", "file", "wall", "clock", if (root != null && listed) "${root.name}, each execution" else ""
+                Locale.ROOT, "              %s%-4s %-28s %10s %11s   %s", if (side.isEmpty()) "" else " ".repeat(7),
+                "run", "file", "wall", "CPU clock", if (root != null && listed) "${root.name}, each execution" else ""
             ).trimEnd()
         )
         runs.forEachIndexed { i, p ->
             val each = if (root != null && listed) root.nodes[i]?.spans?.exactDurations()?.joinToString("  ") { duration(it.toDouble()) } ?: "-" else ""
             appendLine(
                 String.format(
-                    Locale.ROOT, "%s%-4d %-28s %10s %8s   %s", indent, i + 1, files[i].fileName.toString(),
+                    Locale.ROOT, "%s%-4d %-28s %10s %11s   %s", indent, i + 1, files[i].fileName.toString(),
                     duration(p.samplingSpanNanos.toDouble()), p.clock.format(p.clock.mean), each
                 ).trimEnd()
             )

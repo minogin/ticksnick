@@ -16,55 +16,62 @@ graph. It runs on four threads in three batches of about 27 s each. Its coarse l
 ```
 Runs          1 run of 'naive', one JVM: no interval
 
-CAREFUL       times: 1 run of 'naive', no interval - the next JVM can run faster or slower as a whole; shares of all but the smallest rows hold
+WARNINGS
+  Runs: 1 in 'naive', no interval - shares hold, durations need a second run
 
-              run  file                               wall    clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr            117s      99%    27.6s   27.4s   27.0s
+              run  file                               wall   CPU clock   runBatch, each execution
+              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s   27.4s   27.0s
 Wall time      117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
 runBatch       27.3s per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
 Sampling      every 1.0ms: the sampler keeps one of the 14 processors busy to hold the interval
 ```
 
-### CAREFUL
+### WARNINGS
 
 Every warning is in this one section, right under the report's first line, worst first. If there is
 none, the section is absent. At most ten are listed, and the rest are counted.
 
-Each warning has the same shape: **what it is about, a colon, what happened, a dash, what it means or
-what to do**. The subject is a column (`Thread-time%`, `Runnable`), a figure (`times`, `clock`,
-`pauses`) or the name of a label. Lines under the first give the cause.
+Each warning says what happened, why it matters and what to do: **its subject, a colon, what
+happened, a dash, what it means or what to do**. The subject is a name the report shows (a label in
+backticks, a column such as `Thread-time%`, a line such as `Runs` or `CPU clock`), or there is none.
+A second line, further in, gives the cause.
 
 The common ones:
 
-- `times: 1 run ..., no interval` - one JVM cannot say how much the next one will differ. Save
+- `Runs: 1 in 'naive', no interval` - one JVM cannot say how much the next one will differ. Save
   more runs into the same folder.
-- `clock: moved during the run` - the CPU's frequency changed, so times and costs per call drift
-  with it. Shares are not affected.
-- `labels: TickSnick's hooks may add up to P to the work inside labels, and up to W to the wall time`
-  - every fine hook entry and coarse execution at its budget, against the time the labels hold, and
-  against the run's wall time: the wall grows by the most where the hooks sit on the run's critical
-  path, and much less where the labelled work is spread over many threads. Said above 1% of the work.
-  Fewer, larger labels cost less.
-- `<label>: N calls at under D each, below the Fns floor` - the label is a visible part of what
-  it measures. Label the enclosing loop instead, with `op(X, times = n) { }`. The floor is 2 bodies at
-  the run's body; `(a default: this run timed no body)` when the run is too short to time one.
-- `<label>: N coarse executions of D, a coarse label needs D here` - the operation is too short for
-  a coarse label. Make it a fine one; the `op` calls stay the same.
-- `labels: N were still open at a point the caller said should be quiescent` - a label set with
-  `enter` was not closed. Every sample after the leak was charged to it.
-- `threads: N arrived past the 1024-slot ceiling and were NOT SAMPLED`.
-- `Thread-time%: may be off by up to N pp` and the `Runnable` warnings - some labelled time was not
-  spent on a CPU, so a share of time may differ from a share of CPU. The lines under the warning say
-  why: threads waiting for a core, or blocking I/O and native calls.
-- `runs: they differ in ...` - the runs of a folder disagree on a tag or on the setup, so they are not
-  one profile. Move a run that differs out of the folder. It is always the last warning.
-- `runs: N of M came from one JVM` - two sessions of one JVM are not independent, so the interval
-  reads too narrow.
+- `CPU clock: moved 140%..230% during the run` (or `across the runs`) - the CPU's frequency changed, so
+  durations drift with it. Shares are not affected. Turbo off holds it still.
+- `The labels, mostly `visit`, may add up to P to the work inside them and W to the wall time` - every
+  fine call and coarse execution at its budget, against the time the labels hold, and against the run's
+  wall time: the most the wall can grow, where the labels sit on the run's critical path. Said above
+  1% of the work. Fewer, larger labels cost less.
+- `` `visit`: its calls are under the recommended 50ns `` - the label is a visible part of what it
+  measures. Label the loop around it, with `op(visit, times = n) { }`. The floor is 2 bodies at the
+  run's body, rounded up.
+- `` `request`: its executions, 1.2us, are under the recommended 3.0us `` - the operation is too short
+  for a coarse label. Register it fine; the `op` calls stay the same. What raises the floor is named.
+- `` `parse`: entered and never exited `` - a label set with `enter` was not closed, so later time
+  went to it. Put `exit` in a `finally`.
+- `Thread-time%: may be off by up to N pp` and the `Runnable` warnings - some time inside labels read
+  as Runnable may have been waiting, so a share of time may differ from a share of CPU. The second line
+  splits it: waiting for a free core (run fewer threads) or in I/O, native calls or other programs
+  (label the wait).
+- `Paused: 1.85s of pauses, 2.1% of the run, is counted as work in the times below` - GC pauses
+  TickSnick could not tell from work.
+- `Runs: they differ in Heap, so each mean mixes them` - the runs of a folder disagree on a tag, the
+  setup, or how many times the root operation ran, so they are not one profile. Split the folder. It is
+  always the last warning.
+- `Runs: 2 of 4 shared a JVM` - two sessions of one JVM are not independent, so the +- is too narrow.
 
 Warnings go up. A report over several runs shows each run's own warnings, and the same warning from
-several runs is one line ending in `(2 of 4 runs)`. A diff shows the warnings of both its profiles,
-`(2 of 4 runs in 'naive')`.
+several runs is one line ending in `(2 of 4 runs)`, its figures as ranges, `1.04pp..1.29pp`. A diff
+shows the warnings of both its profiles, `(2 of 4 runs in 'naive')`.
+
+A run that **failed** is not a warning: a label left open or work billed to a closed execution stopped
+it, under `strict`. It is saved and left out of its profile, and the report opens with a `FAILED`
+banner naming it; when no run is left, the banner is the whole report.
 
 ### Tags and Setup
 
@@ -100,7 +107,7 @@ A sampler told to spin on fewer than 4 processors gets the remedy at the end of 
 `start(wait = PARK) to free it`.
 
 The CPU's clock is recorded through the run, as a share of its base frequency. A single report
-mentions it only in `CAREFUL`, when it moved; the reports over runs list it for every run.
+mentions it only in `WARNINGS`, when it moved; the reports over runs list it for every run.
 
 ### Coarse operations
 
@@ -185,7 +192,7 @@ run, so the floor follows the machine and its clock. The hook is mostly its two 
 calls, so where `nanoTime` is slow the floor rises with it. Counting the calls per path adds 0.4 bodies
 to the floor for every registered fine label, and `Allocated` 24 bodies: 2.7 us with 20 fine labels,
 3.3 us with `Allocated` too, 5 us with 250 labels, at 25 ns a body. An operation under the floor is still
-measured; a warning says how much of its time TickSnick may be, and what the floor was made of.
+measured; a warning says it is under the recommended floor, rounded up, and what raises it.
 
 **`Allocated`** appears only in a run started with `allocations = true`: the bytes created under the
 row, with its coarse children and every thread that ran under it, counted, not sampled. **Total** is all
@@ -265,11 +272,11 @@ With two runs or more, each figure is the mean of the runs, and what says how mu
 
 ```
 Runs          4 runs of 'naive', one JVM each: every figure below is their mean, +- its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
-              run  file                               wall    clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr            117s      99%    27.6s   27.4s   27.0s
-              2    2026-10-26T18-23-49.tsr            117s      99%    27.4s   27.1s   27.5s
-              3    2026-10-26T18-30-57.tsr            117s      99%    27.8s   27.1s   28.1s
-              4    2026-10-26T18-38-06.tsr            117s      99%    27.5s   27.4s   27.6s
+              run  file                               wall   CPU clock   runBatch, each execution
+              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s   27.4s   27.0s
+              2    2026-10-26T18-23-49.tsr            117s         99%   27.4s   27.1s   27.5s
+              3    2026-10-26T18-30-57.tsr            117s         99%   27.8s   27.1s   28.1s
+              4    2026-10-26T18-38-06.tsr            117s         99%   27.5s   27.4s   27.6s
 Wall time     117 +-0.444s (0.4%) = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 59 pauses, longest 2.01s
 runBatch      27.5 +-0.260s (0.9%) per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
@@ -368,8 +375,8 @@ all` stands at the end of each side's line, and a note under a table that only o
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** reads `-` on the other and has no change: `onCentral (4 -> 0 runs)` was
   removed.
-- **One run on a side** gives the change with no interval and no `?`, and `CAREFUL` says so.
-- When the two sides ran at different CPU clocks, `CAREFUL` says by how much. Times are then not
+- **One run on a side** gives the change with no interval and no `?`, and a warning says so.
+- When the two sides ran at different CPU clocks, a warning says by how much. Times are then not
   comparable; shares still are.
 
 ## The foot

@@ -47,7 +47,7 @@ class ProfileTest {
             assertTrue("6.56 +-" in row, row)
             assertTrue(text.lines().any { it.trim().startsWith("rare (1 of 3 runs)") }, text)
             assertTrue(Regex("""runBatch +6.56 \+-[0-9.]+s \([0-9.]+%\) per execution""").containsMatchIn(text), "the batch, quotable: $text")
-            assertTrue("CAREFUL" !in text, "nothing to be careful about: $text")
+            assertTrue("WARNINGS" !in text, "nothing to warn about: $text")
         } finally {
             dir.toFile().deleteRecursively()
         }
@@ -60,21 +60,23 @@ class ProfileTest {
             RunStore.save(profile(listOf(node("runBatch", listOf(6L, 6L, 6L)))), dir.resolve("a$RUN_EXTENSION"))
             RunStore.save(profile(listOf(node("runBatch", listOf(7L)))), dir.resolve("b$RUN_EXTENSION"))
             val text = Profile.load(dir).render()
-            assertTrue(text.lines()[3].startsWith("CAREFUL") && "runBatch: the runs ran it 3, 1 times" in text.lines()[3], text)
+            // The same workload ran the root the same number of times, so a count that differs is a mixed folder.
+            assertTrue(text.lines()[3] == "WARNINGS", text)
+            assertTrue(text.lines().any { it.startsWith("  Runs: they differ in `runBatch` executions, so each mean mixes them") }, text)
         } finally {
             dir.toFile().deleteRecursively()
         }
     }
 
     @Test
-    fun `one run renders as a profile, CAREFUL that its times have no interval`() {
+    fun `one run renders as a profile, warned that its times have no interval`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             profile(listOf(node("runBatch", listOf(1_000L, 2_000L)))).save(dir.resolve("naive"))
             val lines = TickSnick.load(dir.resolve("naive")).render().lines()
-            val careful = lines.indexOfFirst { it.startsWith("CAREFUL") }
-            assertTrue(careful in 1..lines.indexOfFirst { it.startsWith("Wall time") }, "the CAREFUL line is not above the numbers:\n" + lines.joinToString("\n"))
-            assertTrue("times: 1 run of 'naive', no interval" in lines[careful], lines[careful])
+            val heading = lines.indexOf("WARNINGS")
+            assertTrue(heading in 1..lines.indexOfFirst { it.startsWith("Wall time") }, "the warnings are not above the numbers:\n" + lines.joinToString("\n"))
+            assertEquals("  Runs: 1 in 'naive', no interval - shares hold, durations need a second run", lines[heading + 1])
             assertTrue(lines.any { "COARSE OPERATIONS - wall time" in it }, "not a profile report")
         } finally {
             dir.toFile().deleteRecursively()

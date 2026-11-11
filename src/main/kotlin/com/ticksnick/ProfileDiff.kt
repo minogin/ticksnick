@@ -15,10 +15,6 @@ internal const val FALSE_CHANGE = 0.05
 internal const val NOISE_NOTE = "  ? the change could be noise: the runs differ too much to tell, given how many changes this diff shows; " +
         "more runs of each profile can settle it"
 
-/** The `CAREFUL` line of a diff of one run against one. */
-internal val ONE_RUN_DIFF_CAREFUL: String get() = "times: 1 run on each side, no interval${sym.dash}a change in time may be noise, a run goes faster or " +
-        "slower as a whole; changes in share of the parent hold"
-
 /**
  * The change of one figure between two profiles: after's mean of its runs minus before's, and the
  * half-width of its 95% interval by Welch's t, which does not assume the two sides spread alike. A
@@ -208,35 +204,32 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val b = clockMean(before)
         val a = clockMean(after)
         if (b.isNaN() && a.isNaN()) return
-        appendLine(row("Clock", "${before.runs[0].clock.format(b)} ${sym.arrow} ${after.runs[0].clock.format(a)}, the mean of each side's runs"))
+        appendLine(row("CPU clock", "${before.runs[0].clock.format(b)} ${sym.arrow} ${after.runs[0].clock.format(a)}, the mean of each side's runs"))
     }
 
-    /** What makes the change mean something other than the code's: printed on top, see [carefulBlock]. */
+    /**
+     * What makes the change mean something other than the code's: printed on top, see [carefulBlock].
+     * The diff's own first, then each side's, which name their side: one run on a side is one of them.
+     */
     private fun careful(rootName: String?): Warnings {
-        val lines = mutableListOf<String>()
+        val own = mutableListOf<Warning>()
         val b = clockMean(before)
         val a = clockMean(after)
         val ofBase = (if (!a.isNaN()) after else before).runs[0].clock.ofBase
         if (!a.isNaN() && !b.isNaN() && (before.runs + after.runs).all { it.clock.ofBase == ofBase } && maxOf(a, b) > minOf(a, b) * (1 + CLOCK_MOVED))
-            lines += String.format(
-                Locale.ROOT, "clock: %s ${sym.arrow} %s between the sides${sym.dash}up to %.2f${sym.times} of a time difference is the machine, not the code; shares hold",
-                before.runs[0].clock.format(b), after.runs[0].clock.format(a), maxOf(a, b) / minOf(a, b)
+            own += Warning(
+                Kind.CLOCK_BETWEEN_SIDES, words(before.runs[0].clock.format(b)), words(after.runs[0].clock.format(a)),
+                figure(maxOf(a, b) / minOf(a, b) - 1, ::shareText),
             )
-        val oneRunEach = before.runs.size == 1 && after.runs.size == 1
-        if (oneRunEach) lines += ONE_RUN_DIFF_CAREFUL
-        var sides = Warnings()
-        for (side in listOf(before, after)) {
-            val interval = if (side.runs.size == 1 && !oneRunEach) listOf("times: 1 run of '${side.name}', no interval${sym.dash}a change may be noise; run it again for one") else emptyList()
-            sides += Warnings(interval) + side.warnings(named = true)
-        }
         if (rootName != null) {
             fun countsOf(side: Profile) = side.matched(side.tree(), rootName).let { m -> m.present.map { m.nodes[it]!!.count } }.distinct()
             val cb = countsOf(before)
             val ca = countsOf(after)
             if (cb.size == 1 && ca.size == 1 && ca != cb)
-                lines += "$rootName: run ${cb[0]} times before, ${ca[0]} after${sym.dash}compare per execution"
+                own += Warning(Kind.ROOT_COUNT_SIDES, words(code(rootName)), words(countText(cb[0].toDouble())), words(countText(ca[0].toDouble())))
         }
-        lines += allocationsCareful(before.runs, after.runs)
-        return Warnings(lines + sides.ranked, sides.always)
+        own += allocationsCareful(before.runs, after.runs)
+        val sides = before.warnings(named = true) + after.warnings(named = true)
+        return Warnings(own.map { it.text() } + sides.ranked, sides.always)
     }
 }

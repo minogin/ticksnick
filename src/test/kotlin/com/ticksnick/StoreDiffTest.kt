@@ -278,7 +278,7 @@ class StoreDiffTest {
             assertTrue("Wall time" in capture { Cli.main(arrayOf("render", a.toString())) }, "render printed no report")
             val diff = capture { Cli.main(arrayOf("diff", a.toString(), b.toString())) }
             assertTrue("Diff          a (1 run) -> b (1 run)" in diff, diff)
-            assertTrue(ONE_RUN_DIFF_CAREFUL in diff, diff)
+            assertTrue("Runs: 1 in 'a', no interval" in diff && "Runs: 1 in 'b', no interval" in diff, diff)
         } finally {
             dir.toFile().deleteRecursively()
         }

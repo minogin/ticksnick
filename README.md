@@ -233,7 +233,7 @@ Profiler.tag("threads", pool.size)   // known later, or from Java
 
 A report prints both under its warnings. TickSnick warns but does not refuse: when the runs of a
 folder differ in a tag or in the setup, the report lists the values, `warmups: 1, 2; batches: 3-10`,
-and one `CAREFUL` line names them. A diff shows what differs between its two profiles, and warns only
+and one warning names them. A diff shows what differs between its two profiles, and warns only
 when one of them is mixed. Tags and setup are saved in the `.tsr` file, so nothing secret belongs in a
 tag.
 

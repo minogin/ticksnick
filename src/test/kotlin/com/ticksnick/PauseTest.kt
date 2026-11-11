@@ -217,13 +217,16 @@ class PauseTest {
         confirmed: Long = if (gc < 0) 0 else minOf(paused, gc), measured: Boolean = true,
     ) = Pauses(measured, paused, count, longest, gc, confirmed)
 
+    /** The warnings of [this], as printed, for a spinning sampler over a minute of wall time. */
+    private fun Pauses.said(wait: WaitStrategy = WaitStrategy.SPIN): List<String> = careful(wait, 60 * second).map { it.text() }
+
     /** The table heading says "over N s active", so the word has to be on the page whatever happened. */
     @Test
     fun `wall time is split on a run with no pause too`() {
         for (quiet in listOf(Pauses.NONE, pause(0, 0, 0, gc = 0))) {
             val line = wallOf(quiet, 60 * second)
             assertTrue("60.0s = 60.0s active + 0 paused" in line, line)
-            assertTrue(quiet.careful().isEmpty(), quiet.careful().toString())
+            assertTrue(quiet.said().isEmpty(), quiet.said().toString())
         }
     }
 
@@ -233,13 +236,13 @@ class PauseTest {
         val p = pause(5_780_000_000, 22, 1_850_000_000, gc = 5_790_000_000)
         val line = wallOf(p, 66 * second)
         assertTrue("66.0s = 60.2s active + 5.78s paused (8.76%) in 22 pauses, longest 1.85s" in line, line)
-        assertTrue(p.careful().isEmpty(), "a healthy split printed a warning: ${p.careful()}")
+        assertTrue(p.said().isEmpty(), "a healthy split printed a warning: ${p.said()}")
     }
 
     /** They are one quantity seen from two sides, so agreement needs no comment. */
     @Test
     fun `the two counts agreeing is not remarked on`() {
-        val careful = pause(5_750_000_000, 26, 1_815_000_000, gc = 5_720_000_000).careful()
+        val careful = pause(5_750_000_000, 26, 1_815_000_000, gc = 5_720_000_000).said()
         assertTrue(careful.isEmpty(), careful.toString())
     }
 
@@ -252,21 +255,19 @@ class PauseTest {
     fun `paused time the JVM did not count as collection stays in active time and is called out`() {
         val p = pause(5 * second, 10, 1 * second, gc = 1 * second)
         assertTrue("60.0s = 59.0s active + 1.00s paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
-        val careful = p.careful().single()
-        assertTrue("the sampler lost 4.00s the JVM did not count as GC" in careful, careful)
-        assertTrue("counted as active" in careful, careful)
+        assertEquals(listOf("Paused: 4.00s of pauses, 6.67% of the run, is counted as work in the times below"), p.said())
     }
 
     @Test
     fun `collection the sampler could not see is called out`() {
-        val gc = pause(1 * second, 10, 200 * ms, gc = 3 * second).careful().single()
-        assertTrue("more than the sampler saw" in gc, gc)
+        assertEquals(
+            listOf("Paused: 2.00s of pauses, 3.33% of the run, is counted as work in the times below"),
+            pause(1 * second, 10, 200 * ms, gc = 3 * second).said(),
+        )
         // And when every pause was under a step, so the sampler saw none at all.
         val none = pause(0, 0, 0, gc = 300 * ms)
         assertTrue("+ 0 paused" in wallOf(none, 60 * second), wallOf(none, 60 * second))
-        val careful = none.careful().single()
-        assertTrue("300ms" in careful, careful)
-        assertTrue("inside active" in careful, careful)
+        assertEquals(listOf("Paused: 300ms of pauses, 0.500% of the run, is counted as work in the times below"), none.said())
     }
 
     /** Never a number where the evidence is missing: the same rule the bound follows. */
@@ -274,11 +275,7 @@ class PauseTest {
     fun `an unreadable collector subtracts nothing and says what the sampler saw`() {
         val p = pause(5 * second, 10, 1 * second, gc = -1)
         assertTrue("60.0s = 60.0s active + 0 paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
-        val careful = p.careful().single()
-        assertTrue("5.00s in 10 pauses" in careful, careful)
-        assertTrue("not confirmed" in careful, careful)
-        assertTrue("cannot be read" in careful, careful)
-        assertFalse("by the JVM's own count" in careful, careful)
+        assertEquals(listOf("Paused: 5.00s of pauses, 8.33% of the run, is counted as work in the times below"), p.said())
     }
 
     /** A parked sampler is late on every tick, and none of that lateness is anybody's pause. */
@@ -286,9 +283,13 @@ class PauseTest {
     fun `a sampler that was not spinning claims no pauses`() {
         val p = pause(9 * second, 9_000, 20 * ms, gc = -1, measured = false)
         assertTrue("+ 0 paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
-        val careful = p.careful().single()
-        assertTrue("not measured" in careful, careful)
-        assertFalse("9.00s" in careful, careful)
+        assertEquals(
+            listOf(
+                "Paused: not measured with `wait = PARK`, so GC pauses are inside the times below - " +
+                        "`wait = SPIN` measures them but keeps a core busy"
+            ),
+            p.said(WaitStrategy.PARK),
+        )
     }
 
     // ---------------------------------------------------------------- time on CPU, of run time
@@ -315,7 +316,7 @@ class PauseTest {
         assertTrue("98.90% of active time" in line, line)
         assertFalse("wall time" in line, line)
         // 1.11 pp is over the point the report keeps quiet below, so this run gets the line.
-        val careful = d.careful(60_220_000_000, 0).single()
+        val careful = d.careful(60_220_000_000, 0).single().text()
         assertTrue("off by up to 1.11pp" in careful, careful)
     }
 

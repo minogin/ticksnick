@@ -61,66 +61,30 @@ internal class ClockTrace internal constructor(
     }
 
     /**
-     * A `Careful` line when the clock moved during the run or could not be read; none on a steady
-     * clock, which is the healthy case and says nothing.
+     * A warning when the clock moved during the run or could not be read; none on a steady clock,
+     * which is the healthy case and says nothing.
      *
      * "Moved" is the spread between the 10th and the 90th percentile of the samples, not the minimum
-     * and the maximum: one second caught in a collection or a page fault is not a trend.
+     * and the maximum: one second caught in a collection or a page fault is not a trend. Whether it
+     * rose or fell is not said: it changes nothing the reader does.
      */
-    fun careful(): List<String> {
-        notMeasured?.let { return listOf("clock: not measured${sym.dash}$it") }
+    fun careful(): List<Warning> {
+        notMeasured?.let { return listOf(Warning(Kind.CLOCK_NOT_MEASURED, words(it))) }
         val v = valid
         if (v.size < MIN_CLOCK_SAMPLES) return emptyList()
         val sorted = v.sorted()
         val low = quantile(sorted, 0.1)
         val high = quantile(sorted, 0.9)
         if (high <= low * (1 + CLOCK_MOVED)) return emptyList()
-        // Up to five samples at each end, and never more than a third of them, so that on a short run
-        // the start and the end are not the same seconds.
-        val ends = (v.size / 3).coerceIn(1, MIN_CLOCK_SAMPLES)
-        val start = median(v.take(ends))
-        val end = median(v.takeLast(ends))
-        return listOf(
-            "clock: moved during the run, ${format(start)}${unit()} at the start, ${format(end)} at the end, " +
-                    "${rangeText(listOf(low, high), this::format)} for 80% of it${sym.dash}times and per-call costs drift with it; shares hold"
-        )
+        return listOf(Warning(Kind.CLOCK_MOVED, words(""), Gap.Range(low, high, this::format), words("during the run")))
     }
-
-    private fun unit(): String = if (ofBase) " of base" else ""
 
     internal companion object {
         /** A run with no clock in it, or built by hand: nothing to say. */
         val NOT_RECORDED = ClockTrace(DoubleArray(0), ofBase = true, notMeasured = null)
 
-        /**
-         * A `Clock` line for the diff, and a `Careful` line under it when the two runs ran at clocks
-         * further apart than [CLOCK_MOVED]: a time difference that size may be the machine, not the
-         * code. Empty when neither side recorded a clock.
-         */
-        fun diffLines(before: ClockTrace, after: ClockTrace): List<String> {
-            val a = before.mean
-            val b = after.mean
-            if (a.isNaN() && b.isNaN()) return emptyList()
-            val unit = (if (!b.isNaN()) after else before).unit()
-            return listOf(row("Clock", "${before.format(a)} ${sym.arrow} ${after.format(b)}$unit, the mean of each run"))
-        }
-
-        /** The warning when the two runs' clocks are more than [CLOCK_MOVED] apart, for the diff's `CAREFUL` section. */
-        fun diffCareful(before: ClockTrace, after: ClockTrace): List<String> {
-            val a = before.mean
-            val b = after.mean
-            if (a.isNaN() || b.isNaN() || before.ofBase != after.ofBase || max(a, b) <= min(a, b) * (1 + CLOCK_MOVED)) return emptyList()
-            return listOf(
-                String.format(
-                    Locale.ROOT, "clock: %s ${sym.arrow} %s%s between the runs${sym.dash}up to %.2f${sym.times} of a time difference is the " +
-                            "machine, not the code; shares hold", before.format(a), after.format(b), after.unit(), max(a, b) / min(a, b)
-                )
-            )
-        }
-
         private fun quantile(sorted: List<Double>, q: Double): Double = sorted[Math.round((sorted.size - 1) * q).toInt()]
 
-        private fun median(v: List<Double>): Double = quantile(v.sorted(), 0.5)
     }
 }
 

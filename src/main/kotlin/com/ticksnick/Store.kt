@@ -134,6 +134,19 @@ internal object RunStore {
             text("setup.$i.value", value)
         }
         text("setup.jvm", p.setup.jvm)
+        // The names behind the counts of labels left open, for their warnings. Optional: a run saved
+        // without them says only how many.
+        fun names(key: String, names: Map<String, Int>) {
+            if (names.isEmpty()) return
+            line(key, names.size)
+            names.entries.forEachIndexed { i, (name, n) ->
+                text("$key.$i.name", name)
+                text("$key.$i.value", n.toString())
+            }
+        }
+        names("leakedNames", p.leakedNames.associateWith { 1 })
+        names("openAtEndNames", p.openAtEndNames.associateWith { 1 })
+        names("openContextsAtEndByName", p.openContextsAtEndByName)
 
         line("operations", p.operations.size)
         p.operations.forEachIndexed { i, o ->
@@ -364,6 +377,9 @@ internal object RunStore {
             tags = pairs("tags", "tag"),
             bodyNanos = m["body.nanos"]?.toDouble() ?: Double.NaN,
             nanoTimeBodies = m["body.nanoTimeBodies"]?.toDouble() ?: Double.NaN,
+            leakedNames = pairs("leakedNames", "leakedNames").keys.toList(),
+            openAtEndNames = pairs("openAtEndNames", "openAtEndNames").keys.toList(),
+            openContextsAtEndByName = pairs("openContextsAtEndByName", "openContextsAtEndByName").mapValues { it.value.toIntOrNull() ?: 0 },
         )
     }
 

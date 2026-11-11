@@ -13,12 +13,6 @@ import kotlin.math.min
 internal const val FULL_PROCESSORS = 0.9
 
 /**
- * The share of the waiting `Runnable` hides that has to be on one side - full seconds or spare
- * ones - before the Careful line names that side alone as the cause.
- */
-internal const val ONE_CAUSE = 0.8
-
-/**
  * How often the profiled threads' CPU clocks are read for the `Cores` line: a thread that starts or
  * exits between two windows loses at most this much of its CPU to "GC" instead of a whole window.
  * A read per thread, about a microsecond, ten times a second.
@@ -878,74 +872,34 @@ internal class Duty internal constructor(
      * @param reclaimedSlots threads that exited during the run. The other way to get no window:
      *   the walk reads -1 from a dead thread's CPU clock, so it counts nothing.
      */
-    fun careful(activeNanos: Long, reclaimedSlots: Int): List<String> {
-        val out = ArrayList<String>()
-        if (reason != null) out += "Runnable: unchecked against the CPU clock, $reason${sym.dash}$UNCHECKED"
-        // Three ways to finish with no window, and the message names the one that happened. Telling
-        // a 1.7 s run it was shorter than a 1 s window would contradict the report's own numbers,
-        // which is worse than saying nothing.
-        else if (!available) out += "Runnable: unchecked against the CPU clock, " + when {
-            activeNanos in 1..<windowNanos -> String.format(
-                Locale.ROOT, "the %.1fs run is shorter than the %.3fs check window",
-                activeNanos / 1e9, windowNanos / 1e9
-            )
-            // The clock reads -1 for a thread that has exited, so a walk that finds only dead
-            // threads counts nothing - and the last walk happens at stop(), which is when
-            // short-lived workers have already finished.
-            reclaimedSlots > 0 -> String.format(
-                Locale.ROOT, "no window closed, %d of the threads being measured exited before the run ended",
-                reclaimedSlots
-            )
-            else -> String.format(Locale.ROOT, "no window closed in the %.1fs run", activeNanos / 1e9)
-        } + "${sym.dash}$UNCHECKED"
-        // The bound has not found anything; it has run out of evidence, and that is a different
-        // sentence. It also names the fix, which is a label around the waiting rather than only
-        // around the work.
-        else if (unbounded) out += String.format(
-            Locale.ROOT,
-            "Runnable: unchecked, %.1f%% of thread-time was off the CPU while reading runnable (a native " +
-                    "call, an event loop in a poll, or the scheduler) and operations cover %.1f%% of these " +
-                    "threads, so all of it could be inside them${sym.dash}put a label around the waiting, not only the work",
-            invisibleOffCpu * 100, labelledFraction * 100
+    fun careful(activeNanos: Long, reclaimedSlots: Int): List<Warning> {
+        val out = ArrayList<Warning>()
+        if (reason != null) out += Warning(Kind.RUNNABLE_UNCHECKED, words("this JVM cannot measure CPU time per thread"))
+        // Two ways to finish with no window, and the reason names the one that happened: telling a
+        // 1.7 s run it was shorter than a 1 s window would contradict the report's own numbers.
+        else if (!available) out += Warning(
+            Kind.RUNNABLE_UNCHECKED,
+            words(
+                if (activeNanos in 1..<windowNanos) "the run is under ${duration(windowNanos.toDouble())}"
+                // The clock reads -1 for a thread that has exited, so a walk that finds only dead
+                // threads counts nothing - and the last walk is at stop(), when short-lived workers
+                // have already finished.
+                else "its threads ended within the first ${duration(windowNanos.toDouble())}"
+            ),
         )
-        // Said as what it means for the column a reader looks at, then the number behind it, then
-        // what to do: in the report's own words, with a remedy beside each cause.
-        // Broken into lines as a warning is, since it is four times the width of the others.
-        else if (runnableBoundPp > CAREFUL_PP) out += String.format(
-            Locale.ROOT,
-            "Thread-time%%: may be off by up to %spp as a share of CPU time${sym.dash}" +
-                    "only %s of the time inside labels read as Runnable is sure to have been on a CPU, the rest may have been waiting%n",
-            threeDigits(runnableBoundPp), percent(carefulDuty * 100)
-        ) + causeLine() + (if (carefulDuty < OCCUPANCY_ONLY)
-            "\nRead a share as where threads SIT, not where cycles GO, and do not add two up" else "")
-        if (anomalies > 0) out += "thread CPU clock: $anomalies readings went backwards${sym.dash}dropped"
-        return out
-    }
-
-    /**
-     * What the waiting `Runnable` hides most likely was, from the seconds it happened in: full
-     * processors mean threads waiting for a core, spare ones mean something else. The "use fewer
-     * threads" advice is only worth giving where it is measured, and a full second is measured,
-     * while a spare one cannot tell I/O from another program on the cores.
-     */
-    private fun causeLine(): String {
-        val all = hiddenWhenFull + hiddenWhenSpare
-        val full = if (all > 0) hiddenWhenFull / all else Double.NaN
-        val cores = if (processors > 0) "$processors processors" else "processors"
-        return when {
-            full.isNaN() -> "Likely causes: too many threads for the cores (use fewer),\n" +
-                    "or blocking I/O or native calls (label them, so their waiting is a row of its own)"
-            full >= ONE_CAUSE -> "The JVM's $cores were full when it happened: threads waited for a core.\n" +
-                    "Give the JVM more processors, or run fewer threads"
-            full <= 1 - ONE_CAUSE -> "The JVM had cores to spare when it happened, so it was not waiting for one:\n" +
-                    "blocking I/O or native calls (label them, so their waiting is a row of its own), or other programs on the same cores"
-            else -> String.format(
-                Locale.ROOT,
-                "%s of it when the JVM's %s were full${sym.dash}threads waiting for a core: more processors or fewer threads${sym.dash.trimEnd()}%n" +
-                        "and %s with cores to spare: blocking I/O, native calls (label them) or other programs on the same cores",
-                percent(full * 100), cores, percent((1 - full) * 100)
+        // The bound has run out of evidence: the waiting off the CPU could all be inside the labels.
+        else if (unbounded) out += Warning(Kind.RUNNABLE_OFF_CPU, figure(invisibleOffCpu, ::shareText), words(""))
+        // What it means for the column a reader looks at, and, where the seconds it happened in say
+        // which, the cause with its fix.
+        else if (runnableBoundPp > CAREFUL_PP) {
+            val all = hiddenWhenFull + hiddenWhenSpare
+            val full = if (all > 0) hiddenWhenFull / all else Double.NaN
+            out += Warning(
+                Kind.THREAD_TIME_BOUND, figure(runnableBoundPp) { threeDigits(it) + "pp" },
+                figure(full, ::shareText), figure(if (full.isNaN()) Double.NaN else 1 - full, ::shareText),
             )
         }
+        return out
     }
 
     companion object {
@@ -956,16 +910,6 @@ internal class Duty internal constructor(
          * the bound itself is printed above this line, and this line only names it.
          */
         const val RANKING_SAFE = 0.95
-        const val OCCUPANCY_ONLY = 0.75
-
-        /**
-         * What the row is about, printed only when there is no number to say it instead.
-         *
-         * Both failure paths share it because a reader who hits either one is in the same position:
-         * they have been told a measurement is missing without being told what it would have meant.
-         */
-        private const val UNCHECKED =
-            "read Runnable as an upper bound on work, with nothing saying how much of it was waiting"
 
         /**
          * Below this bound nothing is said: a point of any share is under the gap between any two

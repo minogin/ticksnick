@@ -47,11 +47,11 @@ class RunTest {
             }
         }
         // The message builders, each of which is a path the render only reaches under a fault.
-        check("tooSmall", tooSmallMessage("op", 1_000, 25.0))
-        check("coarseTooSmall", coarseTooSmallMessage("req", 100, 200.0, 800.0, 40.0, 800.0))
+        // Every kind of warning, its gaps filled with words, ASCII outside them.
+        for (kind in Kind.entries) check(kind.name, kind.text(List(6) { "x" }))
         check("leak", leakMessage("op", "worker-1"))
         check("mismatch", mismatchMessage("a", "b"))
-        check("stale", staleContextMessage("req", 997, 0.42))
+        check("stale", staleContextMessage("req", 0.42))
         // And a report carrying as many of the optional blocks at once as one can.
         check("render", loadedRun().render())
         check("render(legend)", loadedRun().render(legend = true))
@@ -234,7 +234,7 @@ class RunTest {
         assertEquals(listOf(tiny), r.tooSmall())
         val text = r.render()
         assertTrue(text.contains("tiny"), "the below-floor label was not named")
-        assertTrue(text.contains("floor"), "no floor warning in the report")
+        assertTrue(text.contains("  `tiny`: its calls are under the recommended 50ns, so the label is a visible part of their time"), "no floor warning in the report: $text")
         assertTrue(r.ok, "a below-floor label invalidated the report")
     }
 
@@ -249,8 +249,8 @@ class RunTest {
     fun `an unbounded duty explains itself instead of printing a number`() {
         val d = duty(labelled = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
         assertTrue(d.unbounded, "the event-loop regime is no longer recognised as unbounded")
-        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
-        assertTrue(lines.contains("unchecked") && lines.contains("label around the waiting"), "no diagnosis for an unbounded run")
+        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
+        assertTrue(lines.contains("was not on a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")
         assertFalse(lines.contains("may be off by"), "printed a bound it does not have")
     }
 
@@ -259,9 +259,9 @@ class RunTest {
     fun `a real bound is printed as a bound`() {
         val d = duty(labelled = 0.9846, aggregate = 0.6927, invisible = 0.014, labelledFraction = 0.595)
         assertFalse(d.unbounded)
-        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n")
+        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
         assertTrue(lines.contains("off by up to 1.56pp"), "the bound was not printed")
-        assertFalse(lines.contains("unchecked"), "printed the diagnosis over a real bound")
+        assertFalse(lines.contains("was not on a CPU"), "printed the diagnosis over a real bound")
         assertEquals(1.56, d.boundPp, 0.05, "the 1.57pp bound moved")
     }
 
@@ -283,7 +283,7 @@ class RunTest {
             "6 processors: profiled threads 2.94, the rest 2.40: GC 1.10 (0.60 in pauses), sampler 1.00, JIT 0.30",
             coresOf(d)
         )
-        val careful = d.careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single()
+        val careful = d.careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
         assertFalse("processors" in careful, "the cores line is the header's now, not the warning's: $careful")
         // A profile without the figures has no line.
         assertEquals(null, coresOf(duty()))
@@ -314,9 +314,8 @@ class RunTest {
      */
     @Test
     fun `the Careful number is the Runnable part's`() {
-        val line = dutyWith(runnable = 0.9).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single()
+        val line = dutyWith(runnable = 0.9).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
         assertTrue("off by up to 11.1pp" in line, line)
-        assertTrue("only 90.0% of the time inside labels read as Runnable" in line, line)
         assertTrue(dutyWith(runnable = 0.995).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).isEmpty(),
             "a Runnable part on a CPU 99.5% of the time printed a warning")
     }
@@ -341,32 +340,31 @@ class RunTest {
     }
 
     /**
-     * The Careful line names the cause from the seconds the hidden waiting happened in: full
-     * processors, threads waiting for a core; spare ones, something else; both, the split.
+     * The warning gives the cause from the seconds the hidden waiting happened in, always as the split:
+     * full processors, threads waiting for a core; spare ones, I/O, native calls or other programs.
+     * One wording, so it merges over runs; with nothing measured, no second line rather than a guess.
      */
     @Test
-    fun `the Careful line names the cause from full or spare seconds`() {
+    fun `the Thread-time warning gives the cause as the split of full and spare seconds`() {
         fun careful(full: Double, spare: Double) = Duty(
             labelledDuty = 0.5, runnableDuty = 0.588, invisibleOffCpu = 0.4, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 10, threads = 6,
             cpuNanos = 29_400_000_000, wallNanos = 60_000_000_000, minWindowDuty = 0.5, maxWindowDuty = 0.5,
             anomalies = 0, maxSampleNanos = 200_000, processors = 6,
             hiddenWhenFull = full, hiddenWhenSpare = spare,
-        ).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single()
+        ).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
 
-        val crowded = careful(full = 9_000.0, spare = 500.0)
-        assertTrue("6 processors were full when it happened: threads waited for a core" in crowded, crowded)
-        assertFalse("I/O" in crowded, "full seconds blamed I/O: $crowded")
+        val crowded = careful(full = 9_000.0, spare = 500.0).lines()
+        assertEquals(
+            "94.7% of it waited for a free core - run fewer threads; 5.26% waited in I/O, native calls or other programs - label the wait",
+            crowded[1],
+        )
 
-        val io = careful(full = 100.0, spare = 9_000.0)
-        assertTrue("cores to spare" in io && "I/O" in io, io)
-        assertFalse("fewer threads" in io, "spare seconds advised fewer threads: $io")
+        val both = careful(full = 5_000.0, spare = 5_000.0).lines()
+        assertTrue(both[1].startsWith("50.0% of it waited for a free core") && "; 50.0% waited in I/O" in both[1], both[1])
 
-        val both = careful(full = 5_000.0, spare = 5_000.0)
-        assertTrue("50.0% of it when the JVM's 6 processors were full" in both, both)
-
-        val unknown = careful(full = 0.0, spare = 0.0)
-        assertTrue("Likely causes" in unknown, "with nothing measured the line names both causes, as before: $unknown")
+        val unknown = careful(full = 0.0, spare = 0.0).lines()
+        assertEquals(1, unknown.size, "with nothing measured there is no cause line: $unknown")
     }
 
     /** Shares are bounded by the labelled duty, not the aggregate one. */
@@ -408,7 +406,17 @@ class RunTest {
             imbalances = 3, stateSampled = true,
         )
         assertTrue(r.ok, "a counted leak invalidated a non-strict report")
-        assertTrue(r.render().contains("labels: 3 were still open"), "the leak count was not printed")
+        // A run saved without the names still says how many.
+        assertTrue(r.render().contains("  3 labels: entered and never exited - an exception skipped the `exit`"), "the leak count was not printed")
+        val named = Run(
+            operations = listOf(stat("a", hits = 100, calls = 1000)),
+            idleHits = 0, ticks = 20_000, samplingSpanNanos = 20_000_000_000,
+            durationNanos = 20_000_000_000, threads = 8, duty = duty(),
+            imbalances = 3, stateSampled = true, leakedNames = listOf("parse", "visit"), openAtEnd = 1, openAtEndNames = listOf("merge"),
+        )
+        val text = named.render()
+        assertTrue(text.contains("  `parse`, `visit`: entered and never exited - "), text)
+        assertTrue(text.contains("  `merge`: entered and never exited by `stop()` - "), text)
     }
 
     // ---------------------------------------------------------------- formatting

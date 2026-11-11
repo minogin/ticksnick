@@ -802,6 +802,13 @@ object Profiler {
         return n
     }
 
+    /** [openContexts] by coarse label, each with how many threads are inside one. */
+    internal fun openContextsByName(): Map<String, Int> {
+        val byName = java.util.TreeMap<String, Int>()
+        forEachSlot { s -> s.context?.let { byName.merge(coarseNameOf(it.type), 1, Int::plus) } }
+        return byName
+    }
+
     /** The calling thread's slot, registering it on first call. */
     @PublishedApi
     internal fun slot(): OpSlot = local.get()
@@ -938,6 +945,7 @@ object Profiler {
     /** One closing call that did not match what was open. Counted with the leaks, and fatal under strict. */
     private fun mismatch(closed: String, open: String) {
         imbalances.incrementAndGet()
+        leakedNames += open
         sampler?.let { if (it.strict) it.fail(mismatchMessage(closed, open)) }
     }
 
@@ -969,6 +977,7 @@ object Profiler {
             else -> return true
         }
         imbalances.incrementAndGet()
+        leakedNames += leaked
         s.flushCounts(ctx)
         s.setContextOpaque(null)
         s.depth = 0
@@ -1000,6 +1009,9 @@ object Profiler {
      */
     private var imbalancesAtStart = 0
 
+    /** The labels behind [imbalances] in the current session, by name, for its warning. Cleared when a session begins. */
+    private val leakedNames: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
     /** [untrackedSlots] as it stood when the current session began. See [Run.untrackedSlots]. */
     private var untrackedAtStart = 0
 
@@ -1011,6 +1023,13 @@ object Profiler {
         var n = 0
         forEachSlot { if (it.depth > 0) n++ }
         return n
+    }
+
+    /** The labels [openSpans] counts, by name. */
+    internal fun openSpanNames(): List<String> {
+        val names = java.util.TreeSet<String>()
+        forEachSlot { if (it.depth > 0) names += it.getOpaque().let { id -> if (id >= 0) nameOf(id) else "an unnamed label" } }
+        return names.toList()
     }
 
     /**
@@ -1183,6 +1202,7 @@ object Profiler {
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()
+        leakedNames.clear()
         untrackedAtStart = untrackedSlots()
         reclaimedAtStart = reclaimedSlots()
         sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, strict = strict, sampleState = sampleState)
@@ -1298,6 +1318,9 @@ object Profiler {
             clock = clockTrace,
             bodyNanos = bodyTrace.nanos,
             nanoTimeBodies = bodyTrace.nanoTimeBodies,
+            leakedNames = leakedNames.sorted(),
+            openAtEndNames = openSpanNames(),
+            openContextsAtEndByName = openContextsByName(),
             wait = s.wait,
             askedStepNanos = s.stepNanos,
             allocations = allocations,

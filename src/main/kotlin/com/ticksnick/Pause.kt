@@ -193,44 +193,30 @@ internal class Pauses internal constructor(
     fun confirmedPausedIn(spanNanos: Long): Long = min(confirmedNanos, spanNanos).coerceAtLeast(0)
 
     /**
-     * What is wrong with the split, if anything. Each is a `Careful` line under the header, and a
-     * healthy run has none: a disagreement between the sampler and the JVM is the one case where
-     * the first line's figure is not the whole story.
+     * What is wrong with the split, if anything, and a healthy run has none: a disagreement between
+     * the sampler and the JVM is the one case where the first line's figure is not the whole story.
+     * To a user every case means one thing, pause time inside the operations' times, so there are two
+     * kinds: the one with a fix, a sampler that does not spin ([wait]), and the rest, with how much
+     * of [wallNanos] it is.
      */
-    fun careful(): List<String> {
-        if (!measured) return listOf(
-            "pauses: not measured${sym.dash}a parked sampler is late on every tick, so none of them reads as a pause" +
-                    (if (gcNanos > 0) "; the JVM counts ${duration(gcNanos.toDouble())} of GC, inside active"
-                    else "")
+    fun careful(wait: WaitStrategy?, wallNanos: Long): List<Warning> {
+        if (!measured) return listOf(Warning(Kind.PAUSES_NOT_MEASURED, words((wait ?: WaitStrategy.PARK).name)))
+        fun inTimes(nanos: Long) = listOf(
+            Warning(
+                Kind.PAUSES_IN_TIMES, figure(nanos.toDouble(), ::duration),
+                figure(if (wallNanos > 0) nanos.toDouble() / wallNanos else Double.NaN, ::shareText),
+            )
         )
-        if (pauses == 0L) {
-            // Collections the sampler could not see, each shorter than a step. Real pauses, and left
-            // in active time all the same: nothing here measured them but the JVM's word for it.
-            return if (gcNanos > 0) listOf(
-                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC in pauses under one tick${sym.dash}the " +
-                        "sampler cannot see them, so they are inside active"
-            ) else emptyList()
-        }
-        val seen = String.format(
-            Locale.ROOT, "%s in %s", duration(pausedNanos.toDouble()), Run.plural(pauses, "pause")
-        )
-        if (gcNanos < 0) return listOf(
-            "pauses: $seen seen by the sampler, not confirmed${sym.dash}this JVM's collectors cannot be read, so counted as active"
-        )
+        // Collections the sampler could not see, each shorter than a step: real pauses, left in active
+        // time all the same, since nothing here measured them but the JVM's word for it.
+        if (pauses == 0L) return if (gcNanos > 0) inTimes(gcNanos) else emptyList()
+        // Pauses the sampler saw and this JVM's collectors cannot confirm.
+        if (gcNanos < 0) return inTimes(pausedNanos)
         return when {
             // The two are the same quantity measured from opposite sides, and they agree to a
             // percent when the pauses were collections. Said only when they do not.
-            pausedNanos - gcNanos > slack(pausedNanos) -> listOf(
-                String.format(
-                    Locale.ROOT, "pauses: the sampler lost %s the JVM did not count as GC${sym.dash}another kind of pause, or " +
-                            "the sampler kept off its core; counted as active",
-                    duration((pausedNanos - gcNanos).toDouble())
-                )
-            )
-            gcNanos - pausedNanos > slack(gcNanos) -> listOf(
-                "pauses: the JVM counts ${duration(gcNanos.toDouble())} of GC, more than the sampler saw${sym.dash}pauses under " +
-                        "one tick are not resolved, and are inside active"
-            )
+            pausedNanos - gcNanos > slack(pausedNanos) -> inTimes(pausedNanos - gcNanos)
+            gcNanos - pausedNanos > slack(gcNanos) -> inTimes(gcNanos - pausedNanos)
             else -> emptyList()
         }
     }

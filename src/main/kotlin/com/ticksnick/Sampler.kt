@@ -945,7 +945,7 @@ internal class Sampler(
         for (t in 0 until MAX_COARSE_TYPES) {
             if (worst < 0 || coarseStaleHits[t] > coarseStaleHits[worst]) worst = t
         }
-        fail(staleContextMessage(Profiler.coarseNameOf(worst), staleContextHits, share))
+        fail(staleContextMessage(Profiler.coarseNameOf(worst), share))
     }
 
     /**

@@ -363,6 +363,12 @@ class RunTest {
         val both = careful(full = 5_000.0, spare = 5_000.0).lines()
         assertTrue(both[1].startsWith("50.0% of it waited for a free core") && "; 50.0% waited in I/O" in both[1], both[1])
 
+        assertEquals("All of it waited for a free core - run fewer threads", careful(full = 9_000.0, spare = 0.0).lines()[1])
+        assertEquals(
+            "All of it waited in I/O, native calls or other programs - label the wait",
+            careful(full = 0.0, spare = 500.0).lines()[1],
+        )
+
         val unknown = careful(full = 0.0, spare = 0.0).lines()
         assertEquals(1, unknown.size, "with nothing measured there is no cause line: $unknown")
     }

@@ -8,6 +8,17 @@ import java.nio.file.Path
 internal const val MAX_VALUES_LISTED = 3
 
 /**
+ * The collector, as `-XX:+Use...GC` names it, from the name of one of its beans. Parallel's and
+ * Serial's beans have names of their own, `PS Scavenge` and `Copy`; the others start with the
+ * collector's: `G1 Young Generation` is G1, `ZGC Minor Cycles` ZGC, `Shenandoah Pauses` Shenandoah.
+ */
+internal fun collectorName(bean: String): String = when (bean) {
+    "PS Scavenge", "PS MarkSweep" -> "Parallel"
+    "Copy", "MarkSweepCompact" -> "Serial"
+    else -> bean.substringBefore(' ')
+}
+
+/**
  * What a run can say by itself about how and where it ran, read at `start()`. A value is compared
  * between the runs of a folder, so it has to stay the same from one run to the next when nothing changed.
  *
@@ -35,8 +46,7 @@ internal class Setup(val facts: Map<String, String>, val jvm: String?) {
             fact("CPU", cpuModel())
             fact("Processors", Runtime.getRuntime().availableProcessors().toString())
             fact("Heap", bytes(Runtime.getRuntime().maxMemory().toDouble()))
-            // The first word: `G1 Young Generation` is G1, `ZGC Cycles` is ZGC.
-            fact("GC", ManagementFactory.getGarbageCollectorMXBeans().firstOrNull()?.name?.substringBefore(' '))
+            fact("GC", ManagementFactory.getGarbageCollectorMXBeans().firstOrNull()?.name?.let(::collectorName))
             fact("Flags", runtime.inputArguments.filter { it.startsWith("-X") }.joinToString(" "))
             return Setup(facts, "${runtime.pid}@${runtime.startTime}")
         }

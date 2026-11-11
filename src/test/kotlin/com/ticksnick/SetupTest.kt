@@ -23,6 +23,17 @@ class SetupTest {
         assertEquals("a, b, c and 1 more", valuesOf(listOf("a", "b", "c", "d")))
     }
 
+    /** The names a JVM gives its collectors' beans, each as its `-XX:+Use...GC` flag names it. */
+    @Test
+    fun `the collector is named as its flag names it`() {
+        assertEquals("G1", collectorName("G1 Young Generation"))
+        assertEquals("Parallel", collectorName("PS Scavenge"))
+        assertEquals("Serial", collectorName("Copy"))
+        assertEquals("ZGC", collectorName("ZGC Cycles"))
+        assertEquals("ZGC", collectorName("ZGC Minor Cycles"))
+        assertEquals("Shenandoah", collectorName("Shenandoah Pauses"))
+    }
+
     @Test
     fun `a line gives every name, and a run without one reads as a dash`() {
         val runs = listOf(mapOf("warmups" to "1", "batches" to "3"), mapOf("warmups" to "2", "batches" to "3"), mapOf("warmups" to "2"))

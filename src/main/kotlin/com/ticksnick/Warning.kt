@@ -69,10 +69,17 @@ internal enum class Kind(val text: (List<String>) -> String) {
         "Runnable: ${g[0]} of it inside labels was not on a CPU${if (g[1].isEmpty()) "" else ", mostly under ${g[1]}"}${sym.dash}" +
                 "a thread waiting in a native call, such as a socket read, shows as Runnable; label the call to give the wait its own row"
     }),
+    // The cause line: both causes with their shares, or the one alone, a 0% cause having nothing to do.
     THREAD_TIME_BOUND({ g ->
-        "Thread-time%: may be off by up to ${g[0]}${sym.dash}some Runnable time inside labels may have been waiting" +
-                if (g[1].isEmpty()) "" else "\n${g[1]} of it waited for a free core${sym.dash}run fewer threads; " +
-                        "${g[2]} waited in I/O, native calls or other programs${sym.dash}label the wait"
+        val none = shareText(0.0)
+        val core = "waited for a free core${sym.dash}run fewer threads"
+        val io = "waited in I/O, native calls or other programs${sym.dash}label the wait"
+        "Thread-time%: may be off by up to ${g[0]}${sym.dash}some Runnable time inside labels may have been waiting" + when {
+            g[1].isEmpty() -> ""
+            g[2] == none -> "\nAll of it $core"
+            g[1] == none -> "\nAll of it $io"
+            else -> "\n${g[1]} of it $core; ${g[2]} $io"
+        }
     }),
     CLOCK_NOT_MEASURED({ g -> "CPU clock: not measured (${g[0]})${sym.dash}times may drift unseen; shares hold" }),
     CLOCK_MOVED({ g -> "CPU clock${g[0]}: ran at ${g[1]} ${g[2]}${sym.dash}times drift with it, shares hold; turbo off holds it still" }),

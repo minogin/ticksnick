@@ -546,7 +546,7 @@ object Profiler {
     private var sampler: Sampler? = null
     /** This session's number if it counts allocated bytes, else 0. Read at every coarse boundary. */
     @Volatile
-    @JvmField
+    @JvmField @field:JvmSynthetic
     internal var allocationSession = 0
 
     /** What this session read about the JVM at [start]. */
@@ -560,7 +560,7 @@ object Profiler {
     private var allocationsMissing = false
 
     /** Whether this JVM can report allocated bytes. A field, so that a test can be a JVM that cannot. */
-    @JvmField
+    @JvmField @field:JvmSynthetic
     internal var allocationsAvailable = AllocationClock.available
 
     private var startedAt: Long = 0

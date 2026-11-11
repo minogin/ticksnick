@@ -50,20 +50,20 @@ private const val FIRST_EXACT = 4
  */
 class CoarseContext @PublishedApi internal constructor(
     /** Which coarse operation this is an execution of. */
-    @JvmField @PublishedApi internal val type: Int,
+    @JvmField @field:JvmSynthetic @PublishedApi internal val type: Int,
     /** The execution this one is nested inside, or null. The stack, as a chain of few long-lived objects. */
-    @JvmField @PublishedApi internal val parent: CoarseContext?,
+    @JvmField @field:JvmSynthetic @PublishedApi internal val parent: CoarseContext?,
     /** `System.nanoTime()` at entry. Half of the only exactly-measured quantity in the report. */
-    @JvmField @PublishedApi internal val startNanos: Long,
+    @JvmField @field:JvmSynthetic @PublishedApi internal val startNanos: Long,
     /**
      * Where this execution sits in the opening thread's calling-context tree, or null for a
      * context made outside the hook. Set at entry so that the sampler credits the node with one
      * read and exit records the span into it with none. See [CoarsePath].
      */
-    @JvmField internal val path: CoarsePath? = null,
+    @JvmField @field:JvmSynthetic internal val path: CoarsePath? = null,
 ) {
     /** How many ancestors this context has. Kept so the sampler's walk is bounded without counting. */
-    @JvmField
+    @JvmField @field:JvmSynthetic
     internal val depth: Int = if (parent == null) 0 else parent.depth + 1
 
     /**
@@ -75,14 +75,14 @@ class CoarseContext @PublishedApi internal constructor(
      * will want again at exit — one miss per instance per tick, against an object that already cost
      * an allocation. See [Sampler].
      */
-    @JvmField
+    @JvmField @field:JvmSynthetic
     internal var tickStamp: Long = -1L
 
     /**
      * As [tickStamp], for the count per path rather than per type: [tickStamp] is set only for the
      * first context of a type in a chain, so a type nested in itself would be counted once.
      */
-    @JvmField
+    @JvmField @field:JvmSynthetic
     internal var nodeStamp: Long = -1L
 
     /**
@@ -101,7 +101,7 @@ class CoarseContext @PublishedApi internal constructor(
      * per coarse execution. A read a few nanoseconds stale is the same bargain every other field in
      * this design makes.
      */
-    @JvmField
+    @JvmField @field:JvmSynthetic
     internal var closed: Boolean = false
 
     internal companion object {

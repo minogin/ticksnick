@@ -51,7 +51,7 @@ class ClockTest {
         val moved = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).careful()
         assertEquals(1, moved.size)
         assertEquals(
-            "CPU clock: moved 135%..205% during the run - times drift with it, shares hold; turbo off holds it still",
+            "CPU clock: ran at 135%..205% during the run - times drift with it, shares hold; turbo off holds it still",
             moved[0].text(),
         )
         // One second caught in a collection is not a trend.
@@ -71,7 +71,7 @@ class ClockTest {
         val a = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).careful()
         val b = report(215.0, 216.0, 214.0, 215.0, 215.0, 150.0, 140.0, 140.0, 141.0, 139.0, 140.0).careful()
         val merged = mergeWarnings(listOf(a, b)).single().second
-        assertTrue(merged.startsWith("CPU clock: moved 135%..215% during the run") && "(2 of 2 runs)" in merged, merged)
+        assertTrue(merged.startsWith("CPU clock: ran at 135%..215% during the run") && "(2 of 2 runs)" in merged, merged)
     }
 
     @Test

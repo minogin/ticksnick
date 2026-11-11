@@ -177,7 +177,7 @@ internal fun plusMinus(e: Estimate): String {
  * One run is one JVM, and one JVM cannot say how far its own numbers would move in the next one:
  * the clock, the heat, the heap layout, the JIT's choices. That is what a number for a report needs,
  * and the same program can move by 20% from one JVM to the next. A profile of one run renders with a
- * `CAREFUL` line saying its times have no interval.
+ * warning saying its times have no interval.
  *
  * Coarse rows are matched by path and fine rows by name, as in [ProfileDiff]. A row missing from
  * some runs says in how many it was, and its figures are over those.
@@ -206,7 +206,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     internal fun runName(i: Int): String = "$name/${files[i].fileName}"
 
     /**
-     * A profile of one run has a `CAREFUL` line on its times: a run can be faster or slower as a whole by
+     * A profile of one run has a warning on its times: a run can be faster or slower as a whole by
      * 20-30% from one JVM to the next, while each row's share of its parent holds within a couple of
      * points. So the shares of one run can be worked from, and its times cannot - which is what the
      * line says, every time, rather than refusing the first look.
@@ -305,7 +305,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * TickSnick call, see [Logo].
      *
      * @param legend every column explained, at the bottom. See [Run.renderLegend].
-     * @param careful the warnings, in a `CAREFUL` section: before any number, see [carefulBlock].
+     * @param careful the warnings, in the `WARNINGS` section: before any number, see [carefulBlock].
      */
     internal fun report(legend: Boolean, careful: Warnings): String = buildString {
         append(failedBanner())

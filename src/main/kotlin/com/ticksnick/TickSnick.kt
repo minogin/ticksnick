@@ -7,7 +7,7 @@ import java.nio.file.Path
  *
  * **A folder is the only thing read**, as it is the only thing written: one folder per profile,
  * every file in it one run. Choosing which runs count is done on the folder - a run not to count is
- * moved out - and not in the tool. One run renders too, with a `CAREFUL` line saying its times have
+ * moved out - and not in the tool. One run renders too, with a warning saying its times have
  * no interval.
  */
 object TickSnick {

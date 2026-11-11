@@ -41,9 +41,9 @@ The common ones:
 
 - `Runs: 1 in 'naive', no interval` - one JVM cannot say how much the next one will differ. Save
   more runs into the same folder.
-- `CPU clock: moved 140%..230% during the run` (or `across the runs`) - the CPU's frequency changed, so
+- `CPU clock: ran at 140%..230% during the run` (or `across the runs`) - the CPU's frequency changed, so
   durations drift with it. Shares are not affected. Turbo off holds it still.
-- `The labels, mostly `visit`, may add up to P to the work inside them and W to the wall time` - every
+- ``The labels, mostly `visit`, may add up to P to the work inside them and W to the wall time`` - every
   fine call and coarse execution at its budget, against the time the labels hold, and against the run's
   wall time: the most the wall can grow, where the labels sit on the run's critical path. Said above
   1% of the work. Fewer, larger labels cost less.

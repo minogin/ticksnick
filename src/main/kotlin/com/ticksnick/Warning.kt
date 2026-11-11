@@ -75,7 +75,7 @@ internal enum class Kind(val text: (List<String>) -> String) {
                         "${g[2]} waited in I/O, native calls or other programs${sym.dash}label the wait"
     }),
     CLOCK_NOT_MEASURED({ g -> "CPU clock: not measured (${g[0]})${sym.dash}times may drift unseen; shares hold" }),
-    CLOCK_MOVED({ g -> "CPU clock${g[0]}: moved ${g[1]} ${g[2]}${sym.dash}times drift with it, shares hold; turbo off holds it still" }),
+    CLOCK_MOVED({ g -> "CPU clock${g[0]}: ran at ${g[1]} ${g[2]}${sym.dash}times drift with it, shares hold; turbo off holds it still" }),
     HOOKS_COST({ g ->
         "The labels${if (g[0].isEmpty()) "" else ", mostly ${g[0]},"} may add up to ${g[1]} to the work inside them and ${g[2]} to the wall time${sym.dash}" +
                 "fewer, larger labels cost less"

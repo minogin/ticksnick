@@ -91,7 +91,7 @@ internal const val COARSE_MAX_RUN_SHARE = 0.01
 internal const val FINE_BUDGET_BODIES = 0.1
 
 /**
- * Above this share of the time inside labels, what the hooks may have cost the run is a `CAREFUL` line:
+ * Above this share of the time inside labels, what the hooks may have cost the run is a warning:
  * the same 1% as [COARSE_MAX_RUN_SHARE], for every hook together.
  */
 internal const val HOOKS_MAX_SHARE = 0.01
@@ -1614,7 +1614,7 @@ class Run internal constructor(
     ) else emptyList()
 
     /**
-     * Every warning of the report, for its `CAREFUL` section right under the first line (see
+     * Every warning of the report, for its `WARNINGS` section right under the first line (see
      * [carefulBlock]).
      *
      * All in one place and before any table, not where each is computed: printed there, a warning

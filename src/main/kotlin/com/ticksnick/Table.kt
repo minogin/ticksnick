@@ -140,7 +140,7 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
     val v = if (c.largest) f.values.max() else f.mean
     return when (c.form) {
         Form.COUNT -> if (f.agreed()) String.format(Locale.ROOT, "%,d", v.toLong()) else String.format(Locale.ROOT, "~%,.0f", v)
-        Form.PER_PARENT -> if (!f.agreed()) String.format(Locale.ROOT, "~%.1f", v) else perParentText(v).let { if (it == "1" && !own) "" else it }
+        Form.PER_PARENT -> if (!f.agreed()) "~" + perParentText(v) else perParentText(v).let { if (it == "1" && !own) "" else it }
         Form.WHOLE -> if (f.agreed()) v.toLong().toString() else String.format(Locale.ROOT, "~%.1f", v)
         Form.ONE_DECIMAL -> String.format(Locale.ROOT, "%.1f", v)
         Form.TWO_DECIMALS -> String.format(Locale.ROOT, "%.2f", v)
@@ -458,7 +458,9 @@ internal class DiffText(
         val scale = if (c.form == Form.RUNNABLE_WAITING) 100.0 else 1.0
         // A share that moved by less than it prints is no change, and `+0.0 pp` is not a sign to read.
         if (share && abs((a - b) * scale) < MIN_SHARE_CHANGE) return layout.cell(c, "=", "")
-        val value = if (share) String.format(Locale.ROOT, "%+.1fpp", (a - b) * scale) else signedPercent((a - b) / b)
+        // From 0 no fraction describes the change: blank, as for a row with nothing to compare.
+        if (!share && relativeChange(b, a).isNaN()) return layout.cell(c, "", "")
+        val value = if (share) String.format(Locale.ROOT, "%+.1fpp", (a - b) * scale) else signedPercent(relativeChange(b, a))
         if (!c.interval) return value
         val half = if (share) change.half * scale else change.relativeHalf * 100
         if (half.isNaN()) return layout.cell(c, value, "")

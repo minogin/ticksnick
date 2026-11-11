@@ -228,6 +228,27 @@ class RunTest {
 
     // ---------------------------------------------------------------- rendering invariants
 
+    /**
+     * A batch label, `op(x, times = n)`, runs its hook once for n calls, so it is judged per entry: the
+     * fix the floor warning recommends is not itself warned about. The same calls, one per entry, are.
+     */
+    @Test
+    fun `a batch label is judged per entry, not per call`() {
+        val batched = OperationStat(0, "lookup", 559, 31_497_063, 0, 0, 0, 0, 559, entries = 31_497)
+        assertEquals(emptyList(), report(listOf(batched)).tooSmall())
+        val single = stat("lookup", hits = 559, calls = 31_497_063)
+        assertEquals(listOf(single), report(listOf(single)).tooSmall())
+    }
+
+    /** `Per parent` never reads `0.0` for a rate that is not 0, and keeps its separators when the runs differ. */
+    @Test
+    fun `a small rate per parent keeps its digits`() {
+        assertEquals("0.000300", perParentText(3, 10_000))
+        assertEquals("2.5", perParentText(5, 2))
+        assertEquals("340", perParentText(1_020, 3))
+        assertEquals("30,890", perParentText(30_889.5))
+    }
+
     /** A label below the floor always produces a warning line, and never stops the run. */
     @Test
     fun `a below-floor label always warns`() {

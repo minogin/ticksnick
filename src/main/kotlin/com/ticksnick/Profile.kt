@@ -393,7 +393,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 P90 to timed { it.percentileNanos(0.90) },
                 P99 to timed { it.percentileNanos(0.99) },
                 MAX to timed { it.spanMaxNanos.toDouble() },
-                COARSE_WAITING to overAll { _, n -> waiting(n.inclusiveHits, n.runningInclusiveHits) },
+                COARSE_WAITING to overAll { i, n -> waiting(runs[i], n.inclusiveHits, n.runningInclusiveHits) },
             ),
             nodes.size,
             children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 } + listOfNotNull(folded),
@@ -401,7 +401,12 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
     }
 
-    private fun waiting(inclusive: Long, running: Long): Double = if (inclusive == 0L) 0.0 else (inclusive - running).toDouble() / inclusive
+    /**
+     * The waiting share of a row in [run]: NaN, left out of the mean, where the run did not read the
+     * thread state or caught the row in no sample. Neither is a measured 0% waiting.
+     */
+    private fun waiting(run: Run, inclusive: Long, running: Long): Double =
+        if (!run.stateSampled || inclusive == 0L) Double.NaN else (inclusive - running).toDouble() / inclusive
 
     /**
      * The fine labels in the own time of the row [m], in the runs [nodes]: those drawn in any run, and
@@ -429,7 +434,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     PARALLEL to Estimate(nodes.mapNotNull { of[it]?.parallel }.filter { it >= PARALLEL_SHOWN }),
                     WALL to anyOver0(ofTimed.map { of[it]?.wallNanos ?: 0.0 }),
                     PARENT_SHARE to anyOver0(ofTimed.map { i -> of[i]?.share?.takeIf { !it.isNaN() }?.times(100) ?: 0.0 }),
-                    MEAN to Estimate(nodes.mapNotNull { of[it]?.perCallNanos }.filter { !it.isNaN() }),
+                    // A run where the label was called and never sampled counts at 0, as in Wall.
+                    MEAN to Estimate(nodes.mapNotNull { i ->
+                        of[i]?.perCallNanos?.takeIf { !it.isNaN() } ?: calls.firstOrNull { it.first == i }?.second?.takeIf { it > 0 }?.let { 0.0 }
+                    }),
                 ),
                 nodes.count { of[it] != null },
                 own = true,
@@ -455,9 +463,21 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         return all.filter { it.name in drawn } to folded
     }
 
+    /** Each node under [roots] with no ancestor of its own name: a recursive operation's whole, once. */
+    private fun outermost(roots: List<CoarseNode>): List<CoarseNode> {
+        val out = ArrayList<CoarseNode>()
+        fun walk(n: CoarseNode, above: Set<String>) {
+            if (n.name !in above) out += n
+            n.children.forEach { walk(it, above + n.name) }
+        }
+        roots.forEach { walk(it, emptySet()) }
+        return out
+    }
+
     /** The coarse operations under more than one caller in any run: their figures over all callers. */
     private fun sharedCoarseRows(): List<Row> {
-        val nodes = runs.map { r -> r.coarseTree.flatMap { it.flatten() }.groupBy { it.name } }
+        // The outermost node of each name only: a recursive operation's nested nodes are inside it already.
+        val nodes = runs.map { r -> outermost(r.coarseTree).groupBy { it.name } }
         val names = nodes.flatMap { n -> n.filterValues { it.size > 1 }.keys }.distinct()
         return names.map { name ->
             val with = runs.indices.filter { nodes[it][name] != null }
@@ -480,7 +500,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     P90 to of { _, c, _ -> c.percentileNanos(0.90) },
                     P99 to of { _, c, _ -> c.percentileNanos(0.99) },
                     MAX to of { _, c, _ -> c.spanMaxNanos.toDouble() },
-                    COARSE_WAITING to of { _, c, _ -> waiting(c.inclusiveHits, c.runningInclusiveHits) },
+                    COARSE_WAITING to of { i, c, _ -> waiting(runs[i], c.inclusiveHits, c.runningInclusiveHits) },
                 ),
                 with.size,
             )
@@ -499,10 +519,12 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             name,
             mapOf(
                 EXECUTIONS to of { r -> if (r.any { it.calls < 0 }) Double.NaN else r.sumOf { it.calls }.toDouble() },
-                WALL to of { r -> r.sumOf { it.wallNanos }.takeIf { it > 0 } ?: Double.NaN },
+                // A label called on a path and never sampled there counts at 0, in Wall and in Mean.
+                WALL to of { r -> r.sumOf { it.wallNanos }.takeIf { it > 0 || r.any { o -> o.calls > 0 } } ?: Double.NaN },
                 MEAN to of { r ->
-                    val called = r.filter { it.calls > 0 && !it.perCallNanos.isNaN() }
-                    if (called.isEmpty()) Double.NaN else called.sumOf { it.perCallNanos * it.calls } / called.sumOf { it.calls }
+                    val called = r.filter { it.calls > 0 }
+                    if (called.isEmpty()) Double.NaN
+                    else called.sumOf { if (it.perCallNanos.isNaN()) 0.0 else it.perCallNanos * it.calls } / called.sumOf { it.calls }
                 },
             ),
             with.size,
@@ -559,7 +581,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 mapOf(
                     THREAD_SHARE to of { _, r -> r.shareOf() * 100 },
                     THREAD_TIME to of { p, r -> r.hits * p.stepNanos },
-                    FINE_WAITING to of { _, r -> r.waitingShare },
+                    FINE_WAITING to of { p, r -> if (p.stateSampled) r.waitingShare else Double.NaN },
                     CALLS to named { _, r -> r.calls.toDouble() },
                     PER_CALL to of { _, r -> r.perCallNanos() },
                     LONG_CALLS to long { _, r -> r.stuckInstances.toDouble() },

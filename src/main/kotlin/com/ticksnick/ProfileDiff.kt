@@ -15,6 +15,9 @@ internal const val FALSE_CHANGE = 0.05
 internal const val NOISE_NOTE = "  ? the change could be noise: the runs differ too much to tell, given how many changes this diff shows; " +
         "more runs of each profile can settle it"
 
+/** A change from [before] to [after] as a fraction of [before]: the one rule for it. NaN from 0, which no fraction describes. */
+internal fun relativeChange(before: Double, after: Double): Double = if (before == 0.0) Double.NaN else (after - before) / before
+
 /**
  * The change of one figure between two profiles: after's mean of its runs minus before's, and the
  * half-width of its 95% interval by Welch's t, which does not assume the two sides spread alike. A
@@ -35,7 +38,7 @@ internal class Change(val before: Estimate, val after: Estimate) {
         else -> t95(degrees) * sqrt(a + b)
     }
 
-    val relative: Double get() = if (before.mean == 0.0) Double.NaN else delta / before.mean
+    val relative: Double get() = relativeChange(before.mean, after.mean)
     val relativeHalf: Double get() = if (before.mean == 0.0) Double.NaN else half / before.mean
 
     /**

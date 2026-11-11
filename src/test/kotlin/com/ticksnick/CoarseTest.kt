@@ -426,6 +426,8 @@ class CoarseTest {
         body: Double = Double.NaN,
         /** Calls of the one fine operation, which holds every labelled sample. */
         fineCalls: Long = labelled,
+        /** Labelled samples under no coarse execution. */
+        outside: Long = 0,
     ) = Run(
         operations = listOf(OperationStat(0, fineName, labelled, fineCalls, 0, 0, 0, 0, labelled)),
         idleHits = 0,
@@ -448,6 +450,7 @@ class CoarseTest {
         coarseTree = tree,
         allocations = allocations,
         bodyNanos = body,
+        labelledOutsideCoarse = outside,
     )
 
     @Test
@@ -592,6 +595,18 @@ class CoarseTest {
         assertEquals(recommendedLimit(coarseFlatFloorBodies(1) * 61.5), slow.coarseFlatFloorNanos, 1e-9)
     }
 
+    /**
+     * An operation under the flat floor is told so, whatever its share: the share floor above it is
+     * the other harm, and must not take the warning's place.
+     */
+    @Test
+    fun `under the flat floor is said even where the share floor is higher`() {
+        // 1 us apiece holding the whole of the run: under 2.5 us, and far over the share condition.
+        val r = report(coarse = listOf(stat(count = 1_000_000, sumNanos = 1_000_000_000, hits = 1_000, running = 1_000)), labelled = 1_000)
+        val kinds = r.warnings().map { it.kind }
+        assertTrue(Kind.COARSE_UNDER_FLOOR in kinds && Kind.COARSE_OVER_SHARE !in kinds, r.render())
+    }
+
     /** Up, to two digits, the second 0 or 5, so that the check and the text agree. */
     @Test
     fun `a recommended limit is rounded up`() {
@@ -641,17 +656,17 @@ class CoarseTest {
      */
     @Test
     fun `the share condition does not accuse on counting noise alone`() {
-        // 6.0 us apiece, 25 hits out of 36 labelled: a 69.4% share, so the raw rule would demand
-        // 7.0 us and accuse. 25 hits is a 20% standard error, and at 55.6% the rule demands 5.6 us
-        // and lets it go. The operation is not exonerated — its share is simply not established.
-        val noisy = stat(count = 400, sumNanos = 2_400_000, hits = 25, running = 25)
+        // 6.0 us apiece on one thread, 25 ms of 36 ms labelled: a 69.4% share, so the raw rule would
+        // demand 7.0 us and accuse. 25 hits is a 20% standard error, and at 55.6% the rule demands
+        // 5.6 us and lets it go. The operation is not exonerated — its share is simply not established.
+        val noisy = stat(count = 4_167, sumNanos = 25_000_000, hits = 25, running = 25)
         assertTrue(
             report(coarse = listOf(noisy), labelled = 36).coarseTooSmall().isEmpty(),
             "accused an operation whose share is not established"
         )
         // The same operation with the same share, measured a thousand times over, is accused —
         // it is the uncertainty that spared it, not the share being innocent.
-        val settled = stat(count = 400_000, sumNanos = 2_400_000_000, hits = 25_000, running = 25_000)
+        val settled = stat(count = 4_166_667, sumNanos = 25_000_000_000, hits = 25_000, running = 25_000)
         assertEquals(
             listOf("req"), report(coarse = listOf(settled), labelled = 36_000).coarseTooSmall().map { it.name }
         )
@@ -858,9 +873,9 @@ class CoarseTest {
 
     @Test
     fun `nothing is said when no coarse label was placed`() {
-        val r = report(coarse = emptyList())
-        assertTrue(r.outsideCoarseSuspects().isEmpty())
-        assertTrue(!r.render().contains("NO coarse span"))
+        // Every labelled sample under no coarse row, as on any run with fine labels alone.
+        val r = report(coarse = emptyList(), outside = 1_000_000)
+        assertTrue(r.warnings().none { it.kind == Kind.OUTSIDE_COARSE }, r.render())
     }
 
     @Test

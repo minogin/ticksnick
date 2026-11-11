@@ -136,16 +136,17 @@ internal fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Doub
  * The `Per parent` figure, in every table that has one: [count] per execution of the row above. `340`,
  * or `2.5` when the executions did not all make the same number; blank with no completed execution.
  */
-internal fun perParentText(count: Long, parentCount: Long): String = when {
-    parentCount <= 0L -> ""
-    count % parentCount == 0L -> String.format(Locale.ROOT, "%,d", count / parentCount)
-    count.toDouble() / parentCount < 100 -> String.format(Locale.ROOT, "%.1f", count.toDouble() / parentCount)
-    else -> String.format(Locale.ROOT, "%,.0f", count.toDouble() / parentCount)
-}
+internal fun perParentText(count: Long, parentCount: Long): String =
+    if (parentCount <= 0L) "" else perParentText(count.toDouble() / parentCount)
 
-/** The `Per parent` figure from its value. See [perParentText]. */
+/**
+ * The `Per parent` figure from its value, the one rule for it: a whole number as it is, `5,262`; under
+ * 1, three significant digits, `0.000300`, never a `0.0` for a rate that is not 0; under 100, one
+ * decimal, `2.5`; past that, none.
+ */
 internal fun perParentText(perParent: Double): String = when {
     perParent == kotlin.math.floor(perParent) -> String.format(Locale.ROOT, "%,d", perParent.toLong())
+    perParent < 1 -> java.math.BigDecimal(perParent).round(java.math.MathContext(3)).toPlainString()
     perParent < 100 -> String.format(Locale.ROOT, "%.1f", perParent)
     else -> String.format(Locale.ROOT, "%,.0f", perParent)
 }
@@ -1076,7 +1077,8 @@ class Run internal constructor(
      * here, since it would make an innocent operation look smaller than it is.
      */
     internal fun tooSmall(): List<OperationStat> = operations
-        .filter { isTooSmall(it.hits, it.calls, stepNanos, fineFloorNanos) }
+        // Per entry, not per call: the hook runs once for a batch label's n calls.
+        .filter { isTooSmall(it.hits, it.hookEntries, stepNanos, fineFloorNanos) }
         .sortedByDescending { it.calls }
 
     /**
@@ -1325,6 +1327,16 @@ class Run internal constructor(
         if (observedNanos <= 0.0) 0.0 else c.inclusiveHits * stepNanos / observedNanos
 
     /**
+     * The share of the run's thread-time [c]'s executions held, from their count and measured mean:
+     * once per execution, however many threads ran inside it, which is what timing them costs in
+     * proportion to. Its inclusive share counts each thread inside, k times this for a fan-out of k.
+     */
+    internal fun spanShareOf(c: CoarseStat): Double = if (observedNanos <= 0.0) 0.0 else c.count * c.meanSpanNanos / observedNanos
+
+    /** What timing [c]'s executions cost, as a share of the run's thread-time. See [spanShareOf]. */
+    internal fun timingCostOf(c: CoarseStat): Double = if (observedNanos <= 0.0) 0.0 else c.count * coarseContextNanos / observedNanos
+
+    /**
      * The shortest [c] was allowed to be, from the tier boundary. See [coarseFloorNanos].
      *
      * The share is **reduced by its own sampling noise** before the share condition is applied.
@@ -1336,7 +1348,7 @@ class Run internal constructor(
      */
     internal fun coarseFloorNanosOf(c: CoarseStat): Double {
         val noise = if (c.inclusiveHits <= 0L) 1.0 else 1.0 / sqrt(c.inclusiveHits.toDouble())
-        return coarseFloorNanos((shareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseFlatFloorNanos, coarseContextNanos)
+        return coarseFloorNanos((spanShareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseFlatFloorNanos, coarseContextNanos)
     }
 
     /** What one coarse execution cost in this run, which rises with the fine labels registered. See [coarseContextNanos]. */
@@ -1566,7 +1578,8 @@ class Run internal constructor(
 
         fun shareOf(): Double = if (allHits == 0L) 0.0 else hits.toDouble() / allHits
 
-        val waitingShare: Double get() = if (hits == 0L) 0.0 else (hits - runningHits).toDouble() / hits
+        /** NaN with no sample, which is no share, not 0% waiting. */
+        val waitingShare: Double get() = if (hits == 0L) Double.NaN else (hits - runningHits).toDouble() / hits
 
         fun noiseFloor(): Double = if (hits <= 0) 0.0 else 1.0 / sqrt(hits.toDouble())
 
@@ -1670,7 +1683,8 @@ class Run internal constructor(
             }
             // The one signal for work escaping its context, which neither the floor check nor the
             // balance check can see.
-            if (labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
+            // Only where a coarse label was used: a run with fine labels alone is all under no coarse row.
+            if (coarse.any { it.count > 0 || it.inclusiveHits > 0 } && labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(
                 Warning(Kind.OUTSIDE_COARSE, figure(labelledOutsideCoarseShare, ::shareText), words(codeList(outsideCoarseSuspects().take(4).map { it.name })))
             )
             // Every public way of opening an execution gives it a path, so a row missing from the tree
@@ -1692,13 +1706,14 @@ class Run internal constructor(
             )
             // The same boundary from the other side, exact: the duration it compares is measured.
             for (c in coarseTooSmall()) {
-                val floor = coarseFloorNanosOf(c)
+                // Under the flat floor the operation is too short to time, whatever its share; above it, it is
+                // under the share floor only, and what the reader needs is what timing it costs.
                 add(
-                    if (floor > coarseFlatFloorNanos) Warning(
-                        Kind.COARSE_OVER_SHARE, words(code(c.name)), figure(coarseContextNanos / c.meanSpanNanos * shareOf(c), ::shareText),
+                    if (c.meanSpanNanos >= coarseFlatFloorNanos) Warning(
+                        Kind.COARSE_OVER_SHARE, words(code(c.name)), figure(timingCostOf(c), ::shareText),
                         words(code("registerFine(\"${c.name}\")")),
                     ) else Warning(
-                        Kind.COARSE_UNDER_FLOOR, words(code(c.name)), figure(c.meanSpanNanos, ::duration), figure(floor, ::limitText),
+                        Kind.COARSE_UNDER_FLOOR, words(code(c.name)), figure(c.meanSpanNanos, ::duration), figure(coarseFlatFloorNanos, ::limitText),
                         words(coarseFloorRaised(operations.size, allocations, bodyOrDefaultNanos, hookScale)),
                         words(code("registerFine(\"${c.name}\")")),
                     )

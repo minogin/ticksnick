@@ -258,6 +258,9 @@ In a clone of this repository: `./gradlew cli --args="render profiles/baseline"`
   report says so.
 - The CPU clock is recorded on Windows and Linux. On macOS it needs root, so the report says it was
   not measured.
+- **GraalVM Native Image is not supported.** It compiles the program ahead of time, and much of the
+  JVM's management interface, which TickSnick reads its checks from, is missing or limited there.
+  GraalVM in its usual JIT mode is HotSpot.
 
 ## Contribution
 

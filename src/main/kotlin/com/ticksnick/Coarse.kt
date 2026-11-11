@@ -447,7 +447,10 @@ internal class CoarsePath(
 
     /** The slowest executions kept here, longest first. */
     fun slowest(): List<SlowExecution> =
-        (0 until slowCount).map { SlowExecution(slowKeys!![it]!!, slowNanos!![it]) }.sortedByDescending { it.nanos }
+        (0 until minOf(slowCount, SLOWEST_KEPT)).mapNotNull { i ->
+            val k = slowKeys?.get(i) ?: return@mapNotNull null
+            SlowExecution(k, slowNanos?.get(i) ?: return@mapNotNull null)
+        }.sortedByDescending { it.nanos }
 
     /** Adds [o] and everything under it into this node and the matching nodes under it. */
     fun mergeFrom(o: CoarsePath) {
@@ -482,7 +485,11 @@ internal class CoarsePath(
             val f = calls ?: LongArray(MAX_OPERATIONS).also { calls = it }
             for (i in f.indices) f[i] += ocalls[i]
         }
-        for (i in 0 until o.slowCount) recordSlow(o.slowNanos!![i], o.slowKeys!![i]!!)
+        // Read from a live thread, which may have counted an execution before its arrays or key are
+        // seen here: one not yet visible is skipped, never a NullPointerException out of stop().
+        val ons = o.slowNanos
+        val oks = o.slowKeys
+        if (ons != null && oks != null) for (i in 0 until minOf(o.slowCount, SLOWEST_KEPT)) recordSlow(ons[i], oks[i] ?: continue)
         o.children?.let { ocs -> for (t in ocs.indices) ocs[t]?.let { child(t).mergeFrom(it) } }
         o.overflow?.let { oos -> for (t in oos.indices) oos[t]?.let { deeper(t).mergeFrom(it) } }
     }

@@ -94,12 +94,14 @@ class RunTest {
     /** A duty report with no live measurement behind it, for the arithmetic that hangs off one. */
     private fun duty(
         labelled: Double = 0.99,
+        runnable: Double = Double.NaN,
         aggregate: Double = 0.99,
         invisible: Double = 0.0,
         labelledFraction: Double = 1.0,
         reason: String? = null,
     ) = Duty(
         labelledDuty = labelled,
+        runnableDuty = runnable,
         invisibleOffCpu = invisible,
         labelledFraction = labelledFraction,
         reason = reason,
@@ -247,7 +249,7 @@ class RunTest {
      */
     @Test
     fun `an unbounded duty explains itself instead of printing a number`() {
-        val d = duty(labelled = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
+        val d = duty(labelled = 0.0, runnable = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
         assertTrue(d.unbounded, "the event-loop regime is no longer recognised as unbounded")
         val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
         assertTrue(lines.contains("was not on a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")

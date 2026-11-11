@@ -106,7 +106,9 @@ internal class Sampler(
     private val duty = DutyCycle(dutyWindowNanos)
 
     /** Time this thread was itself stopped, which is time every thread was. See [PauseTracker]. */
-    private val pause = PauseTracker(stepNanos, GcPauseClock.pauseNanos())
+    // A sampler that parks or sleeps is late on every tick by the scheduler's doing, so its lateness
+    // is no pause: nothing is counted, charged or subtracted, and the report says pauses were not measured.
+    private val pause = PauseTracker(if (wait == WaitStrategy.SPIN) stepNanos else Long.MAX_VALUE, GcPauseClock.pauseNanos())
 
     /** When to next look for slots whose thread died without releasing. See Profiler.reclaimDeadSlots. */
     private var nextReclaim = Long.MIN_VALUE
@@ -587,6 +589,16 @@ internal class Sampler(
     private val started = CountDownLatch(1)
 
     override fun run() {
+        // Anything thrown here would end sampling and leave a run that reads as whole. It fails the
+        // run instead: a profile with the rest of the session missing would be a wrong one.
+        try {
+            loop()
+        } catch (e: Throwable) {
+            fail(samplerErrorMessage(e))
+        }
+    }
+
+    private fun loop() {
         // Before the first tick, so that no call is counted whose sample could not have been taken.
         try {
             for (id in 0 until MAX_OPERATIONS) callsAtStart[id] = Profiler.callsOf(id)
@@ -1038,7 +1050,18 @@ internal class Sampler(
     internal fun shutdown() {
         running = false
         LockSupport.unpark(this)
-        join()
+        // Waited for whatever the caller's interrupt status, as [start] waits: throwing here would
+        // leave the session half-stopped, and the next start() refused.
+        var interrupted = false
+        while (true) {
+            try {
+                join()
+                break
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
     }
 
     /** Total samples taken: one per slot per tick. */

@@ -265,6 +265,13 @@ internal fun leakMessage(open: String, thread: String = Thread.currentThread().n
             "${sym.dash}put `exit` in a `finally`"
 
 /**
+ * The failure of the sampler itself (`sampler-error`): it stopped on [e], so the rest of the session
+ * went unsampled. Not the user's to fix.
+ */
+internal fun samplerErrorMessage(e: Throwable): String =
+    "the sampler stopped on ${code(e.toString())}, so the rest of the run was not sampled${sym.dash}a TickSnick bug, please report it"
+
+/**
  * Whether one operation's long executions are evidence of anything, given what the machine was
  * doing to every operation at the same time — see [Run.machineFloor].
  *

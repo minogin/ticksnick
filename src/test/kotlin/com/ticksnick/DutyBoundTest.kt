@@ -142,6 +142,16 @@ class DutyBoundTest {
         assertTrue(pp(r.duty) in 0.0..100.0, "bound ${pp(r.duty)}pp is not a percentage")
     }
 
+    /**
+     * Labels that only ever wait, visibly: no labelled time read Runnable, so none of it can hide a
+     * wait, and the bound is nothing rather than 100pp.
+     */
+    @Test
+    fun `labels that only wait leave nothing to bound`() {
+        val d = bound(Thread(labelled = 1.0, offCpu = 1.0, notRunnable = 1.0, labelledNotRunnable = 1.0))
+        assertEquals(1.0, d.runnableDuty)
+    }
+
     /** With no labelled samples anywhere there is nothing to bound, and NaN says so. */
     @Test
     fun `nothing labelled is not a duty of zero`() {

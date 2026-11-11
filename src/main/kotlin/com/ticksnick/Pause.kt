@@ -209,7 +209,7 @@ internal class Pauses internal constructor(
         )
         // Collections the sampler could not see, each shorter than a step: real pauses, left in active
         // time all the same, since nothing here measured them but the JVM's word for it.
-        if (pauses == 0L) return if (gcNanos > 0) inTimes(gcNanos) else emptyList()
+        if (pauses == 0L) return if (gcNanos > slack(gcNanos)) inTimes(gcNanos) else emptyList()
         // Pauses the sampler saw and this JVM's collectors cannot confirm.
         if (gcNanos < 0) return inTimes(pausedNanos)
         return when {

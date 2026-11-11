@@ -230,19 +230,48 @@ internal class OpSlot(
      * the number of labels placed by hand and not yet closed, which is what makes it a balance
      * check rather than a general call-depth counter.
      *
-     * A plain array with a single writer, and read from the sampling thread only when the session
-     * ends. Sixty-four is far past any sane nesting of hand-placed labels; past that the label is
-     * still set correctly and only the restoring is given up, which is recorded rather than thrown.
+     * A plain array with a single writer. It grows when full, so a balanced recursion of any depth
+     * unwinds exactly: the copy is on the 65th level and never again on the common path.
      */
     @JvmField
-    val stack = IntArray(MAX_SPAN_DEPTH)
+    var stack = IntArray(MAX_SPAN_DEPTH)
+
+    /**
+     * Beside [stack], the label each `enter` opened: what a leak is named by. [stack] holds what came
+     * before each one, which under a lexical `op` inside is not the label left open.
+     */
+    @JvmField
+    var entered = IntArray(MAX_SPAN_DEPTH)
 
     @JvmField
     var depth: Int = 0
 
-    /** Hand-placed labels that overflowed the stack, so exit could not restore what came before. */
+    /**
+     * The coarse executions this thread opened with `enter` and has not closed, innermost last: the
+     * coarse half of what [Profiler.expectBalanced] checks. A context opened by `op` or borrowed by
+     * `withCoarse` is not here, since nothing can leak it. Grows as [stack] does.
+     */
     @JvmField
-    internal var overflows: Long = 0
+    var coarseEntered = IntArray(MAX_SPAN_DEPTH)
+
+    @JvmField
+    var coarseDepth: Int = 0
+
+    /** Pushes the label [id] opens by `enter`, with what the thread was inside before it. */
+    fun pushEntered(id: Int) {
+        if (depth == stack.size) {
+            stack = stack.copyOf(depth * 2)
+            entered = entered.copyOf(depth * 2)
+        }
+        stack[depth] = getOpaque()
+        entered[depth++] = id
+    }
+
+    /** Pushes the coarse execution of type [type] opened by `enter`. */
+    fun pushCoarseEntered(type: Int) {
+        if (coarseDepth == coarseEntered.size) coarseEntered = coarseEntered.copyOf(coarseDepth * 2)
+        coarseEntered[coarseDepth++] = type
+    }
 
     /**
      * The coarse execution this thread is currently inside, or null.
@@ -348,9 +377,6 @@ internal class OpSlot(
             resolve(root, ctx)
         }
     }
-
-    /** How deeply this thread is nested in coarse executions. Zero when it is inside none. */
-    internal fun coarseDepth(): Int = context?.let { it.depth + 1 } ?: 0
 
     fun countOf(id: Int): Long = counts[id + COUNT_PAD]
 
@@ -822,15 +848,15 @@ object Profiler {
      * after. The two forms nest in either order.
      *
      * What it costs, and it is not the hook: **there is no `finally` here, so a body that throws
-     * leaves the label set** and every later sample on this thread is billed to it. No error, no
-     * warning, a plausible wrong number — the contaminating direction. A library's "after"
-     * callback is often not inside a `finally`, so this is not a hypothetical. See [expectBalanced].
+     * leaves the label set** and every later sample on this thread is billed to it, a plausible wrong
+     * number. [expectBalanced] finds it and fails the run, and a label still open at `stop()` is a
+     * warning. A library's "after" callback is often not inside a `finally`, so this is not hypothetical.
      */
     @JvmStatic
     @JvmName("enterFine")
     fun enter(op: FineOp) {
         val s = local.get()
-        if (s.depth < MAX_SPAN_DEPTH) s.stack[s.depth++] = s.getOpaque() else s.overflows++
+        s.pushEntered(op.id)
         s.setOpaque(op.id)
         s.count(op.id)
     }
@@ -840,7 +866,7 @@ object Profiler {
     @JvmName("enterFine")
     fun enter(op: FineOp, times: Int) {
         val s = local.get()
-        if (s.depth < MAX_SPAN_DEPTH) s.stack[s.depth++] = s.getOpaque() else s.overflows++
+        s.pushEntered(op.id)
         s.setOpaque(op.id)
         s.count(op.id, times)
     }
@@ -864,7 +890,9 @@ object Profiler {
     fun exit(op: FineOp) {
         val s = local.get()
         val current = s.getOpaque()
-        if (current != op.id) mismatch(nameOf(op), if (current < 0) "no operation" else nameOf(current))
+        // With nothing open the slot is empty before and after: no time goes to a wrong label.
+        if (current < 0) return
+        if (current != op.id) mismatch(nameOf(op), nameOf(current))
         s.setOpaque(if (s.depth > 0) s.stack[--s.depth] else NO_OP)
     }
 
@@ -879,9 +907,13 @@ object Profiler {
     @JvmStatic
     @JvmName("enterCoarse")
     fun enter(op: CoarseOp) {
+        // From Java a handle is an int, and a fine one past the coarse ids would otherwise reach
+        // the sampler's arrays and stop it.
+        require(op.id in 0 until MAX_COARSE_TYPES) { "not a coarse operation: ${op.id}" }
         val s = local.get()
         val parent = s.contextOpaque()
         s.flushCounts(parent)
+        s.pushCoarseEntered(op.id)
         s.setContextOpaque(CoarseContext(op.id, parent, System.nanoTime(), s.pathFor(parent, op.id)))
     }
 
@@ -898,10 +930,11 @@ object Profiler {
         val s = local.get()
         val ctx = s.contextOpaque()
         if (ctx == null) {
-            mismatch(nameOf(op), "no coarse execution")
+            // Nothing open: nothing is billed to a wrong execution.
             return
         }
         if (ctx.type != op.id) mismatch(nameOf(op), coarseNameOf(ctx.type))
+        if (s.coarseDepth > 0) s.coarseDepth--
         s.setContextOpaque(ctx.parent)
         ctx.markClosed()
         s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
@@ -963,22 +996,22 @@ object Profiler {
     @JvmStatic
     fun expectBalanced(): Boolean {
         val s = local.get()
-        // Read before anything is reset, and defensively: a slot can hold NO_OP with a depth above
-        // zero if the leak was an `exit` without its `enter` rather than the other way round.
-        val ctx = s.contextOpaque()
-        val id = s.getOpaque()
+        // Only what `enter` opened: a lexical `op` around this call, or a context borrowed by
+        // `withCoarse` or `propagating()`, is open by design and cannot leak. Named by what was
+        // entered, innermost first, not by the label the thread is in now.
         val leaked = when {
             // The coarse half is named first when both leaked, because a coarse context left open
             // collects a whole request's worth of samples rather than one label's.
-            ctx != null -> coarseNameOf(ctx.type)
-            s.depth > 0 && id >= 0 -> nameOf(id)
-            s.depth > 0 -> "an unnamed label"
+            s.coarseDepth > 0 -> coarseNameOf(s.coarseEntered[s.coarseDepth - 1])
+            s.depth > 0 -> nameOf(s.entered[s.depth - 1])
             else -> return true
         }
         imbalances.incrementAndGet()
+        val ctx = s.contextOpaque()
         s.flushCounts(ctx)
         s.setContextOpaque(null)
         s.depth = 0
+        s.coarseDepth = 0
         s.setOpaque(NO_OP)
         // Fatal. Resetting the slot stops the leak spreading, but it cannot give back the samples
         // already billed to the wrong operation - so continuing means reporting a share that was
@@ -1023,7 +1056,7 @@ object Profiler {
     /** The labels [openSpans] counts, by name. */
     internal fun openSpanNames(): List<String> {
         val names = java.util.TreeSet<String>()
-        forEachSlot { if (it.depth > 0) names += it.getOpaque().let { id -> if (id >= 0) nameOf(id) else "an unnamed label" } }
+        forEachSlot { s -> for (i in 0 until s.depth) names += nameOf(s.entered[i]) }
         return names.toList()
     }
 
@@ -1185,6 +1218,8 @@ object Profiler {
         allocations: Boolean = false,
         tags: Map<String, Any> = emptyMap(),
     ) {
+        require(tickMillis > 0 && tickMillis.isFinite()) { "tickMillis must be above 0: $tickMillis" }
+        require(jitter >= 0 && jitter < 1) { "jitter must be at least 0 and under 1: $jitter" }
         Logo.once()
         check(sampler == null) { "already sampling" }
         setup = Setup.read()

@@ -278,6 +278,34 @@ class PauseTest {
         assertEquals(listOf("Paused: 5.00s of pauses, 8.33% of the run, is counted as work in the times below"), p.said())
     }
 
+    /**
+     * Collections each under a step, which the sampler never sees, are said only past the margin the
+     * other cases have: a fifth, or 50 ms. ZGC's 4 ms of sub-millisecond pauses in a minute is noise.
+     */
+    @Test
+    fun `pauses the sampler did not see are said only past the margin`() {
+        assertEquals(emptyList(), pause(0, 0, 0, gc = 4 * ms).said())
+        assertEquals(1, pause(0, 0, 0, gc = 2 * second).said().size)
+    }
+
+    /**
+     * A parked sampler counts no pause at all, whatever the JVM can read: its lateness is the
+     * scheduler's, so nothing may be charged to a row or taken out of wall time, while the report
+     * says pauses were not measured.
+     */
+    @Test
+    fun `a parked sampler counts no pause, with collections it could confirm`() {
+        val tick = Profiler.registerFine("pauseTestParked")
+        Profiler.start(tickMillis = 1.0, wait = WaitStrategy.PARK)
+        val live = Array(2_000_000) { LongArray(4) }
+        repeat(3) { op(tick) { System.gc() }; Thread.sleep(50) }
+        val p = Profiler.stop().pause
+        assertTrue(live.isNotEmpty())
+        assertFalse(p.measured)
+        assertEquals(0L, p.pauses, "a parked sampler's lateness was counted as pauses")
+        assertEquals(0L, p.pausedNanos)
+    }
+
     /** A parked sampler is late on every tick, and none of that lateness is anybody's pause. */
     @Test
     fun `a sampler that was not spinning claims no pauses`() {
@@ -315,9 +343,9 @@ class PauseTest {
         val line = d.summary()
         assertTrue("98.90% of active time" in line, line)
         assertFalse("wall time" in line, line)
-        // 1.11 pp is over the point the report keeps quiet below, so this run gets the line.
-        val careful = d.careful(60_220_000_000, 0).single().text()
-        assertTrue("off by up to 1.11pp" in careful, careful)
+        // Nothing here is labelled fine, so there is no labelled share to bound: no Thread-time% warning,
+        // where every thread's CPU over wall once stood in for it.
+        assertTrue(d.careful(60_220_000_000, 0).none { it.kind == Kind.THREAD_TIME_BOUND })
     }
 
     @Test

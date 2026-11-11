@@ -729,7 +729,8 @@ internal fun labelledDuty(
         ((labelled - stall) / labelled).coerceIn(0.0, 1.0),
         invisible / total,
         labelled / total,
-        if (!stateSampled || labelledRunnable <= 0.0) Double.NaN
+        // No labelled time read Runnable: nothing there can hide a wait, so nothing to bound.
+        if (!stateSampled) Double.NaN else if (labelledRunnable <= 0.0) 1.0
         else ((labelledRunnable - runnableStall) / labelledRunnable).coerceIn(0.0, 1.0),
     )
 }
@@ -850,8 +851,8 @@ internal class Duty internal constructor(
      * a small part of the threads' time, and `epoll_wait` off the CPU while reading `RUNNABLE`.
      */
     val unbounded: Boolean
-        get() = !labelledDuty.isNaN() && !invisibleOffCpu.isNaN() &&
-                labelledDuty <= 0.0 && invisibleOffCpu > 0.0
+        get() = !runnableDuty.isNaN() && !invisibleOffCpu.isNaN() &&
+                runnableDuty <= 0.0 && invisibleOffCpu > 0.0
 
     /**
      * The worst a share can be wrong by, in percentage points, if every stall there was landed on
@@ -865,8 +866,12 @@ internal class Duty internal constructor(
      */
     val boundPp: Double get() = min(100.0, (1 - shareDuty) / shareDuty * 100)
 
-    /** The duty the Careful line judges: [runnableDuty] where the state was read, [shareDuty] where not. */
-    val carefulDuty: Double get() = if (runnableDuty.isNaN()) shareDuty else runnableDuty
+    /**
+     * The duty the `Thread-time%` warning judges: [runnableDuty] where the state was read,
+     * [labelledDuty] where not. NaN, and no warning, where nothing was labelled fine: every thread's
+     * CPU over wall would count visible waiting and idle pools as hidden.
+     */
+    val carefulDuty: Double get() = if (runnableDuty.isNaN()) labelledDuty else runnableDuty
 
     /** [boundPp] over [carefulDuty]: how far `Runnable` may overstate CPU work. */
     val runnableBoundPp: Double get() = min(100.0, (1 - carefulDuty) / carefulDuty * 100)

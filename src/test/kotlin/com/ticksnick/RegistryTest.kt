@@ -306,15 +306,95 @@ class RegistryTest {
 
     /** An `exit` with no `enter` names nothing rather than reading off the end of the name table. */
     @Test
-    fun `an unmatched exit does not crash the leak message`() {
+    fun `an exit with nothing open is ignored, and the run stands`() {
         val ghost = Profiler.registerFine("test:neverEntered")
+        val ghostCoarse = Profiler.registerCoarse("test:registry-coarse")
+        Profiler.start(tickMillis = 1.0)
         onOwnThread {
+            // The slot is empty before and after: no time goes to a wrong label.
             Profiler.exit(ghost)
-            // Depth is already zero, so this is balanced; what is checked is that getting here at
-            // all — and formatting a message from a slot holding NO_OP — is safe.
+            Profiler.exit(ghostCoarse)
             assertTrue(Profiler.expectBalanced())
+            Profiler.release()
         }
-        assertTrue(leakMessage("an unnamed label", "t").contains("an unnamed label"))
+        val run = Profiler.stop()
+        assertNull(run.failure, "an exit with nothing open failed the run")
+    }
+
+    /**
+     * Past the stack's first size, a balanced recursion of hand-placed labels still unwinds exactly:
+     * the stack grows. It once stopped pushing at 64 while `exit` went on popping, and a correct
+     * program failed with a crossed `exit`.
+     */
+    @Test
+    fun `a balanced recursion of hand-placed labels of any depth unwinds exactly`() {
+        val outer = Profiler.registerFine("test:deep-outer")
+        val inner = Profiler.registerFine("test:deep-inner")
+        Profiler.start(tickMillis = 1.0)
+        onOwnThread {
+            Profiler.enter(outer)
+            repeat(200) { Profiler.enter(inner) }
+            repeat(200) { Profiler.exit(inner) }
+            assertEquals(outer.id, Profiler.slot().getOpaque(), "the recursion did not unwind to its start")
+            Profiler.exit(outer)
+            assertTrue(Profiler.expectBalanced())
+            Profiler.release()
+        }
+        assertNull(Profiler.stop().failure, "a balanced recursion failed the run")
+    }
+
+    /**
+     * Only what `enter` opened can leak. A lexical `op` around the check, and a context borrowed from
+     * another thread, are open by design: the README's own pool ends its tasks inside one.
+     */
+    @Test
+    fun `expectBalanced passes inside an op and under a borrowed context`() {
+        val fine = Profiler.registerFine("test:balanced-fine")
+        val coarse = Profiler.registerCoarse("test:registry-coarse")
+        Profiler.start(tickMillis = 1.0)
+        onOwnThread {
+            op(fine) { assertTrue(Profiler.expectBalanced(), "a lexical fine op read as a leak") }
+            op(coarse) {
+                assertTrue(Profiler.expectBalanced(), "a lexical coarse op read as a leak")
+                val ctx = captureCoarse()
+                val helper = Thread { withCoarse(ctx) { assertTrue(Profiler.expectBalanced(), "a borrowed context read as a leak") }; Profiler.release() }
+                helper.start()
+                helper.join()
+            }
+            Profiler.release()
+        }
+        assertNull(Profiler.stop().failure)
+    }
+
+    /** A leak is named by the label `enter` opened, not by the label the thread happens to be in. */
+    @Test
+    fun `a leak is named by what was entered`() {
+        val leaked = Profiler.registerFine("test:leaked-entered")
+        val around = Profiler.registerFine("test:leaked-around")
+        val coarse = Profiler.registerCoarse("test:registry-coarse")
+        Profiler.start(tickMillis = 1.0)
+        onOwnThread {
+            Profiler.enter(leaked)
+            op(around) { assertFalse(Profiler.expectBalanced()) }
+            Profiler.release()
+        }
+        val fine = assertNotNull(Profiler.stop().failure)
+        assertTrue("test:leaked-entered" in fine && "test:leaked-around" !in fine, fine)
+
+        Profiler.start(tickMillis = 1.0)
+        onOwnThread {
+            Profiler.enter(coarse)
+            assertFalse(Profiler.expectBalanced())
+            Profiler.release()
+        }
+        val failure = assertNotNull(Profiler.stop().failure)
+        assertTrue("test:registry-coarse" in failure, failure)
+    }
+
+    /** From Java a handle is an int: a fine one past the coarse ids is refused, not left to stop the sampler. */
+    @Test
+    fun `a coarse call refuses an id past the coarse ones`() {
+        assertFailsWith<IllegalArgumentException> { Profiler.enter(CoarseOp(MAX_COARSE_TYPES + 5)) }
     }
 
     // ---------------------------------------------------------------- the slot registry

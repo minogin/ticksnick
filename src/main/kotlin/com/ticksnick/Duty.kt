@@ -188,8 +188,16 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
     private var prevCpu = HashMap<Long, Long>()
     private var prevWall = 0L
 
-    /** A thread's CPU reading, and when it was taken. */
-    private class FirstSight(val cpu: Long, val nanos: Long)
+    /** A thread's CPU reading, when it was taken, and [lateInWindow] at that moment. */
+    private class FirstSight(val cpu: Long, val nanos: Long, val late: Long)
+
+    /**
+     * The sampler's lateness since the last boundary, added up every tick. The window's confirmed
+     * pause is known only as a total, at the boundary; a thread seen partway through the window is
+     * given the share of it that the lateness after its first reading is of the window's. Split by
+     * time instead, a long pause inside a short span went mostly uncounted and read as waiting.
+     */
+    private var lateInWindow = 0L
 
     /**
      * Threads first seen since the last boundary, each with its first reading, so that its first
@@ -372,6 +380,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
      */
     fun everyTick(now: Long, lateNanos: Long) {
         if (!available) return
+        if (lateNanos > 0) lateInWindow += lateNanos
         val p = ProcessCpuClock.cpuNanos()
         if (lateNanos > 0 && p >= 0 && prevTickProcess >= 0 && prevWall != 0L && now > prevTickNanos) {
             pendingPausedCpu += (p - prevTickProcess) * (lateNanos.toDouble() / (now - prevTickNanos))
@@ -398,7 +407,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
             if (last != null && c >= last) pendingProfiledCpu += c - last
             next[s.threadId] = c
             if (prevWall != 0L && s.threadId !in prevCpu && s.threadId !in firstSeen) {
-                firstSeen[s.threadId] = FirstSight(c, now)
+                firstSeen[s.threadId] = FirstSight(c, now, lateInWindow)
                 // Its samples count from here too, so that they cover the span its CPU and wall do.
                 val idx = s.index
                 val h = hits
@@ -461,9 +470,12 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
             val p = prevCpu[s.threadId] ?: first?.cpu ?: return@forEachSlot
             val span = now - (first?.nanos ?: prevWall)
             if (span <= 0) return@forEachSlot
-            // The window's pause is known only as a total: a thread seen partway through it is
-            // given the share of it its span is of the window.
-            val itsPause = if (first == null) paused else (paused.toDouble() * span / (now - prevWall)).toLong()
+            // A thread seen partway through the window: its share of the pause. See [lateInWindow].
+            val itsPause = when {
+                first == null -> paused
+                lateInWindow > 0 -> (paused.toDouble() * (lateInWindow - first.late) / lateInWindow).toLong()
+                else -> 0L
+            }
             val d = c - p
             if (d < 0) anomalies++ else {
                 cpu += d
@@ -518,6 +530,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
         pendingLate = 0L
         prevCpu = next
         firstSeen = HashMap()
+        lateInWindow = 0L
         prevProcess = process
         prevSampler = sampler
         prevJit = jit

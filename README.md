@@ -146,7 +146,7 @@ anyway. Where the labels are in code you cannot fix, label one level up, where a
 - `sampleState` (true): record whether each sampled thread was running or waiting.
 - `allocations` (false): count the bytes allocated under each coarse operation, for the report's
   `Allocated` column. It adds about 30 ns to each coarse execution. It needs a JVM that reports
-  them, as HotSpot does; on one that does not, the session runs without and the report says so.
+  them, as HotSpot and OpenJ9 do; on one that does not, the session runs without and the report says so.
 - `tags` (none): what the run cannot say by itself, see [Tags and setup](#tags-and-setup).
 
 ### From Java

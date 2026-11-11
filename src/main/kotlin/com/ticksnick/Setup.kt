@@ -7,15 +7,32 @@ import java.nio.file.Path
 /** How many different values of one name a line lists before it gives their range or counts the rest. */
 internal const val MAX_VALUES_LISTED = 3
 
+/** The argument with which OpenJ9 names its own options file. */
+private const val OPTIONS_FILE = "-Xoptionsfile="
+
 /**
- * The collector, as `-XX:+Use...GC` names it, from the name of one of its beans. Parallel's and
- * Serial's beans have names of their own, `PS Scavenge` and `Copy`; the others start with the
- * collector's: `G1 Young Generation` is G1, `ZGC Minor Cycles` ZGC, `Shenandoah Pauses` Shenandoah.
+ * The collector, as the JVM's flag names it, from the name of one of its beans. Parallel's,
+ * Serial's and OpenJ9's beans have names of their own, `PS Scavenge`, `Copy` and `scavenge` for
+ * gencon; the others start with the collector's: `G1 Young Generation` is G1, `ZGC Minor Cycles` ZGC,
+ * `Shenandoah Pauses` Shenandoah.
  */
 internal fun collectorName(bean: String): String = when (bean) {
     "PS Scavenge", "PS MarkSweep" -> "Parallel"
     "Copy", "MarkSweepCompact" -> "Serial"
+    "scavenge" -> "gencon"
     else -> bean.substringBefore(' ')
+}
+
+/**
+ * The JVM's arguments less those it added itself. OpenJ9 adds the options of its own
+ * `options.default`, after `-Xoptionsfile=` naming that file: a local path, and none of them the
+ * user's. [read] reads the file; one that cannot be read leaves its options in, the path still out.
+ */
+internal fun userArguments(args: List<String>, read: (Path) -> String = { Files.readString(it) }): List<String> {
+    val named = args.firstOrNull { it.startsWith(OPTIONS_FILE) } ?: return args
+    val added = runCatching { read(Path.of(named.removePrefix(OPTIONS_FILE))) }.getOrDefault("")
+        .let { text -> Regex("\"([^\"]*)\"|(\\S+)").findAll(text).map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toSet() }
+    return args.filter { it != named && it !in added }
 }
 
 /**
@@ -47,7 +64,7 @@ internal class Setup(val facts: Map<String, String>, val jvm: String?) {
             fact("Processors", Runtime.getRuntime().availableProcessors().toString())
             fact("Heap", bytes(Runtime.getRuntime().maxMemory().toDouble()))
             fact("GC", ManagementFactory.getGarbageCollectorMXBeans().firstOrNull()?.name?.let(::collectorName))
-            fact("Flags", runtime.inputArguments.filter { it.startsWith("-X") }.joinToString(" "))
+            fact("Flags", userArguments(runtime.inputArguments).filter { it.startsWith("-X") }.joinToString(" "))
             return Setup(facts, "${runtime.pid}@${runtime.startTime}")
         }
 

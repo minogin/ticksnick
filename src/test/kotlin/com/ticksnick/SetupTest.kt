@@ -23,7 +23,7 @@ class SetupTest {
         assertEquals("a, b, c and 1 more", valuesOf(listOf("a", "b", "c", "d")))
     }
 
-    /** The names a JVM gives its collectors' beans, each as its `-XX:+Use...GC` flag names it. */
+    /** The names a JVM gives its collectors' beans, each as the JVM's flag names the collector. */
     @Test
     fun `the collector is named as its flag names it`() {
         assertEquals("G1", collectorName("G1 Young Generation"))
@@ -32,6 +32,20 @@ class SetupTest {
         assertEquals("ZGC", collectorName("ZGC Cycles"))
         assertEquals("ZGC", collectorName("ZGC Minor Cycles"))
         assertEquals("Shenandoah", collectorName("Shenandoah Pauses"))
+        assertEquals("gencon", collectorName("scavenge"))
+    }
+
+    /** OpenJ9 adds its own `options.default` to the JVM's arguments, with the file's local path. */
+    @Test
+    fun `the options OpenJ9 adds itself are not the user's flags`() {
+        val named = "-Xoptionsfile=C:\\jdk\\lib\\options.default"
+        val lockword = "-Xlockword:mode=default,noLockword=java/lang/String"
+        val hashed = "-XX:+EnsureHashed:java/lang/Class,java/lang/Thread"
+        val args = listOf(named, lockword, hashed, "-Xmx14g")
+        val file = "\"$lockword\"\n\"$hashed\"\n"
+        assertEquals(listOf("-Xmx14g"), userArguments(args) { file })
+        assertEquals(listOf(lockword, hashed, "-Xmx14g"), userArguments(args) { error("unreadable") })
+        assertEquals(listOf("-Xmx14g"), userArguments(listOf("-Xmx14g")) { error("not read without the option") })
     }
 
     @Test

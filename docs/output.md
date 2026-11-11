@@ -48,7 +48,7 @@ The common ones:
   wall time: the most the wall can grow, where the labels sit on the run's critical path. Said above
   1% of the work. Fewer, larger labels cost less.
 - `` `visit`: its calls are under the recommended 50ns `` - the label is a visible part of what it
-  measures. Label the loop around it, with `op(visit, times = n) { }`. The floor is 2 bodies at the
+  measures. Label the loop around it, with `op(handle, times = n) { }`. The floor is 2 bodies at the
   run's body, rounded up.
 - `` `request`: its executions, 1.2us, are under the recommended 3.0us `` - the operation is too short
   for a coarse label. Register it fine; the `op` calls stay the same. What raises the floor is named.

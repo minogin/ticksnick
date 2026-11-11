@@ -1710,7 +1710,7 @@ class Run internal constructor(
             // A label below the floor cannot move a ranking, so it is a warning and never a failure:
             // every offender is named; the reader decides.
             for (op in tooSmall()) add(
-                Warning(Kind.FINE_UNDER_FLOOR, words(code(op.name)), figure(fineFloorNanos, ::limitText), words(code("op(${op.name}, times = n) { }")))
+                Warning(Kind.FINE_UNDER_FLOOR, words(code(op.name)), figure(fineFloorNanos, ::limitText))
             )
             // The same boundary from the other side, exact: the duration it compares is measured.
             for (c in coarseTooSmall()) {

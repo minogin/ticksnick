@@ -724,13 +724,17 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             // which of their labels it was, and on a short run — where this line fires most — the
             // answer is usually the whole point. Capped at four, since a run can fold twenty-five.
             fun names(ops: List<Unsampled>) = ops.take(4).joinToString { it.name + if (it.coarse) STAR else "" } + if (ops.size > 4) ", ${sym.ellipsis}" else ""
-            // "called anyway" rather than "N of them did run", which reads as nonsense at N = 1 —
-            // and one is the common case on a short run, which is exactly when a reader is most
-            // likely to be new to the report.
-            add(
-                "  ${Run.plural(fine.folded.size.toLong(), "operation")} never sampled and folded away" +
-                        (if (called.isEmpty()) ", and never called: " + names(fine.folded) else "; called anyway: " + names(called.sortedByDescending { it.calls }))
-            )
+            // In the reader's words: what happened to them, not what the table did with them.
+            val uncalled = fine.folded.filter { it.calls <= 0 }
+            val parts = buildList {
+                if (called.isNotEmpty()) add(
+                    "${Run.plural(called.size.toLong(), "operation")} called but never sampled: " + names(called.sortedByDescending { it.calls })
+                )
+                if (uncalled.isNotEmpty()) add(
+                    (if (called.isEmpty()) Run.plural(uncalled.size.toLong(), "operation") else "${uncalled.size}") + " never called: " + names(uncalled)
+                )
+            }
+            add("  " + parts.joinToString("; "))
         }
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.

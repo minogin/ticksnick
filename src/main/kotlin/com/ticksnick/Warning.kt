@@ -108,7 +108,7 @@ internal enum class Kind(val text: (List<String>) -> String) {
     }),
     FINE_UNDER_FLOOR({ g ->
         "${g[0]}: its calls are under the recommended ${g[1]}, so the label is a visible part of their time${sym.dash}" +
-                "label the loop around it, ${g[2]}, or drop it"
+                "label the loop around it, `op(handle, times = n) { }`, or drop it"
     }),
     COARSE_UNDER_FLOOR({ g ->
         "${g[0]}: its executions, ${g[1]}, are under the recommended ${g[2]}${if (g[3].isEmpty()) "" else " (${g[3]})"}, " +

@@ -220,6 +220,7 @@ internal object RunStore {
             if (n.ownFineCovered.isNotEmpty()) sparse(k + "ownFineCovered", n.ownFineCovered)
             if (n.calls.isNotEmpty()) sparse(k + "calls", n.calls)
             if (n.allocated != 0L) line(k + "allocated", n.allocated)
+            if (n.allocatedUnknown) line(k + "allocatedUnknown", true)
             // Only where there are any; a node without these lines loads with none.
             if (n.slowest.isNotEmpty()) {
                 line(k + "slowest", n.slowest.size)
@@ -363,6 +364,7 @@ internal object RunStore {
                 calls = if (k + "calls" in m) sparse(k + "calls", MAX_OPERATIONS) else LongArray(0),
                 // Optional: only a session that counted them has any.
                 allocated = m[k + "allocated"]?.toLong() ?: 0L,
+                allocatedUnknown = m[k + "allocatedUnknown"]?.toBoolean() ?: false,
                 children = (childrenOf[i] ?: emptyList<Int>()).map { build(it) },
                 slowest = (0 until (m[k + "slowest"]?.toInt() ?: 0)).map {
                     SlowExecution(text(k + "slowest.$it.key") ?: "", long(k + "slowest.$it.nanos"))

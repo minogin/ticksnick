@@ -88,6 +88,29 @@ class AllocationsTest {
         assertBytes(3.0 * MB, p.allocatedPerExecution(p.node("alloc.outer")), "outer")
     }
 
+    /**
+     * On a virtual thread the JVM reads -1 for the bytes a thread allocated: the path, and every one
+     * above it, read as not known, `-`, and a warning says why - never a 0 for work that did allocate.
+     */
+    @Test
+    fun `bytes on a virtual thread are not known, never 0`() {
+        Profiler.start(allocations = true)
+        repeat(3) {
+            op(outer) {
+                val ctx = captureCoarse()
+                Thread.ofVirtual().start {
+                    withCoarse(ctx) { op(inner) { sink = ByteArray(MB) } }
+                    Profiler.release()
+                }.join()
+            }
+        }
+        val p = Profiler.stop()
+
+        assertTrue(p.allocatedPerExecution(p.node("alloc.inner")).isNaN(), "a virtual thread's bytes read as a figure")
+        assertTrue(p.allocatedPerExecution(p.node("alloc.outer")).isNaN(), "the parent of a virtual thread's work read as a figure")
+        assertTrue(p.warnings().any { it.kind == Kind.ALLOCATIONS_VIRTUAL_THREADS }, p.render())
+    }
+
     /** The thread that opened the execution does not allocate this; a thread working under it does. */
     @Test
     fun `bytes allocated on a thread that carries the context count under the row`() {

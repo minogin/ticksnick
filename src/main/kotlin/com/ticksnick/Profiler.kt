@@ -197,7 +197,11 @@ internal class OpSlot(
     /** Moves the bytes this thread allocated since its last coarse boundary onto [node]. See [flushCounts]. */
     private fun flushAllocated(node: CoarsePath?, session: Int, now: Long) {
         if (allocatedSession == session) {
-            if (node != null) node.allocated += now - allocatedAtBoundary
+            // -1, on a virtual thread: no count, and the path says so rather than reading 0.
+            if (node != null) {
+                if (now < 0 || allocatedAtBoundary < 0) node.allocatedUnknown = true
+                else node.allocated += now - allocatedAtBoundary
+            }
         } else {
             allocatedSession = session
         }
@@ -1325,6 +1329,7 @@ object Profiler {
             ownFine = n.ownFine ?: LongArray(MAX_OPERATIONS + 1), ownFineCovered = n.ownFineCovered ?: LongArray(MAX_OPERATIONS + 1),
             calls = n.calls ?: LongArray(MAX_OPERATIONS),
             allocated = n.allocated,
+            allocatedUnknown = n.allocatedUnknown,
             fine = n.fine ?: LongArray(MAX_OPERATIONS + 1),
             pausedNanos = (n.pausedNanos * pauseScale).toLong(),
             children = n.children?.filterNotNull()?.filter { !it.isEmpty() }?.map { nodeOf(it) } ?: emptyList(),

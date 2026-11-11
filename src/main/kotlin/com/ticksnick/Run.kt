@@ -572,6 +572,8 @@ internal class CoarseNode internal constructor(
     internal val calls: LongArray = LongArray(0),
     /** Bytes allocated directly under executions at this path, outside its coarse children, on every thread. Counted. */
     val allocated: Long = 0,
+    /** Whether an execution here ran where the JVM could not count bytes: [allocated] is then not known. */
+    val allocatedUnknown: Boolean = false,
 ) {
     val meanSpanNanos: Double get() = if (count == 0L) Double.NaN else spanSumNanos.toDouble() / count
 
@@ -1373,9 +1375,11 @@ class Run internal constructor(
 
     /**
      * Bytes allocated under [n] in all its executions, its coarse children included, on every thread
-     * that ran under it. A parent's is its own and its children's, exactly: nothing is estimated.
+     * that ran under it. A parent's is its own and its children's, exactly: nothing is estimated. NaN,
+     * read as `-`, where any of them ran on a virtual thread, which the JVM does not count.
      */
-    internal fun allocatedTotal(n: CoarseNode): Long = n.flatten().sumOf { it.allocated }
+    internal fun allocatedTotal(n: CoarseNode): Double =
+        n.flatten().let { all -> if (all.any { it.allocatedUnknown }) Double.NaN else all.sumOf { it.allocated }.toDouble() }
 
     /**
      * Coarse labels on something too small to carry a context.
@@ -1653,6 +1657,7 @@ class Run internal constructor(
             // quietly accumulating everybody else's samples, with a plausible number beside it.
             if (openAtEnd > 0) add(Warning(Kind.LABELS_LEFT_OPEN, words(labelsText(openAtEndNames, openAtEnd))))
             if (allocationsMissing) add(Warning(Kind.ALLOCATIONS_UNAVAILABLE))
+            if (allocations && coarseTree.any { root -> root.flatten().any { it.allocatedUnknown } }) add(Warning(Kind.ALLOCATIONS_VIRTUAL_THREADS))
             if (untrackedSlots > 0) add(Warning(Kind.THREADS_UNSAMPLED, figure(untrackedSlots.toDouble(), ::countText)))
             // No warning for threads that exited without Profiler.release(): the sampler skips a
             // thread that has exited and the slot is reclaimed within a second, so nothing above is

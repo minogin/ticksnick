@@ -55,6 +55,9 @@ internal enum class Kind(val text: (List<String>) -> String) {
         "${g[0]}: entered and never exited by `stop()`${sym.dash}an exception skipped the `exit`, so later time went to it; put `exit` in a `finally`"
     }),
     ALLOCATIONS_UNAVAILABLE({ _ -> "Allocated: not shown${sym.dash}this JVM cannot count allocated bytes per thread; HotSpot can" }),
+    ALLOCATIONS_VIRTUAL_THREADS({ _ ->
+        "Allocated: not counted on virtual threads, so the rows that ran on them read `-`${sym.dash}run that work on platform threads to count it"
+    }),
     THREADS_UNSAMPLED({ g ->
         "${g[0]} threads were not sampled, past the ${countText(MAX_SLOTS.toDouble())} TickSnick follows at once${sym.dash}" +
                 "their time is missing from every figure; `Profiler.release()` frees the slot of a thread done labelling"

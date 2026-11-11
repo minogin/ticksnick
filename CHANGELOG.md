@@ -129,6 +129,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - Each coarse execution costs more with it on, and the coarse floor check takes that into account.
   A diff warns when only one side counted.
 - On a JVM that cannot report allocated bytes the session runs without them and the report says so.
+  On a virtual thread, where the JVM gives none, a row and every row above it read `-`, never 0, and
+  a warning says why.
 
 ### Floors that follow the machine
 

@@ -380,6 +380,12 @@ internal class CoarsePath(
     @JvmField var calls: LongArray? = null
     /** Bytes allocated directly under this path, outside its coarse children. Written as [calls] is. */
     @JvmField var allocated: Long = 0
+
+    /**
+     * Whether an execution under this path ran where the JVM could not count allocated bytes, a
+     * virtual thread, whose reading is -1: [allocated] is then short by an unknown amount, and reads `-`.
+     */
+    @JvmField var allocatedUnknown: Boolean = false
     /**
      * Samples whose innermost context was an execution on this path, by fine label, last entry no
      * label: this path's own time, outside its coarse children. Unlabelled samples of a thread parked
@@ -460,6 +466,7 @@ internal class CoarsePath(
         if (o.maxNanos > maxNanos) maxNanos = o.maxNanos
         spans.addAll(o.spans)
         allocated += o.allocated
+        if (o.allocatedUnknown) allocatedUnknown = true
         inclusiveHits += o.inclusiveHits
         runningInclusiveHits += o.runningInclusiveHits
         instanceTicks += o.instanceTicks
@@ -502,6 +509,7 @@ internal class CoarsePath(
         maxNanos = 0
         spans.clear()
         allocated = 0
+        allocatedUnknown = false
         inclusiveHits = 0
         runningInclusiveHits = 0
         instanceTicks = 0

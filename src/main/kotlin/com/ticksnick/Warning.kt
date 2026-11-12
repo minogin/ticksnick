@@ -56,7 +56,7 @@ internal enum class Kind(val text: (List<String>) -> String) {
     }),
     ALLOCATIONS_UNAVAILABLE({ _ -> "Allocated: not shown${sym.dash}this JVM cannot count allocated bytes per thread; HotSpot can" }),
     ALLOCATIONS_VIRTUAL_THREADS({ _ ->
-        "Allocated: not counted on virtual threads, so the rows that ran on them read `-`${sym.dash}run that work on platform threads to count it"
+        "Allocated: not counted on virtual threads, so the rows that ran on them read `?`${sym.dash}run that work on platform threads to count it"
     }),
     THREADS_UNSAMPLED({ g ->
         "${g[0]} threads were not sampled, past the ${countText(MAX_SLOTS.toDouble())} TickSnick follows at once${sym.dash}" +

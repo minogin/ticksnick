@@ -159,7 +159,7 @@ class CallsPerParentTest {
             ("plan" to "rule") to listOf("1,360", "680", "-50%", "340", "340", "="), ("plan" to "visit") to listOf("400", "200", "-50%", "100", "100", "="),
             ("plan" to "rare") to listOf("200", "100", "-50%", "50", "50", "="),
             ("cleanup" to "visit") to listOf("40", "20", "-50%", "10", "10", "="), ("cleanup" to "rare") to listOf("4", "2", "-50%", "1", "1", "="),
-            ("cleanup" to "unlabelled") to listOf("own", "own", "", "", "", ""),
+            ("cleanup" to "unlabelled") to listOf("", "", "", "", "", ""),  // no label: no calls apply, blank
         )
         for ((row, want) in wanted) assertEquals(want, rows[row], "$row in:\n$diff")
         assertTrue(diff.lines().any { it.contains("Per parent") }, diff)

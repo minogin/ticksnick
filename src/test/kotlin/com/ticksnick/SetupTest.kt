@@ -68,9 +68,9 @@ class SetupTest {
     }
 
     @Test
-    fun `a line gives every name, and a run without one reads as a dash`() {
+    fun `a line gives every name, and a run without one reads as unknown`() {
         val runs = listOf(mapOf("warmups" to "1", "batches" to "3"), mapOf("warmups" to "2", "batches" to "3"), mapOf("warmups" to "2"))
-        assertEquals("warmups: 1, 2; batches: 3, -", factsLine(runs))
+        assertEquals("warmups: 1, 2; batches: 3, ?", factsLine(runs))
         assertEquals(listOf("warmups", "batches"), mixedNames(runs))
         assertEquals(emptyList(), mixedNames(listOf(mapOf("a" to "1"), mapOf("a" to "1"))))
     }

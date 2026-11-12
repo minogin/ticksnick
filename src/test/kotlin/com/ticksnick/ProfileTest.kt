@@ -19,7 +19,7 @@ class ProfileTest {
         assertTrue(abs(e.half - 1.35) < 0.01, "half-width ${e.half}")
         assertEquals("+-21%", plusMinus(e))
         assertTrue(Estimate(listOf(6.08)).half.isNaN(), "one run has no interval")
-        assertEquals("-", plusMinus(Estimate(listOf(6.08))))
+        assertEquals("?", plusMinus(Estimate(listOf(6.08))))
         assertEquals(2.0395, t95(31), 1e-4)
         assertEquals(1.9840, t95(100), 1e-4)
         assertTrue(t95(30) > t95(31) && t95(31) > t95(100) && t95(100) > 1.96)

@@ -111,9 +111,9 @@ internal fun valuesOf(values: List<String>): String {
 
 private fun namesIn(runs: List<Map<String, String>>): List<String> = runs.flatMap { it.keys }.distinct()
 
-private fun valuesOf(name: String, runs: List<Map<String, String>>): String = valuesOf(runs.map { it[name] ?: "-" })
+private fun valuesOf(name: String, runs: List<Map<String, String>>): String = valuesOf(runs.map { it[name] ?: UNKNOWN })
 
-/** `warmups: 2; batches: 1, 3`: every name in [runs], one map per run, with `-` for a run that lacks it. */
+/** `warmups: 2; batches: 1, 3`: every name in [runs], one map per run, with `?` for a run that lacks it. */
 internal fun factsLine(runs: List<Map<String, String>>): String =
     namesIn(runs).joinToString("; ") { "$it: ${valuesOf(it, runs)}" }
 

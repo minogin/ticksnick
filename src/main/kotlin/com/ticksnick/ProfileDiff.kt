@@ -148,7 +148,8 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         with(after) { runList("after", header = false) }
         appendLine(header("Wall time", before.wallTime(), after.wallTime()))
         appendLine(header("  Active", before.active(), after.active()))
-        appendLine(header("  Paused", before.paused(), after.paused()))
+        // No pause on either side is the default, nothing to look at: `Paused 0.00ns -> 0.00ns +0.00ns` said nothing.
+        if (before.paused().mean > 0 || after.paused().mean > 0) appendLine(header("  Paused", before.paused(), after.paused()))
         if (rootName != null) {
             val b = before.matched(before.tree(), rootName)
             val a = after.matched(after.tree(), rootName)
@@ -197,8 +198,8 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     /** A line of the report that is about the run, not the program: one line per side. */
     private fun StringBuilder.bothSides(key: String, b: String?, a: String?) {
         if (b == null && a == null) return
-        appendLine(row(key, "before  ${b ?: "-"}"))
-        appendLine(row("", "after   ${a ?: "-"}"))
+        appendLine(row(key, "before  ${b ?: UNKNOWN}"))
+        appendLine(row("", "after   ${a ?: UNKNOWN}"))
     }
 
     private fun clockMean(r: Profile) = r.runs.map { it.clock.mean }.filter { !it.isNaN() }.let { if (it.isEmpty()) Double.NaN else it.average() }

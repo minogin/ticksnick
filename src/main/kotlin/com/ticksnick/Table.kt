@@ -12,6 +12,13 @@ internal const val MIN_SHARE_CHANGE = 0.05
 /** The width of a `+-` beside a figure, its separating space included: the widest is a change's, `+-4.7pp`. */
 internal const val INTERVAL_COLUMN = 8
 
+/**
+ * A figure TickSnick could not measure, or measured too little of to say: never 0, which is a measured
+ * nothing. A blank, by contrast, has nothing to look at: the column's default, or a column that does not
+ * apply to the row. After a change in a diff, `?` says the same thing: whether the change is real.
+ */
+internal const val UNKNOWN = "?"
+
 /** How a column's figures read. Text only: a [Row] holds raw values, so that another writer can take them. */
 internal enum class Form(val percentage: Boolean = false) {
     COUNT, PER_PARENT, WHOLE, ONE_DECIMAL, TWO_DECIMALS, TIME, BYTES, PARENT_SHARE(true), SHARE(true), RUNNABLE_WAITING(true)
@@ -24,9 +31,10 @@ internal enum class Form(val percentage: Boolean = false) {
  * @param interval whether the figure gets a `+-` over the runs: yes for what says how much, no for
  * what says how it ran, and no for what is counted. Required, so that a new column has to answer.
  * @param width the column's narrowest width in text, the figures being right-aligned in it.
- * @param absent what a coarse or fine row prints with no figure here, and [absentOwn] what a fine row
- * under a coarse one prints.
- * @param zeroIsAbsent a 0 reads as no figure.
+ * @param absent what a figure no run could give prints: [UNKNOWN], or blank where that means the column's
+ * default, as `Parallel` under its threshold. A row the column does not apply to has no figure at all,
+ * and prints blank.
+ * @param zeroIsAbsent a 0 is the column's default, and prints blank.
  * @param largest over the runs the figure is their largest, not their mean.
  */
 internal class Column(
@@ -35,17 +43,16 @@ internal class Column(
     val form: Form,
     val interval: Boolean,
     val width: Int,
-    val absent: String = "-",
-    val absentOwn: String = "",
+    val absent: String = UNKNOWN,
     val zeroIsAbsent: Boolean = false,
     val largest: Boolean = false,
 )
 
-internal val EXECUTIONS = Column("Executions", "Load", Form.COUNT, interval = false, width = 11, absentOwn = "own")
+internal val EXECUTIONS = Column("Executions", "Load", Form.COUNT, interval = false, width = 11)
 internal val PER_PARENT = Column("Per parent", "Load", Form.PER_PARENT, interval = false, width = 10, absent = "")
 internal val PARALLEL = Column("Parallel", "Load", Form.ONE_DECIMAL, interval = false, width = 8, absent = "")
-internal val WALL = Column("Wall", "Load", Form.TIME, interval = true, width = 10, absentOwn = "-")
-internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interval = true, width = 8, absent = "")
+internal val WALL = Column("Wall", "Load", Form.TIME, interval = true, width = 10)
+internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interval = true, width = 8)
 internal val PAUSED = Column("Paused", "Load", Form.TIME, interval = true, width = 10, zeroIsAbsent = true)
 internal val COARSE_WAITING = Column("Runnable / Waiting", "Load", Form.RUNNABLE_WAITING, interval = true, width = 18)
 internal val MEAN = Column("Mean", "Load", Form.TIME, interval = true, width = 10)
@@ -66,9 +73,10 @@ internal val THREAD_TIME = Column("Thread-time", "Load", Form.TIME, interval = t
 internal val FINE_WAITING = Column("Runnable / Waiting", "Load", Form.RUNNABLE_WAITING, interval = true, width = 18)
 internal val CALLS = Column("Calls", "Load", Form.COUNT, interval = false, width = 13)
 internal val PER_CALL = Column("Thread-time per call", "Load", Form.TIME, interval = true, width = 20)
-internal val LONG_CALLS = Column("Long calls", "Long", Form.COUNT, interval = false, width = 10)
-internal val LONG_TIME = Column("Time", "Long", Form.TIME, interval = false, width = 8)
-internal val LONGEST = Column("Longest", "Long", Form.TIME, interval = false, width = 8, largest = true)
+// Blank, not unknown, where the long calls are within the noise: the ordinary case, and nothing to look at.
+internal val LONG_CALLS = Column("Long calls", "Long", Form.COUNT, interval = false, width = 10, absent = "")
+internal val LONG_TIME = Column("Time", "Long", Form.TIME, interval = false, width = 8, absent = "")
+internal val LONGEST = Column("Longest", "Long", Form.TIME, interval = false, width = 8, largest = true, absent = "")
 internal val WALL_TIME = Column("Wall-time", "Spread", Form.TIME, interval = false, width = 9)
 internal val CONCURRENCY = Column("Concurrency", "Spread", Form.TWO_DECIMALS, interval = false, width = 11)
 internal val WORKERS = Column("Workers", "Spread", Form.WHOLE, interval = false, width = 7)
@@ -84,7 +92,8 @@ internal class Unsampled(val name: String, val coarse: Boolean, val calls: Long)
 /**
  * **One row of a table**: raw values, nanos and bytes and shares in percent, each with every run's
  * value behind it, never text. A run with no figure for a column has none in its [Estimate], and a
- * row with none at all prints its column's [Column.absent].
+ * row with none at all prints its column's [Column.absent]. A column that does not apply to the row is not
+ * in [figures], and prints blank.
  *
  * @param present how many runs have the row.
  * @param own a fine label in a coarse row's own time.
@@ -134,9 +143,16 @@ internal class Table(
 /** Whether every run has the same figure: a counted one prints plainly then, and `~` the mean when not. */
 private fun Estimate.agreed(): Boolean = values.distinct().size == 1
 
-/** The figure of [c] as the report prints it, value only. [own]: the row is a fine label in a coarse row's own time. */
+/**
+ * **What a cell shows: a figure, [UNKNOWN] or nothing**, the one rule for every table of every report and diff.
+ * No figure on the row: the column does not apply to it, blank. A figure no run could give: [Column.absent],
+ * unknown unless that means the default. A measured default, `Paused` 0: blank. [own]: the row is a fine label
+ * in a coarse row's own time.
+ */
 internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
-    if (f == null || f.n == 0 || (c.zeroIsAbsent && f.mean == 0.0)) return if (own) c.absentOwn else c.absent
+    if (f == null) return ""
+    if (f.n == 0) return c.absent
+    if (c.zeroIsAbsent && f.mean == 0.0) return ""
     val v = if (c.largest) f.values.max() else f.mean
     return when (c.form) {
         Form.COUNT -> if (f.agreed()) String.format(Locale.ROOT, "%,d", v.toLong()) else String.format(Locale.ROOT, "~%,.0f", v)
@@ -435,13 +451,30 @@ internal class DiffText(
         appendLine(layout.rule())
     }
 
+    /**
+     * A side's cell: its default is blank, as in a report, unless the other side has a figure there - `Per parent`
+     * 3 -> 1 must print the 1, or the change reads against nothing.
+     */
+    private fun sideText(c: Column, row: Row?, other: Row?, own: Boolean): String {
+        val text = cellText(c, row, own)
+        val f = row?.figures?.get(c)
+        if (text.isNotEmpty() || f == null || f.n == 0) return text
+        val across = cellText(c, other, own)
+        if (across.isEmpty() || across == UNKNOWN) return text
+        return when (c) {
+            PER_PARENT -> "1"
+            PAUSED -> "0"
+            else -> text
+        }
+    }
+
     /** Before, after, the change, what is attached to the row on each side, and the rows under it. */
     private fun StringBuilder.row(r: DiffRow, depth: Int, shared: Boolean = false) {
-        fun side(name: String, row: Row?) = layout.line(
-            listOf(name) + columns.map { c -> layout.cell(c, cellText(c, row, r.own), intervalText(c, row?.figures?.get(c))) }
+        fun side(name: String, row: Row?, other: Row?) = layout.line(
+            listOf(name) + columns.map { c -> layout.cell(c, sideText(c, row, other, r.own), intervalText(c, row?.figures?.get(c))) }
         )
-        appendLine(side(nameOf(r, depth, shared), r.before))
-        appendLine(side("", r.after))
+        appendLine(side(nameOf(r, depth, shared), r.before, r.after))
+        appendLine(side("", r.after, r.before))
         appendLine(layout.line(listOf("") + columns.map { c -> changeCell(c, r) }))
         val indent = "  ".repeat(depth)
         slowestLines(indent, "slowest before: ", r.before?.slowest.orEmpty())

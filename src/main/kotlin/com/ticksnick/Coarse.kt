@@ -385,7 +385,7 @@ internal class CoarsePath(
 
     /**
      * Whether an execution under this path ran where the JVM could not count allocated bytes, a
-     * virtual thread, whose reading is -1: [allocated] is then short by an unknown amount, and reads `-`.
+     * virtual thread, whose reading is -1: [allocated] is then short by an unknown amount, and reads `?`.
      */
     @JvmField var allocatedUnknown: Boolean = false
     /**

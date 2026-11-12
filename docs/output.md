@@ -7,6 +7,12 @@ TickSnick prints three kinds of report:
   and what says how much has a 95% interval.
 - **A diff**: `TickSnick.diff(before, after)` on two folders.
 
+**A cell holds a figure, `?` or nothing.** `?` is a figure TickSnick could not measure, or measured
+too little of to say: a p90 with under 10 executions, a label never sampled where it was called. More
+runs, more executions or another setup would give it. A blank cell has nothing to look at: the
+column's usual value (`Per parent` 1, `Paused` 0) or a column that does not apply to the row. A 0 is
+a measured nothing. After a change in a diff, `?` means the change could be noise.
+
 The examples come from a program that resolves Java classpaths over the Maven Central dependency
 graph. It runs on four threads in three batches of about 27 s each. Its coarse labels are `runBatch`,
 `resolveRoot`, `resolve`, `select`, `via` and `reach`; the rest are fine labels.
@@ -85,7 +91,7 @@ Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64;
 
 **Tags** are what the program said about the run. **Setup** is what the run read by itself, and how it
 measured. When runs differ, each name lists its values: `warmups: 1, 2; batches: 3..10`. A run with no
-value for a name shows `-`.
+value for a name shows `?`.
 
 ### The header
 
@@ -120,7 +126,7 @@ COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged t
                                |                                             Load                                             |                    Long
 Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
 -------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
-runBatch                       |           3                          82.0s               4.20s      80.0% / 20.0%      27.3s |      27.4s          -          -      27.6s
+runBatch                       |           3                          82.0s               4.20s      80.0% / 20.0%      27.3s |      27.4s          ?          ?      27.6s
   resolveRoot                  |      92,667     30,889      4.0      82.0s     100%      4.20s          100% / 0%     3.53ms |      602us     7.50ms     61.6ms      434ms
     resolve                    |     278,001          3               82.0s     100%      4.20s          100% / 0%     1.18ms |      146us     2.57ms     19.0ms      358ms
       select                   |     278,001                          42.5s      52%      3.90s          100% / 0%      611us |     62.7us     1.27ms     11.6ms      348ms
@@ -151,7 +157,7 @@ run counted it.
   share whose thread was parked, blocked or waiting. `runBatch` is 20% waiting: the main thread
   waits for the workers.
 - **Mean, p50, p90, p99, Max** - measured per execution. Percentiles are exact up to 2,624
-  executions and within 0.8% after. A p90 needs 10 executions and a p99 100; with fewer it shows `-`.
+  executions and within 0.8% after. A p90 needs 10 executions and a p99 100; with fewer, a row run once included, it shows `?`.
 
 **The `-` rows under an operation** are the fine labels in its own time, outside its coarse
 children:
@@ -160,16 +166,16 @@ children:
                                |                                             Load                                             |                    Long
 Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
 -------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
-batch                          |           1                          1.14s                   -          100% / 0%      1.14s |          -          -          -      1.14s
-  plan                         |          10         10               984ms      87%          -          100% / 0%     98.4ms |     98.3ms     98.6ms          -     99.5ms
+batch                          |           1                          1.14s                              100% / 0%      1.14s |          ?          ?          ?      1.14s
+  plan                         |          10         10               984ms      87%                     100% / 0%     98.4ms |     98.3ms     98.6ms          ?     99.5ms
     - rule                     |       3,400        340               682ms      69%                                    201us
     - visit (2 parents)        |       1,000        100               205ms      21%                                    205us
     - rare (2 parents)         |         500         50              97.2ms      10%                                    194us
     - and 1 more               |                                     2.00ms      <1%
-  cleanup                      |          10         10               150ms      13%          -          100% / 0%     15.0ms |     15.0ms     15.0ms          -     15.1ms
+  cleanup                      |          10         10               150ms      13%                     100% / 0%     15.0ms |     15.0ms     15.0ms          ?     15.1ms
     - visit (2 parents)        |         100         10              97.2ms      65%                                    972us
     - unlabelled               |         own                         51.1ms      34%
-    - rare (2 parents)         |          10          1                   -
+    - rare (2 parents)         |          10          1                   ?        ?                                        ?
 -------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
 Under multiple parents - each over all of them
   - visit                      |       1,100                          303ms                                             275us
@@ -182,7 +188,7 @@ Under multiple parents - each over all of them
   can be compared between runs of different sizes.
 - **Wall, % parent** - its time, sampled, and its share of the row's Wall, as a coarse child's is.
 - **Mean** - its own time per call: `visit` is 205 us under `plan` and 972 us under `cleanup`.
-- A label called on a path and never sampled there still has its row, with `-` for the time:
+- A label called on a path and never sampled there still has its row, with `?` for its time:
   `rare` ran once per `cleanup`, too briefly to be caught.
 - `unlabelled` is time under no fine label.
 - **Every fact about a row is in one parenthesis on its name:** `(2 parents)` when an operation is on
@@ -216,7 +222,7 @@ exactly. **Per execution** is that over `Executions`, which compares runs of dif
 does. It is bytes allocated, not memory held: an operation can allocate gigabytes and hold none of it.
 What it measures is the collector's work - a young collection comes every time the young generation
 fills - and not how much memory the program needs. Work on a virtual thread is not counted: the rows it
-ran under, and every row above them, read `-`, and a warning says so. The label's own context, one per execution, is left
+ran under, and every row above them, read `?`, and a warning says so. The label's own context, one per execution, is left
 out, so an execution that allocates nothing reads 0; the first execution on a path still includes a few
 KB of the label's own, which matters only for an operation that allocates very little. A thread
 counts from its first coarse boundary in the session, so an execution already open at `start` misses
@@ -233,11 +239,11 @@ COARSE AND FINE OPERATIONS - own time, out of 104s active time
 Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+----------------------------------------------------------------------------------+------------------------------+------------------------------------
 onCentral                  |          28.1%        117s          100% / 0%   569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
-runBatch *                 |          18.8%       77.8s     0.198% / 99.8%             3                25.9s |          -        -        - |     77.8s        1.00       2     1
+runBatch *                 |          18.8%       77.8s     0.198% / 99.8%             3                25.9s |                              |     77.8s        1.00       2     1
 merge                      |          14.1%       58.4s          100% / 0%   199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
-visit                      |          14.0%       58.2s          100% / 0%   562,928,865                103ns |          -        -        - |     43.5s        1.34       4    12
-(no operation)             |          6.37%       26.4s     99.0% / 0.950%             -                    - |          -        -        - |         -           -       -     -
-passedOn                   |          6.00%       24.9s          100% / 0%   222,178,167                112ns |          -        -        - |     21.9s        1.14       4    12
+visit                      |          14.0%       58.2s          100% / 0%   562,928,865                103ns |                              |     43.5s        1.34       4    12
+(no operation)             |          6.37%       26.4s     99.0% / 0.950%
+passedOn                   |          6.00%       24.9s          100% / 0%   222,178,167                112ns |                              |     21.9s        1.14       4    12
 ```
 
 One row per label, across the whole run, in its **own** time: time inside it and inside no label
@@ -258,8 +264,8 @@ above. `(no operation)` is time on profiled threads under no label.
 
 **Long** - calls of the label that lasted over a sampling tick: how many, the time they held, and the
 longest. A fine call is counted and not timed, so this is what stands in for the coarse table's
-percentiles, and a coarse row shows `-`. A short operation with a few long calls is usually a rehash,
-a lock or a GC pause. `-` means they hold no more than preemption and pauses alone would explain; the
+percentiles, and a coarse row is blank there. A short operation with a few long calls is usually a rehash,
+a lock or a GC pause. Blank means they hold no more than preemption and pauses alone would explain; the
 footnote says how much that is.
 
 **Spread** - how the time was spread over threads.
@@ -303,7 +309,7 @@ COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged t
                                    |                                                                      Load                                                                      |                    Long
 Coarse operation                   |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
 -----------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
-runBatch                           |           3                          82.4s +-0.9%                            4.29s +-5.2%           80.0 / 20.0 +-0.0%         27.5s +-0.9%    |      27.5s          -          -      28.1s
+runBatch                           |           3                          82.4s +-0.9%                            4.29s +-5.2%           80.0 / 20.0 +-0.0%         27.5s +-0.9%    |      27.5s          ?          ?      28.1s
   resolveRoot                      |      92,667     30,889      4.0      82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        3.55ms +-0.9%    |      602us     7.54ms     61.3ms      449ms
     resolve                        |     278,001          3               82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        1.18ms +-0.9%    |      148us     2.57ms     18.9ms      358ms
       select                       |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
@@ -368,7 +374,7 @@ COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the cha
 Operation                  |   Thread-time%           Thread-time           Runnable / Waiting                   Calls Thread-time per call           | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+--------------------------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------
 onCentral (4 -> 0 runs)    |           28.3 +-0.3%           118s +-1.6%               100 / 0 +-0.0%      569,233,860                207ns +-1.6%    |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
-                           |              -                     -                            -                       -                    -           |          -        -        - |         -           -       -     -
+
 
 dependencies               |           5.58 +-0.1%          23.2s +-2.6%               100 / 0 +-0.0%      222,178,167                104ns +-2.6%    |         ~5   14.5ms   9.01ms |     20.7s        1.12       4    12
                            |           14.5 +-0.2%          43.1s +-3.1%               100 / 0 +-0.0%      222,178,167                194ns +-3.1%    |          6   23.5ms   12.0ms |     31.6s        1.37       4    12
@@ -395,7 +401,7 @@ and a note under a table that only one side has names it.
   prints too when the only `?` is on a line over the tables.
 - **Calls and Executions are the check.** `=` means both sides did the same work, so a change in
   time is a change in the code. Two different counts mean different work.
-- **A row on one side only** reads `-` on the other and has no change: `onCentral (4 -> 0 runs)` was
+- **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was
   removed.
 - **One run on a side** gives the change with no interval and no `?`, and a warning says so.
 - **`CPU clock`** under the header is each side's mean. When the two differ, a warning says by how

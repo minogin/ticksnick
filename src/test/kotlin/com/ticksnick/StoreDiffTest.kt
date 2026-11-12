@@ -68,7 +68,7 @@ class StoreDiffTest {
     }
 
     @Test
-    fun `a stall shows in the Long group and a smooth operation shows dashes`() {
+    fun `a stall shows in the Long group and a smooth operation shows nothing there`() {
         val p = session()
         val stalls = p.operations.first { it.name == "store-stalls" }
         assertTrue(stalls.stuckInstances >= 1, "the stall was not seen as a long execution")
@@ -79,7 +79,7 @@ class StoreDiffTest {
         val smoothRow = lines.first { it.startsWith("store-smooth ") }
         val longOf = { row: String -> row.split("|")[2].trim() }
         assertTrue(longOf(stallRow).first().isDigit(), "the Long group is empty on the stalled row: $stallRow")
-        assertEquals("- - -", longOf(smoothRow).split(Regex("\\s+")).joinToString(" "), "the smooth row has figures in Long: $smoothRow")
+        assertEquals("", longOf(smoothRow), "the smooth row has figures in Long: $smoothRow")
     }
 
     @Test
@@ -313,9 +313,9 @@ class StoreDiffTest {
         val after = profile(listOf(stat("only-after", 100, 1_000), stat("both", 300, 2_000)), tree = listOf(node("root", 1_000_000_000)))
         val text = diffOf(before, after, "x", "y")
         val onlyBefore = diffRow(text, "only-before")
-        assertTrue("100" in onlyBefore[0] && " - " in onlyBefore[1], "a row only the earlier run had: $onlyBefore")
+        assertTrue("100" in onlyBefore[0] && onlyBefore[1].isBlank(), "a row only the earlier run had: $onlyBefore")
         val onlyAfter = diffRow(text, "only-after")
-        assertTrue(" - " in onlyAfter[0] && "100" in onlyAfter[1], "a row only the later run had: $onlyAfter")
+        assertTrue('|' !in onlyAfter[0] && "100" in onlyAfter[1], "a row only the later run had: $onlyAfter")
         val both = diffRow(text, "both")
         assertTrue("1,000" in both[0] && "2,000" in both[1], "calls that differ should both print: $both")
         assertTrue("+50%" in both[2], "the change is missing: $both")

@@ -734,7 +734,7 @@ class CoarseTest {
         val head = lines.first { it.startsWith("Coarse operation") }
         assertTrue("Per execution" in head, head)
         val row = lines.first { it.trimStart().startsWith("- fine") }
-        assertEquals(head.indexOf("% parent") + "% parent".length, row.trimEnd().length, "out of line: $row")
+        assertEquals(head.indexOf("Mean") + "Mean".length, row.trimEnd().length, "out of line: $row")
     }
 
     // --- the name column -------------------------------------------------------------
@@ -852,7 +852,8 @@ class CoarseTest {
         assertTrue(iRun in 0 until iBatch && iBatch < iQuery, "the tree is not drawn in order: $text")
         assertEquals(1, lines.count { it.trim().startsWith("query ") }, "an operation is printed more than once: $text")
         val fineRow = lines[iQuery + 1].split(Regex(" +")).filter { it.isNotEmpty() && it != "|" }
-        assertEquals(listOf("-", "fine", "own", "3.00s", "100%"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
+        // A split row's calls and time per call were not saved: unknown, not blank.
+        assertEquals(listOf("-", "fine", "?", "3.00s", "100%", "?"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
         assertTrue(text.contains("- rows split a leaf's time by the innermost label"), "the split rows have no key: $text")
         assertFalse(lines[iQuery].trim().startsWith("fine "), "the fine row is not under its leaf")
         assertTrue(lines[iBatch + 1].trim().startsWith("query "), "a parent repeats its children's breakdown: ${lines[iBatch + 1]}")

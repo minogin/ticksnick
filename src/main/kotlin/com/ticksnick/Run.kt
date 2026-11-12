@@ -394,7 +394,7 @@ private fun threeSignificantString(v: Double): String = when {
 
 /** Three significant digits and no unit, for a quantity that carries its own - `pp`, a ratio. */
 internal fun threeDigits(value: Double): String =
-    if (value.isNaN()) "-" else threeSignificantString(value)
+    if (value.isNaN()) UNKNOWN else threeSignificantString(value)
 
 /**
  * A percentage to three significant digits: `100%`, `40.3%`, `5.80%`, `0.512%`.
@@ -404,7 +404,7 @@ internal fun threeDigits(value: Double): String =
  * and every arithmetic use the full value; this is only what is shown.
  */
 internal fun percent(value: Double): String = when {
-    value.isNaN() -> "-"
+    value.isNaN() -> UNKNOWN
     // Reserved for a real 100: the pair `100% / 0.003%` reads as a contradiction, and the halves of
     // `Runnable / Wait` are supposed to add up on the page as well as in the arithmetic.
     value >= 100.0 -> "100%"
@@ -1197,7 +1197,7 @@ class Run internal constructor(
     /**
      * Bytes allocated under [n] in all its executions, its coarse children included, on every thread
      * that ran under it. A parent's is its own and its children's, exactly: nothing is estimated. NaN,
-     * read as `-`, where any of them ran on a virtual thread, which the JVM does not count.
+     * read as `?`, where any of them ran on a virtual thread, which the JVM does not count.
      */
     internal fun allocatedTotal(n: CoarseNode): Double =
         n.flatten().let { all -> if (all.any { it.allocatedUnknown }) Double.NaN else all.sumOf { it.allocated }.toDouble() }
@@ -1344,7 +1344,7 @@ class Run internal constructor(
             appendLine("  for coarse operations:")
             appendLine("  executions, mean and the percentiles are MEASURED, two timestamps per execution${sym.dash}the")
             appendLine("    only numbers here that are not sampled. Percentiles are exact up to $EXACT_SPANS executions and")
-            appendLine("    within 0.8% past them; a p90 needs 10 executions and a p99 100, and shows - with fewer")
+            appendLine("    within 0.8% past them; a p90 needs 10 executions and a p99 100, and shows $UNKNOWN with fewer")
             appendLine("  wall is the part of its root's wall time a row took: its durations summed, divided by")
             appendLine("    how many ran at a time under each parent, at its level and above. % parent is of the")
             appendLine("    parent's wall, and the rest of 100% is the parent's own time outside this child")

@@ -160,11 +160,11 @@ internal fun plusMinusPoints(e: Estimate): String = when {
     else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%%", e.half)
 }
 
-/** `+-2.3%`, `+-12%`, or `-` where there is no interval. */
+/** `+-2.3%`, `+-12%`, or [UNKNOWN] where there is no interval. */
 internal fun plusMinus(e: Estimate): String {
     val r = e.relative * 100
     return when {
-        r.isNaN() -> "-"
+        r.isNaN() -> UNKNOWN
         r < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%%", r)
         else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%%", r)
     }
@@ -391,7 +391,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 P99 to timed { it.percentileNanos(0.99) },
                 MAX to timed { it.spanMaxNanos.toDouble() },
                 COARSE_WAITING to overAll { i, n -> waiting(runs[i], n.inclusiveHits, n.runningInclusiveHits) },
-            ),
+            ).filterKeys { it != PARENT_SHARE || parents.any { p -> p != null } },  // a root has no parent to be a share of
             nodes.size,
             children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 } + listOfNotNull(folded),
             slowest = m.nodes.flatMap { it?.slowest.orEmpty() }.sortedByDescending { it.nanos }.take(m.nodes.maxOf { it?.slowest?.size ?: 0 }),
@@ -432,11 +432,11 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     WALL to anyOver0(ofTimed.map { of[it]?.wallNanos ?: 0.0 }),
                     PARENT_SHARE to anyOver0(ofTimed.map { i -> of[i]?.share?.takeIf { !it.isNaN() }?.times(100) ?: 0.0 }),
                     // A run where the label was called and never sampled counts at 0, as in Wall; never
-                    // sampled in any run, it reads `-`, as Wall does and as the key under the table says.
+                    // sampled in any run, it is unknown, as Wall is and as the key under the table says.
                     MEAN to anyOver0(nodes.mapNotNull { i ->
                         of[i]?.perCallNanos?.takeIf { !it.isNaN() } ?: calls.firstOrNull { it.first == i }?.second?.takeIf { it > 0 }?.let { 0.0 }
                     }),
-                ),
+                ).let { if (name == "unlabelled") it - listOf(EXECUTIONS, PER_PARENT, MEAN) else it },  // no label: nothing called
                 nodes.count { of[it] != null },
                 own = true,
             )
@@ -573,23 +573,23 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             val present = runs.indices.filter { i -> rows[i][label]?.let { it.hits > 0 || it.calls > 0 } == true }
             fun of(f: (Run, Run.OperationRow) -> Double) = Estimate(present.map { f(runs[it], rows[it][label]!!) }.filter { !it.isNaN() })
             fun long(f: (Run, Run.OperationRow) -> Double) = of { p, r -> if (r.longShown) f(p, r) else Double.NaN }
-            fun named(f: (Run, Run.OperationRow) -> Double) = of { p, r -> if (r.name == Run.NO_OPERATION) Double.NaN else f(p, r) }
             Row(
                 rows[present.first()][label]!!.name,
                 mapOf(
                     THREAD_SHARE to of { _, r -> r.shareOf() * 100 },
                     THREAD_TIME to of { p, r -> r.hits * p.stepNanos },
                     FINE_WAITING to of { p, r -> if (p.stateSampled) r.waitingShare else Double.NaN },
-                    CALLS to named { _, r -> r.calls.toDouble() },
+                    CALLS to of { _, r -> r.calls.toDouble() },
                     PER_CALL to of { _, r -> r.perCallNanos() },
                     LONG_CALLS to long { _, r -> r.stuckInstances.toDouble() },
                     LONG_TIME to long { p, r -> r.stuckHits * p.stepNanos },
                     LONGEST to long { p, r -> r.longestStuckTicks * p.stepNanos },
-                    WALL_TIME to named { p, r -> r.activeTicks * p.stepNanos },
+                    WALL_TIME to of { p, r -> r.activeTicks * p.stepNanos },
                     CONCURRENCY to of { _, r -> r.concurrency },
                     WORKERS to of { _, r -> r.workers },
                     POOL to of { _, r -> r.pool },
-                ),
+                    // Time outside every operation was not called and ran on no workers: only its time applies.
+                ).let { if (rows[present.first()][label]!!.name == Run.NO_OPERATION) it.filterKeys { c -> c == THREAD_SHARE || c == THREAD_TIME || c == FINE_WAITING } else it },
                 present.size,
                 coarse = rows[present.first()][label]!!.coarse,
             )
@@ -661,9 +661,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; Parallel on one is how many" +
                     " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
-        if (all.any { it.own && it.foldedRows == 0 && it.figures[EXECUTIONS]?.n != 0 }) add(
+        if (all.any { it.own && it.foldedRows == 0 && (it.figures[EXECUTIONS]?.n ?: 0) != 0 }) add(
             "  on a $SPLIT_MARK row, Executions is its calls on that path and Per parent per execution of the row above, both counted;" +
-                    " Mean is its own thread-time per call, sampled; - for a label called there and never caught"
+                    " Mean is its own thread-time per call, sampled; $UNKNOWN for a label called there and never caught"
         )
         if (allocations) add(
             "  Allocated: bytes created under the row, its coarse children and every thread under it included, in all and per execution;" +
@@ -675,7 +675,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
         if (runs.size > 1) {
             add("  % parent is each run's share of its own parent, ${sym.plusMinus} in percentage points: the run's speed cancels out of it")
-            add("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval; - where a run had too few executions for it")
+            add("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval; $UNKNOWN where a run had too few executions for it")
         }
     }
 
@@ -746,7 +746,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         add(
             String.format(
                 Locale.ROOT,
-                "  Long: calls over a tick hold %s of thread-time run-wide; preemption and GC pauses alone could put it at %s, and a row at or under that shows -",
+                "  Long: calls over a tick hold %s of thread-time run-wide; preemption and GC pauses alone could put it at %s, and a row at or under that is blank",
                 percent(runs.map { it.stuckBaseline }.average() * 100), percent(runs.map { it.machineFloor }.average() * 100)
             )
         )
@@ -822,7 +822,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             ).trimEnd()
         )
         runs.forEachIndexed { i, p ->
-            val each = if (root != null && listed) root.nodes[i]?.spans?.exactDurations()?.joinToString("  ") { duration(it.toDouble()) } ?: "-" else ""
+            val each = if (root != null && listed) root.nodes[i]?.spans?.exactDurations()?.joinToString("  ") { duration(it.toDouble()) } ?: UNKNOWN else ""
             appendLine(
                 String.format(
                     Locale.ROOT, "%s%-4d %-28s %10s %11s   %s", indent, i + 1, files[i].fileName.toString(),

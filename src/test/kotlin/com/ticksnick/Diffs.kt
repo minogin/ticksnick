@@ -14,7 +14,10 @@ internal fun coresOf(d: Duty): String? = coresLine(listOfNotNull(d.cores()))
 /** The three lines of the row [name] of a diff's table: before, after, the change. */
 internal fun diffRow(text: String, name: String): List<String> {
     val lines = text.lines()
-    val i = lines.indexOfFirst { it.trimStart().removePrefix("- ").startsWith("$name ") && '|' in it }
+    // A side that does not have the row is blank, so its line can end at the name.
+    val i = lines.indices.indexOfFirst { j ->
+        lines[j].trimStart().removePrefix("- ").startsWith("$name ") && ('|' in lines[j] || '|' in lines.getOrElse(j + 1) { "" })
+    }
     require(i >= 0) { "no row $name in $text" }
     return lines.subList(i, i + 3)
 }

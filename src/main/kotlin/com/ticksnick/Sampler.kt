@@ -240,7 +240,7 @@ internal class Sampler(
     /** Ticks at which at least one thread was doing this type's own work. */
     internal val coarseSelfActiveTicks = LongArray(MAX_COARSE_TYPES)
 
-    /** The most threads seen doing this type's own work at one tick. See `Run.workersOf`. */
+    /** The most threads seen doing this type's own work at one tick: its row's `Workers`. */
     internal val coarseSelfPeak = IntArray(MAX_COARSE_TYPES)
 
     /** As `seenAt`, for [coarseSelfActiveTicks]. */
@@ -721,7 +721,7 @@ internal class Sampler(
                     // does exactly that — the helper releases the context, and only then does the
                     // owner learn it can close — so this benign ordering is the *common* case, not a
                     // rare one. Without this check it can pass 1% of coarse thread-time on a run
-                    // where nothing has escaped at all, which is over the strict threshold and
+                    // where nothing has escaped at all, which is over the threshold that fails the run, and
                     // would stop a correct session a second into the run.
                     //
                     // Re-reading the slot separates the two. If the thread has moved on, the sample

@@ -141,7 +141,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         appendLine("=".repeat(width))
         appendLine(row("Diff", "${before.name} (${before.described()}) ${sym.arrow} ${after.name} (${after.described()})"))
         val rootName = (after.root() ?: before.root())?.name
-        carefulBlock(careful(rootName))
+        warningsSection(warnings(rootName))
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
         if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change ${sym.plusMinus} its 95% interval (Welch's t)"))
         with(before) { runList("before") }
@@ -211,10 +211,10 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     }
 
     /**
-     * What makes the change mean something other than the code's: printed on top, see [carefulBlock].
+     * What makes the change mean something other than the code's: printed on top, see [warningsSection].
      * The diff's own first, then each side's, which name their side: one run on a side is one of them.
      */
-    private fun careful(rootName: String?): Warnings {
+    private fun warnings(rootName: String?): Warnings {
         val own = mutableListOf<Warning>()
         val b = clockMean(before)
         val a = clockMean(after)
@@ -231,7 +231,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
             if (cb.size == 1 && ca.size == 1 && ca != cb)
                 own += Warning(Kind.ROOT_COUNT_SIDES, words(code(rootName)), words(countText(cb[0].toDouble())), words(countText(ca[0].toDouble())))
         }
-        own += allocationsCareful(before.runs, after.runs)
+        own += allocationsWarnings(before.runs, after.runs)
         val sides = before.warnings(named = true) + after.warnings(named = true)
         return Warnings(own.map { it.text() } + sides.ranked, sides.always)
     }

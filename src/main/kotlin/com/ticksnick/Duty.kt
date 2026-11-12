@@ -663,7 +663,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
     }
 }
 
-/** What [labelledDuty] came to. The second and third explain the first; the fourth is what the Careful line judges. */
+/** What [labelledDuty] came to. The second and third explain the first; the fourth is what the `Thread-time%` warning judges. */
 internal class LabelledDuty(
     val duty: Double,
     val invisibleOffCpu: Double,
@@ -725,7 +725,7 @@ internal fun labelledDuty(
     var stall = 0.0
     var invisible = 0.0
     var total = 0.0
-    // The same, over labelled samples that read RUNNABLE only: what the Careful line judges.
+    // The same, over labelled samples that read RUNNABLE only: what the `Thread-time%` warning judges.
     var labelledRunnable = 0.0
     var runnableStall = 0.0
     for (i in slotHits.indices) {
@@ -749,7 +749,7 @@ internal fun labelledDuty(
             // Only the off-CPU the state read cannot see, and no more of it than there is labelled
             // time reading RUNNABLE. The visible waiting is left out: each row's Waiting shows it.
             labelledRunnable += slotLabelled[i] - slotLabelledWaiting[i]
-            runnableStall += min(max(0.0, l - wl), max(0.0, f - w)) * hits
+            runnableStall += hiddenSamples(hits, slotLabelled[i], slotWaiting[i], slotLabelledWaiting[i], cpuNanos[i], wall)
             // Capped by `f` as well, so that using the state read can never produce a *worse*
             // bound than ignoring it. Not runnable implies not on the CPU, so `wl` is a subset of
             // `f` by definition and the cap binds only when the two instruments disagree — the
@@ -784,11 +784,11 @@ internal class Duty internal constructor(
     val labelledDuty: Double,
     /**
      * Of the labelled time that read `RUNNABLE`, the part sure to have been on a CPU, worst case.
-     * NaN without the state read, and the Careful line then judges [shareDuty].
+     * NaN without the state read, and the `Thread-time%` warning then judges [shareDuty].
      *
      * [labelledDuty] counts the waiting the state read saw inside labels as possibly not CPU, which
-     * is right for a share read as CPU, and so it stays the ceiling on `working`. But the Careful
-     * line is about `Runnable`, and that waiting is not hidden in it: each row's `Waiting` shows it.
+     * is right for a share read as CPU, and so it stays the ceiling on `working`. But that
+     * warning is about `Runnable`, and that waiting is not hidden in it: each row's `Waiting` shows it.
      * A thread parked in `Future.get()` inside a label is almost all waiting, in plain sight, and
      * counted in [labelledDuty] it can make up half the bound.
      */
@@ -840,7 +840,7 @@ internal class Duty internal constructor(
     val profiledCpuNanos: Long = -1,
     /**
      * The waiting `Runnable` hides, in samples, in seconds when the JVM's processors were full and
-     * in seconds when a core was spare. What the Careful line names as the cause. 0 and 0 when not
+     * in seconds when a core was spare. What the `Thread-time%` warning names as the cause. 0 and 0 when not
      * measured, and the line then names both causes.
      */
     val hiddenWhenFull: Double = 0.0,
@@ -903,21 +903,20 @@ internal class Duty internal constructor(
      * `(1 - d) / d`, and that is the number worth printing: it holds for every operation at once
      * and needs nothing to be known about where the stalling went.
      */
-    val boundPp: Double get() = min(100.0, (1 - shareDuty) / shareDuty * 100)
+    val boundPp: Double get() = boundPpOf(shareDuty)
 
     /**
      * The duty the `Thread-time%` warning judges: [runnableDuty] where the state was read,
      * [labelledDuty] where not. NaN, and no warning, where nothing was labelled fine: every thread's
      * CPU over wall would count visible waiting and idle pools as hidden.
      */
-    val carefulDuty: Double get() = if (runnableDuty.isNaN()) labelledDuty else runnableDuty
+    val judgedDuty: Double get() = if (runnableDuty.isNaN()) labelledDuty else runnableDuty
 
-    /** [boundPp] over [carefulDuty]: how far `Runnable` may overstate CPU work. */
-    val runnableBoundPp: Double get() = min(100.0, (1 - carefulDuty) / carefulDuty * 100)
+    /** [boundPp] over [judgedDuty]: how far `Runnable` may overstate CPU work. */
+    val runnableBoundPp: Double get() = boundPpOf(judgedDuty)
 
-    /** What a reported occupancy share could really be, as CPU. */
-    fun boundsFor(share: Double): Pair<Double, Double> =
-        max(0.0, (share - (1 - shareDuty)) / shareDuty) to min(1.0, share / shareDuty)
+    /** The widest a share can be wrong by at duty [d], in percentage points: `(1 - d) / d`. See [boundPp]. */
+    private fun boundPpOf(d: Double): Double = min(100.0, (1 - d) / d * 100)
 
     /**
      * Where the JVM's cores went, or null without the figures: the processors, the profiled
@@ -954,7 +953,7 @@ internal class Duty internal constructor(
         )
 
     /**
-     * What is wrong with `Runnable`, if anything: `Careful` lines under the header, none on a
+     * What is wrong with `Runnable`, if anything: warnings for the `WARNINGS` section, none on a
      * healthy run.
      *
      * `Runnable` is the JVM's word and an upper bound on work - a thread the scheduler preempted
@@ -968,7 +967,7 @@ internal class Duty internal constructor(
      * @param reclaimedSlots threads that exited during the run. The other way to get no window:
      *   the walk reads -1 from a dead thread's CPU clock, so it counts nothing.
      */
-    fun careful(activeNanos: Long, reclaimedSlots: Int): List<Warning> {
+    fun warnings(activeNanos: Long, reclaimedSlots: Int): List<Warning> {
         val out = ArrayList<Warning>()
         if (reason != null) out += Warning(Kind.RUNNABLE_UNCHECKED, words("this JVM cannot measure CPU time per thread"))
         // Two ways to finish with no window, and the reason names the one that happened: telling a
@@ -1000,14 +999,6 @@ internal class Duty internal constructor(
     }
 
     companion object {
-        /**
-         * Above this the non-CPU fraction cannot reorder the top of a report: the bound is then
-         * under a percentage point, and real gaps between ranked operations are wider than that.
-         * A judgement about how to read the number rather than a measured threshold — which is why
-         * the bound itself is printed above this line, and this line only names it.
-         */
-        const val RANKING_SAFE = 0.95
-
         /**
          * Below this bound nothing is said: a point of any share is under the gap between any two
          * rows worth acting on. A busy machine can read several points from preemption alone, and

@@ -83,7 +83,7 @@ internal const val FINE_NAME_WIDTH = 26
  * learns to skip. The caller orders them, worst first. [Warnings.always] come after the cap and are
  * not cut.
  */
-internal fun StringBuilder.carefulBlock(warnings: Warnings) {
+internal fun StringBuilder.warningsSection(warnings: Warnings) {
     if (warnings.ranked.isEmpty() && warnings.always.isEmpty()) return
     fun print(w: String) {
         val lines = w.lines()
@@ -202,9 +202,6 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
 
     private val walls = runs.map { it.wallsOf() }
 
-    /** Run [i] by name: its folder and time. */
-    internal fun runName(i: Int): String = "$name/${files[i].fileName}"
-
     /**
      * A profile of one run has a warning on its times: a run can be faster or slower as a whole by
      * 20-30% from one JVM to the next, while each row's share of its parent holds within a couple of
@@ -305,9 +302,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * TickSnick call, see [Logo].
      *
      * @param legend every column explained, at the bottom. See [Run.renderLegend].
-     * @param careful the warnings, in the `WARNINGS` section: before any number, see [carefulBlock].
+     * @param warnings the warnings, in the `WARNINGS` section: before any number, see [warningsSection].
      */
-    internal fun report(legend: Boolean, careful: Warnings): String = buildString {
+    internal fun report(legend: Boolean, warnings: Warnings): String = buildString {
         append(failedBanner())
         if (runs.isEmpty()) return@buildString
         val n = runs.size
@@ -319,7 +316,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                         "${sym.plusMinus} its 95% interval from how much the runs differ (Student's t, ${Run.plural((n - 1).toLong(), "degree")} of freedom)"
             )
         )
-        carefulBlock(careful)
+        warningsSection(warnings)
         factLines(tagMaps, setupMaps)
         runList()
         appendLine(
@@ -588,9 +585,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     LONG_TIME to long { p, r -> r.stuckHits * p.stepNanos },
                     LONGEST to long { p, r -> r.longestStuckTicks * p.stepNanos },
                     WALL_TIME to named { p, r -> r.activeTicks * p.stepNanos },
-                    CONCURRENCY to of { _, r -> if (r.activeTicks == 0L) Double.NaN else r.hits.toDouble() / r.activeTicks },
-                    WORKERS to of { _, r -> if (r.peakInside <= 0) Double.NaN else r.peakInside.toDouble() },
-                    POOL to of { _, r -> if (r.threads <= 0) Double.NaN else r.threads.toDouble() },
+                    CONCURRENCY to of { _, r -> r.concurrency },
+                    WORKERS to of { _, r -> r.workers },
+                    POOL to of { _, r -> r.pool },
                 ),
                 present.size,
                 coarse = rows[present.first()][label]!!.coarse,

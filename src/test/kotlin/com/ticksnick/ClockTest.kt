@@ -47,29 +47,29 @@ class ClockTest {
 
     @Test
     fun `a steady clock says nothing, a moving one says how far, a missing one says why`() {
-        assertEquals(emptyList(), report(200.0, 205.0, 198.0, 202.0, 201.0, 199.0, 203.0).careful())
-        val moved = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).careful()
+        assertEquals(emptyList(), report(200.0, 205.0, 198.0, 202.0, 201.0, 199.0, 203.0).warnings())
+        val moved = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).warnings()
         assertEquals(1, moved.size)
         assertEquals(
             "CPU clock: ran at 135%..205% during the run - times drift with it, shares hold; turbo off holds it still",
             moved[0].text(),
         )
         // One second caught in a collection is not a trend.
-        assertEquals(emptyList(), report(200.0, 200.0, 200.0, 200.0, 120.0, 200.0, 200.0, 200.0, 200.0, 200.0).careful())
+        assertEquals(emptyList(), report(200.0, 200.0, 200.0, 200.0, 120.0, 200.0, 200.0, 200.0, 200.0, 200.0).warnings())
         // Too few samples to say anything.
-        assertEquals(emptyList(), report(205.0, 135.0).careful())
+        assertEquals(emptyList(), report(205.0, 135.0).warnings())
         val mac = ClockTrace(DoubleArray(0), ofBase = true, notMeasured = "macOS reads the CPU clock only as root")
         assertEquals(
             listOf("CPU clock: not measured (macOS reads the CPU clock only as root) - times may drift unseen; shares hold"),
-            mac.careful().map { it.text() },
+            mac.warnings().map { it.text() },
         )
-        assertEquals(emptyList(), ClockTrace.NOT_RECORDED.careful())
+        assertEquals(emptyList(), ClockTrace.NOT_RECORDED.warnings())
     }
 
     @Test
     fun `a clock that moved in several runs is one warning, its outer range`() {
-        val a = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).careful()
-        val b = report(215.0, 216.0, 214.0, 215.0, 215.0, 150.0, 140.0, 140.0, 141.0, 139.0, 140.0).careful()
+        val a = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).warnings()
+        val b = report(215.0, 216.0, 214.0, 215.0, 215.0, 150.0, 140.0, 140.0, 141.0, 139.0, 140.0).warnings()
         val merged = mergeWarnings(listOf(a, b)).single().second
         assertTrue(merged.startsWith("CPU clock: ran at 135%..215% during the run") && "(2 of 2 runs)" in merged, merged)
     }

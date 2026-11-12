@@ -68,7 +68,7 @@ internal class ClockTrace internal constructor(
      * and the maximum: one second caught in a collection or a page fault is not a trend. Whether it
      * rose or fell is not said: it changes nothing the reader does.
      */
-    fun careful(): List<Warning> {
+    fun warnings(): List<Warning> {
         notMeasured?.let { return listOf(Warning(Kind.CLOCK_NOT_MEASURED, words(it))) }
         val v = valid
         if (v.size < MIN_CLOCK_SAMPLES) return emptyList()

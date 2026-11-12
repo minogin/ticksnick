@@ -255,12 +255,12 @@ class DutyBoundTest {
      * whole batch. Such a run prints 65.6%, 52.5 pp, of which the main thread's visible waiting is
      * about half.
      *
-     * The waiting the state read saw is in each row's `Waiting`, so the Careful line, which is about
+     * The waiting the state read saw is in each row's `Waiting`, so the Thread-time% warning, which is about
      * `Runnable`, leaves it out; the share bound keeps it. The workers' off-CPU stays in both: it
      * reads RUNNABLE, and only the clock sees it.
      */
     @Test
-    fun `a main thread waiting in plain sight does not feed the Careful line`() {
+    fun `a main thread waiting in plain sight does not feed the Thread-time% warning`() {
         val worker = Thread(labelled = 1.0, offCpu = 0.21)
         val main = Thread(labelled = 1.0, offCpu = 1.0, notRunnable = 0.998, labelledNotRunnable = 0.998)
         val r = bound(worker, worker, worker, worker, worker, main)
@@ -268,19 +268,19 @@ class DutyBoundTest {
         assertTrue(r.duty < 0.70, "the share bound must still count the visible waiting, read ${r.duty}")
 
         val alone = bound(worker, worker, worker, worker, worker)
-        assertEquals(alone.runnableDuty, r.runnableDuty, 0.005, "the parked main thread moved the Careful line")
+        assertEquals(alone.runnableDuty, r.runnableDuty, 0.005, "the parked main thread moved the Thread-time% warning")
     }
 
     /** The contended lock's waiting is visible too, so only the 1.2 points the state read missed are left. */
     @Test
-    fun `contended lock - the Careful line judges only what Runnable hides`() {
+    fun `contended lock - the Thread-time% warning judges only what Runnable hides`() {
         val r = bound(*Array(8) {
             Thread(labelled = 1.0, offCpu = 0.606, notRunnable = 0.594, labelledNotRunnable = 0.594)
         })
         assertEquals(1 - 0.012 / 0.406, r.runnableDuty, 0.005)
     }
 
-    /** Without the state read nothing separates the waiting, and the Careful line falls back to the share bound. */
+    /** Without the state read nothing separates the waiting, and the Thread-time% warning falls back to the share bound. */
     @Test
     fun `no state read, no runnable figure`() {
         assertTrue(bound(Thread(labelled = 1.0, offCpu = 0.2), state = false).runnableDuty.isNaN())

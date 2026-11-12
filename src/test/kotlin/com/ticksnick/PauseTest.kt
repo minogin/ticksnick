@@ -218,7 +218,7 @@ class PauseTest {
     ) = Pauses(measured, paused, count, longest, gc, confirmed)
 
     /** The warnings of [this], as printed, for a spinning sampler over a minute of wall time. */
-    private fun Pauses.said(wait: WaitStrategy = WaitStrategy.SPIN): List<String> = careful(wait, 60 * second).map { it.text() }
+    private fun Pauses.said(wait: WaitStrategy = WaitStrategy.SPIN): List<String> = warnings(wait, 60 * second).map { it.text() }
 
     /** The table heading says "over N s active", so the word has to be on the page whatever happened. */
     @Test
@@ -345,7 +345,7 @@ class PauseTest {
         assertFalse("wall time" in line, line)
         // Nothing here is labelled fine, so there is no labelled share to bound: no Thread-time% warning,
         // where every thread's CPU over wall once stood in for it.
-        assertTrue(d.careful(60_220_000_000, 0).none { it.kind == Kind.THREAD_TIME_BOUND })
+        assertTrue(d.warnings(60_220_000_000, 0).none { it.kind == Kind.THREAD_TIME_BOUND })
     }
 
     @Test

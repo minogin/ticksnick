@@ -114,8 +114,8 @@ class CoarseContext @PublishedApi internal constructor(
 /**
  * Marks this execution finished, so a thread still mounted on it can be detected.
  *
- * `@PublishedApi` because [coarse] is inline and closes the context in a `finally` the compiler
- * writes — the same reason [OpSlot.recordSpan] carries it.
+ * `@PublishedApi` because [op] is inline and closes the context, through [closeCoarse], in a
+ * `finally` the compiler writes — the same reason [OpSlot.recordSpan] carries it.
  */
 @PublishedApi
 internal fun CoarseContext.markClosed() = CoarseContext.CLOSED.setOpaque(this, true)
@@ -173,14 +173,16 @@ internal object SpanHistogram {
     fun middle(i: Int): Double = (lowerBound(i).toDouble() + upperBound(i).toDouble()) / 2
 
     /**
-     * The [p]-th percentile of [counts], reported at the middle of its bucket. `p` in 0..1.
-     *
-     * Rank is `ceil(p x n)` and at least 1, the nearest-rank convention [Spans] uses on exact
-     * durations too, so the two agree up to the rounding.
+     * The rank of the [p]-th percentile, `p` in 0..1, among [n] values: `ceil(p x n)` and at least 1,
+     * the nearest-rank convention. The one rule for this and for [Spans] on exact durations, so the
+     * two agree up to the rounding.
      */
+    fun nearestRank(p: Double, n: Long): Long = maxOf(1L, Math.ceil(p * n).toLong())
+
+    /** The [p]-th percentile of [counts], reported at the middle of its bucket. `p` in 0..1. */
     fun percentile(counts: LongArray, total: Long, p: Double): Double {
         if (total <= 0L) return Double.NaN
-        val rank = maxOf(1L, Math.ceil(p * total).toLong())
+        val rank = nearestRank(p, total)
         var seen = 0L
         for (i in counts.indices) {
             seen += counts[i]
@@ -282,7 +284,7 @@ internal class Spans internal constructor() {
         if (e == null) return Double.NaN
         val sorted = e.copyOf(minOf(k, e.size)).also { it.sort() }
         if (sorted.isEmpty()) return Double.NaN
-        val rank = maxOf(1, Math.ceil(p * sorted.size).toInt())
+        val rank = SpanHistogram.nearestRank(p, sorted.size.toLong()).toInt()
         return sorted[minOf(rank, sorted.size) - 1].toDouble()
     }
 

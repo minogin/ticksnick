@@ -199,7 +199,7 @@ internal class Pauses internal constructor(
      * kinds: the one with a fix, a sampler that does not spin ([wait]), and the rest, with how much
      * of [wallNanos] it is.
      */
-    fun careful(wait: WaitStrategy?, wallNanos: Long): List<Warning> {
+    fun warnings(wait: WaitStrategy?, wallNanos: Long): List<Warning> {
         if (!measured) return listOf(Warning(Kind.PAUSES_NOT_MEASURED, words((wait ?: WaitStrategy.PARK).name)))
         fun inTimes(nanos: Long) = listOf(
             Warning(

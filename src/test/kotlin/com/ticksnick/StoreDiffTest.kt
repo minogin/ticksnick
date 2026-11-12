@@ -313,7 +313,7 @@ class StoreDiffTest {
 
     /**
      * A profile without the optional keys loads, renders without them, and claims nothing it was
-     * not given: no Cores line, the Careful line on the share duty, rows as their summed durations,
+     * not given: no Cores line, the Thread-time% warning on the share duty, rows as their summed durations,
      * a leaf split by its samples.
      */
     @Test

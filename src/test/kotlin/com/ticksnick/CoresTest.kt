@@ -123,6 +123,6 @@ class CoresTest {
         Profiler.start()
         op(tick) { spinFor(200_000_000) }
         val p = Profiler.stop()
-        assertTrue(p.clock.careful().isEmpty(), "a 0.2s session warned about the clock: ${p.clock.careful()}")
+        assertTrue(p.clock.warnings().isEmpty(), "a 0.2s session warned about the clock: ${p.clock.warnings()}")
     }
 }

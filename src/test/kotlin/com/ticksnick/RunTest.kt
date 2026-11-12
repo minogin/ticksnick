@@ -151,47 +151,11 @@ class RunTest {
         val ops = listOf(stat("a", hits = 300, calls = 1000), stat("b", hits = 100, calls = 1000))
         val quiet = report(ops, idle = 0)
         val noisy = report(ops, idle = 400)
-        assertEquals(0.75, quiet.shareOf(ops[0]), 1e-9)
-        assertEquals(0.375, noisy.shareOf(ops[0]), 1e-9, "a share must be of every sample")
+        assertEquals(0.75, quiet.rows()[0].shareOf(), 1e-9)
+        assertEquals(0.375, noisy.rows()[0].shareOf(), 1e-9, "a share must be of every sample")
         val text = noisy.render()
         assertTrue(text.lines().any { it.startsWith("(no operation)") && "50.0%" in it }, text)
         assertFalse(quiet.render().contains("(no operation)"), "a row for nothing")
-    }
-
-    /**
-     * Coverage over runnable occupancy restricts **both** sides.
-     *
-     * On a thread pool most unlabelled samples can be a thread that was not runnable - 79% of them
-     * on a search workload - which turns "the labels cover half the run" into something quite
-     * different. Taking it off only the denominator would be the same mismatch of denominators
-     * pointing the other way, because a label can be held across a wait — a locked update can spend
-     * 73% of itself parked.
-     */
-    @Test
-    fun `runnable coverage restricts both sides`() {
-        // 600 labelled of which 100 parked; 400 unlabelled of which 300 parked.
-        val ops = listOf(stat("a", hits = 600, calls = 1000, waiting = 100))
-        val r = report(ops, idle = 400, idleWaiting = 300)
-        assertEquals(0.6, r.labelledHits.toDouble() / (r.labelledHits + r.idleHits), 1e-9)
-        // Runnable: 500 labelled against 100 unlabelled.
-        assertEquals(500.0 / 600.0, r.runnableCoverage, 1e-9)
-        assertTrue(r.runnableCoverage > 0.6, "restricting to runnable time should raise coverage here")
-    }
-
-    /** Without the state read the question cannot be asked, and NaN says so rather than guessing. */
-    @Test
-    fun `runnable coverage is unavailable without thread state`() {
-        val r = report(listOf(stat("a", hits = 600, calls = 1000)), idle = 400, state = false)
-        assertTrue(r.runnableCoverage.isNaN())
-    }
-
-    /** The noise floor is what chance alone would produce, so it must fall as evidence accumulates. */
-    @Test
-    fun `the noise floor shrinks with hits`() {
-        val small = stat("small", hits = 100, calls = 1000)
-        val large = stat("large", hits = 10_000, calls = 1000)
-        val r = report(listOf(small, large))
-        assertTrue(r.noiseFloorOf(large) < r.noiseFloorOf(small))
     }
 
     // ---------------------------------------------------------------- the long-execution verdict
@@ -272,7 +236,7 @@ class RunTest {
     fun `an unbounded duty explains itself instead of printing a number`() {
         val d = duty(labelled = 0.0, runnable = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
         assertTrue(d.unbounded, "the event-loop regime is no longer recognised as unbounded")
-        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
+        val lines = d.warnings(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
         assertTrue(lines.contains("Runnable: all of it inside labels may have been off a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")
         assertFalse(lines.contains("may be off by"), "printed a bound it does not have")
         assertFalse(lines.contains("%"), "printed a share it does not have: $lines")
@@ -283,7 +247,7 @@ class RunTest {
     fun `a real bound is printed as a bound`() {
         val d = duty(labelled = 0.9846, aggregate = 0.6927, invisible = 0.014, labelledFraction = 0.595)
         assertFalse(d.unbounded)
-        val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
+        val lines = d.warnings(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
         assertTrue(lines.contains("off by up to 1.56pp"), "the bound was not printed")
         assertFalse(lines.contains("off a CPU"), "printed the diagnosis over a real bound")
         assertEquals(1.56, d.boundPp, 0.05, "the 1.57pp bound moved")
@@ -307,7 +271,7 @@ class RunTest {
             "6 processors: profiled threads 2.94, the rest 2.40: GC 1.10 (0.60 in pauses), sampler 1.00, JIT 0.30",
             coresOf(d)
         )
-        val careful = d.careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
+        val careful = d.warnings(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
         assertFalse("processors" in careful, "the cores line is the header's now, not the warning's: $careful")
         // A profile without the figures has no line.
         assertEquals(null, coresOf(duty()))
@@ -331,16 +295,16 @@ class RunTest {
     )
 
     /**
-     * The Careful line's number comes from the labelled time that read Runnable, not from all the
+     * The Thread-time% warning's number comes from the labelled time that read Runnable, not from all the
      * labelled time: with a share duty of 50% - a main thread parked in plain sight - and 90% of the
      * Runnable part on a CPU, it says 11.1 pp, and with 99.5% it says nothing. Taken from the share
      * duty, the line would print 100 pp in both.
      */
     @Test
-    fun `the Careful number is the Runnable part's`() {
-        val line = dutyWith(runnable = 0.9).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
+    fun `the Thread-time% warning's number is the Runnable part's`() {
+        val line = dutyWith(runnable = 0.9).warnings(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
         assertTrue("off by up to 11.1pp" in line, line)
-        assertTrue(dutyWith(runnable = 0.995).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).isEmpty(),
+        assertTrue(dutyWith(runnable = 0.995).warnings(activeNanos = 10_000_000_000L, reclaimedSlots = 0).isEmpty(),
             "a Runnable part on a CPU 99.5% of the time printed a warning")
     }
 
@@ -376,7 +340,7 @@ class RunTest {
             cpuNanos = 29_400_000_000, wallNanos = 60_000_000_000, minWindowDuty = 0.5, maxWindowDuty = 0.5,
             anomalies = 0, maxSampleNanos = 200_000, processors = 6,
             hiddenWhenFull = full, hiddenWhenSpare = spare,
-        ).careful(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
+        ).warnings(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
 
         val crowded = careful(full = 9_000.0, spare = 500.0).lines()
         assertEquals(
@@ -456,12 +420,12 @@ class RunTest {
         assertEquals("-", duration(Double.NaN))
     }
 
-    /** Thread-time crosses to seconds at a second, so 40 s never prints as "40080.00ms". */
+    /** A duration crosses to seconds at a second, so 40 s never prints as "40080.00ms". */
     @Test
-    fun `thread time crosses to seconds at a second`() {
-        assertTrue(threadTime(999_000_000.0).endsWith("ms"))
-        assertTrue(threadTime(40_080_000_000.0).endsWith("s"))
-        assertFalse(threadTime(40_080_000_000.0).contains("ms"))
+    fun `a duration crosses to seconds at a second`() {
+        assertTrue(duration(999_000_000.0).endsWith("ms"))
+        assertTrue(duration(40_080_000_000.0).endsWith("s"))
+        assertFalse(duration(40_080_000_000.0).contains("ms"))
     }
 
     @Test

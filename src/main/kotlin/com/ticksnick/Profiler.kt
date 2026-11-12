@@ -748,6 +748,25 @@ object Profiler {
      */
     private val retiredCoarseThreads = IntArray(MAX_COARSE_TYPES)
 
+    /**
+     * Folds a departing thread's slot into the retired totals: its calls, the threads that made them,
+     * its batch excess and its coarse tree. The one way a slot is retired, by [release] and
+     * [reclaimDeadSlots] alike; both take the slot out of the walk before and hand its index back after.
+     */
+    private fun retireSlot(s: OpSlot) {
+        synchronized(retiredCounts) {
+            for (id in 0 until MAX_OPERATIONS) {
+                val n = s.countOf(id)
+                if (n > 0) {
+                    retiredCounts[id] += n
+                    retiredThreads[id]++
+                }
+                retiredBatchExcess[id] += s.batchExcess[id]
+            }
+        }
+        retire(s.coarseRoot)
+    }
+
     /** Folds one departing thread's tree into [retiredCoarse]. */
     private fun retire(root: CoarsePath?) {
         if (root == null) return
@@ -1098,17 +1117,7 @@ object Profiler {
     fun release() {
         val s = local.get()
         if (s.index >= 0) slotByIndex.set(s.index, null)
-        synchronized(retiredCounts) {
-            for (id in 0 until MAX_OPERATIONS) {
-                val n = s.countOf(id)
-                if (n > 0) {
-                    retiredCounts[id] += n
-                    retiredThreads[id]++
-                }
-                retiredBatchExcess[id] += s.batchExcess[id]
-            }
-        }
-        retire(s.coarseRoot)
+        retireSlot(s)
         // Removed from the walk list first, so the sampler cannot be reading this slot at the
         // moment its index is handed to somebody else.
         if (s.index >= 0) freeIndexes.add(s.index)
@@ -1149,17 +1158,7 @@ object Profiler {
             val owner = s.thread.get()
             if (owner != null && owner.isAlive) continue
             if (!slotByIndex.compareAndSet(i, s, null)) continue
-            synchronized(retiredCounts) {
-                for (id in 0 until MAX_OPERATIONS) {
-                    val n = s.countOf(id)
-                    if (n > 0) {
-                        retiredCounts[id] += n
-                        retiredThreads[id]++
-                    }
-                    retiredBatchExcess[id] += s.batchExcess[id]
-                }
-            }
-            retire(s.coarseRoot)
+            retireSlot(s)
             freeIndexes.add(i)
             reclaimed.incrementAndGet()
         }

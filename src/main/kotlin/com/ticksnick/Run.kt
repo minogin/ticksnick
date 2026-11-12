@@ -117,7 +117,7 @@ internal fun bytes(v: Double): String {
 }
 
 /** The warning of a comparison where only one side counted allocated bytes. */
-internal fun allocationsCareful(before: List<Run>, after: List<Run>): List<Warning> {
+internal fun allocationsWarnings(before: List<Run>, after: List<Run>): List<Warning> {
     val b = before.any { it.allocations }
     val a = after.any { it.allocations }
     return if (b == a) emptyList() else listOf(
@@ -128,7 +128,21 @@ internal fun allocationsCareful(before: List<Run>, after: List<Run>): List<Warni
     )
 }
 
-/** See [Run.impliedUpperNanosOf]. Shared so the run-time check and the report cannot disagree. */
+/**
+ * The most an execution can plausibly have cost, from the sampling alone.
+ *
+ * The hit count is a count of rare events, so its upper confidence bound is
+ * `hits + 2√hits + 3` — and that is `3` when nothing was ever sampled, which is the rule of
+ * three and the reason an operation the sampler never caught is still measurable. Seeing it
+ * zero times in *n* samples means its whole occupancy is under three ticks however large *n*
+ * was, so its cost per call is under `3 × tick / calls`. Forty million calls at a 1 ms tick
+ * puts that under 0.075 ns, a fraction of one cycle.
+ *
+ * This is what makes "too small" provable rather than suspected: if even the upper bound is
+ * below the floor, no amount of missing evidence can rescue the label.
+ *
+ * Shared so the run-time check and the report cannot disagree.
+ */
 internal fun impliedUpperNanos(hits: Long, calls: Long, stepNanos: Double): Double =
     if (calls == 0L) Double.NaN else (hits + 2 * sqrt(hits.toDouble()) + 3) * stepNanos / calls
 
@@ -404,24 +418,12 @@ internal fun percent(value: Double): String = when {
 }
 
 /**
- * A total of thread-time, in whatever unit keeps it readable.
- *
- * The same function as [duration], kept only as a name: at the call sites it says which of the two
- * quantities is being printed, thread-time or wall-time, which are easy to confuse.
- */
-internal fun threadTime(nanos: Double): String = duration(nanos)
-
-/**
  * `key            value`, with every value starting at the same column.
  *
  * Keys rather than prose: a reader scans the left column to find a fact, and the key says what kind
  * of thing the line is - a fact, a caveat or a verdict.
  */
 internal fun row(key: String, value: String): String = String.format(Locale.ROOT, "%-13s %s", key, value)
-
-/** A row that qualifies the one above it — a reason, a bound, a verdict. Values still align. */
-internal fun subRow(key: String, value: String): String =
-    String.format(Locale.ROOT, "  %-11s %s", key, value)
 
 /** One operation's line in a [Run]. */
 internal class OperationStat internal constructor(
@@ -465,44 +467,6 @@ internal class OperationStat internal constructor(
     /** The fraction of this operation's occupancy where its thread was parked, blocked or waiting. */
     val waitingShare: Double get() = if (hits == 0L) 0.0 else waitingHits.toDouble() / hits
 
-    /**
-     * **Executions of this operation in flight at once**, averaged over the ticks where any were.
-     *
-     * It counts executions, not threads serving one of them, and the distinction is structural
-     * rather than a convention. A fine operation is atomic and never leaves the
-     * thread that entered it — a body that suspends or hands off is by construction not fine — so
-     * one thread inside the label *is* one execution of it, and the two counts are the same count.
-     * The parallelism of a **single** execution across threads is not a quantity this tier can hold at
-     * all: it needs an execution to have an identity that a second thread can be handed, which is
-     * exactly what a coarse context is and what an integer in a slot can never be.
-     *
-     * So this is one factor of a product, and the other factor is **parallelism** in the work-span
-     * sense, `work / span` for one execution, which only the coarse tier can measure:
-     *
-     *     threads inside = executions in flight x parallelism per execution
-     *
-     * Here the second factor is 1 by construction, so the product collapses and either reading
-     * gives the same number. The column is still not called "threads", because beside a coarse
-     * column the two factors come apart.
-     *
-     * **What this number depends on, stated because it is not the code.** Little's law relates the
-     * mean over *all* time to the load — `L = lambda x W` — and this column is not that mean: it
-     * divides by the ticks where the operation was occupied rather than by every tick, so
-     * `column = lambda x W x parallelism / p_active`, and it is capped by the threads there are:
-     *
-     *     threads inside = min(lambda x W x parallelism, P)
-     *
-     * Below the cap it tracks the arrival rate; at the cap it reports the pool size and stops
-     * tracking the load at all. Twice the clients is twice this number with the code unchanged, so
-     * it is a property of the deployment in both regimes. It earns its place because [elapsedNanosOf]
-     * cannot be computed without it, and because printed over the thread count — see
-     * [Run.inFlightOf] — the ratio says which of the two regimes produced it.
-     *
-     * The divisor that turns occupancy into elapsed time: the same hundred thread-seconds of
-     * waiting is a convoy at fifteen executions in flight and mild persistent contention at 1.7,
-     * and the two want opposite fixes.
-     */
-    val inFlight: Double get() = if (activeTicks == 0L) Double.NaN else hits.toDouble() / activeTicks
 }
 
 /**
@@ -671,8 +635,8 @@ internal class CoarseStat internal constructor(
      * work, but it is not available for anything else either, so with sixteen threads and five tied
      * up per request you can serve three at once and not four.
      *
-     * It is the number that keeps the identity in [Run.inFlightOf]'s note exact — `threads inside
-     * = executions in flight x this` — because [inFlight] counts an execution whether or not its
+     * It is the number that keeps the identity `threads inside = executions in flight x this`
+     * exact, because [inFlight] counts an execution whether or not its
      * threads are running, and a factorisation has to count both sides the same way. It is also
      * consistent with the rest of the report, where `share`, `occupancy` and `in flight` all count a
      * waiting thread in full.
@@ -715,8 +679,8 @@ internal class CoarseStat internal constructor(
         get() = if (instanceTicks == 0L) Double.NaN else runningInclusiveHits.toDouble() / instanceTicks
 
     /**
-     * Executions of this operation running at once — the same quantity as [OperationStat.inFlight]
-     * and with the same caveat: it tracks the load, not the code.
+     * Executions of this operation running at once. It tracks the load, not the code: twice the
+     * clients is twice this number.
      */
     val inFlight: Double
         get() = if (activeTicks == 0L) Double.NaN else instanceTicks.toDouble() / activeTicks
@@ -725,9 +689,8 @@ internal class CoarseStat internal constructor(
 /**
  * One measurement of a [Profile]: what one sampling session left behind.
  *
- * Shares are over *labelled* samples. Samples that caught a thread outside any operation are
- * reported separately as [idleHits] rather than folded into the denominator — mixing them in would
- * make every share depend on how much uninstrumented code happened to be running.
+ * Shares are over all samples, so a share is of active time; samples that caught a thread outside
+ * any operation are the `(no operation)` row. See [OperationRow.shareOf].
  */
 class Run internal constructor(
     internal val operations: List<OperationStat>,
@@ -904,22 +867,6 @@ class Run internal constructor(
     /** Every sample taken: the denominator of a share. */
     internal val allHits: Long get() = labelledHits + unlabelledHits
 
-    /**
-     * A share of *all* samples, so it is a share of active time: 30% means 30% of the time the
-     * program was not paused, and the `(no operation)` row in the table is the rest.
-     *
-     * Over all samples rather than labelled ones, because that is what a reader expects: adding a
-     * label moves samples out of `(no operation)` and nothing else, where a share of labelled
-     * samples would move every row. The absolute column is still the one to compare between runs -
-     * see the note on [occupancyNanosOf].
-     */
-    internal fun shareOf(op: OperationStat): Double =
-        if (allHits == 0L) 0.0 else op.hits.toDouble() / allHits
-
-    /** Error chance alone would produce at this hit count — anything smaller is not measurable. */
-    internal fun noiseFloorOf(op: OperationStat): Double =
-        if (op.hits > 0) 1.0 / sqrt(op.hits.toDouble()) else Double.NaN
-
     /** The sampling span with the confirmed pauses taken out: the time every sample was taken in. */
     internal val activeNanos: Long get() = samplingSpanNanos - pause.confirmedPausedIn(samplingSpanNanos)
 
@@ -933,92 +880,6 @@ class Run internal constructor(
      */
     internal val stepNanos: Double get() = if (ticks > 1) activeNanos.toDouble() / (ticks - 1) else Double.NaN
 
-    /**
-     * About [occupancyNanosOf]: an operation's occupancy as thread-time rather than as a fraction,
-     * and the column to compare between two runs.
-     *
-     * A share moves when anything else in the run moves - another operation's time, the idle time,
-     * the run's length. Occupancy moves only when this operation does, so a change in one clause
-     * shows in that clause's row and nowhere else.
-     */
-    internal fun occupancyNanosOf(op: OperationStat): Double = op.hits * stepNanos
-
-    /**
-     * How much *wall clock* had at least one thread inside this operation — as against
-     * [occupancyNanosOf], which sums across threads.
-     *
-     * The distinction is the whole point and it only matters when threads wait. Eight threads
-     * computing for five seconds is forty thread-seconds of occupancy and the sum is real: on one
-     * thread it would genuinely take forty seconds. A hundred threads parked one second on one lock
-     * is also a hundred thread-seconds, and there the sum is fiction — the clock advanced one
-     * second and removing the lock would save one second, not a hundred. Elapsed is the number that
-     * says so, and it costs one counter per operation.
-     *
-     * It is not latency: it is the union of every execution's interval, so it says the operation had
-     * *somebody* inside it for this long and nothing about any single execution. And it is not a
-     * counterfactual — see the warning at the foot of the report.
-     */
-    internal fun elapsedNanosOf(op: OperationStat): Double = op.activeTicks * stepNanos
-
-    /**
-     * [OperationStat.inFlight] printed **over the threads that ever entered it**, as `3.28/8`.
-     *
-     * The denominator is not decoration and it is not there to save the reader an arithmetic step.
-     * The numerator alone invites the one reading it cannot support — *"this operation used 3.28
-     * threads"*, as though that were a property of the operation — when it is a property of the
-     * deployment, and of two different parts of it depending on which regime the run is in:
-     *
-     * - **below saturation** it tracks the arrival rate, so twice the clients is twice the number
-     *   and the code is unchanged;
-     * - **at the ceiling** it stops tracking the load at all and reports how many threads there
-     *   were, because there is nothing left to spread the work onto.
-     *
-     * The ratio is the only part of the column that survives that objection: it says which of the
-     * two regimes produced the number. `3.28/8` is *tracking your load*; `7.9/8` is *every thread
-     * that runs this label is inside it at once*, which is a finding.
-     *
-     * **The denominator is per operation**, not the run's thread high-water mark, which is the pool
-     * size only on a workload where every thread does everything. With a `main` thread beside a
-     * pool, an operation that never left `main` would print `1.00 / 5`, measured against four
-     * threads that could not have entered it. A count of the threads that actually called it makes
-     * it `1.00 / 1`: *this operation is serial by construction*. The run-wide count is in the header
-     * line, where it is a fact about the run and is not pretending to be about a row.
-     */
-    internal fun inFlightOf(op: OperationStat): String {
-        val n = op.inFlight
-        return if (n.isNaN()) "-" else String.format(Locale.ROOT, "%.2f", n)
-    }
-
-    /**
-     * The `Workers` column: **how many threads were ever actually working on this at once.**
-     *
-     * The question it answers is the one a reader brings with them - *I dispatched three, how many
-     * ran?* - and nothing else in the table can answer it. `Concurrency` cannot: a mean of 1.1 is
-     * consistent with two workers or eight. `Pool` cannot: the threads exist either way. A row
-     * reading `1.10  2  4` says the pool is four, at most two were ever in here together, and on
-     * average barely one - and if three were dispatched, something is off.
-     *
-     * Mechanically it is `max(k)` where `k` is the threads found inside at one tick, the same
-     * series whose mean is `Concurrency`. Detected rather than measured, so it is a lower bound: a
-     * burst that begins and ends between two ticks is a burst nobody saw.
-     */
-    internal fun workersOf(op: OperationStat): String =
-        if (op.peakInside <= 0) "-" else op.peakInside.toString()
-
-    /**
-     * The `Pool` column: distinct threads that ever *called* the operation.
-     *
-     * Counted by the hook rather than sampled, so unlike the two columns beside it this one is
-     * exact - it counts callers, and a thread that entered once and was never sampled still ran it.
-     *
-     * It is the pool, and that holds in the cases that look like exceptions: a thread-per-task
-     * workload really does have ten thousand of them, which is what virtual threads are for, and a
-     * label fed by two pools really is run by both. What it counts is the threads that *were used*,
-     * which is why a `ThreadPoolExecutor` of four reaches 4 while never running more than three
-     * tasks at once - it opens a new core thread on every submit until the core size is reached.
-     */
-    internal fun poolOf(op: OperationStat): String = if (op.threads <= 0) "-" else op.threads.toString()
-
     /** Thread-time spent inside any label. */
     internal val labelledNanos: Double get() = labelledHits * stepNanos
 
@@ -1029,27 +890,6 @@ class Run internal constructor(
     /** Of [unlabelledHits], those whose thread was not runnable. See [labelledWaitingHits]. */
     internal val unlabelledWaitingHits: Long
         get() = (idleWaitingHits - coarse.sumOf { it.selfHits - it.selfRunningHits }).coerceAtLeast(0)
-
-    /**
-     * Coverage with both sides restricted to occupancy where the thread was actually runnable.
-     *
-     * The plain coverage figure divides labelled samples by *every* sample, and on a workload with
-     * idle threads that reads as "the operations miss most of the run" when what it means is "most of
-     * the run was nobody doing anything". When 79.2% of the unlabelled samples caught a thread that
-     * was not runnable, 49.8% coverage means something quite different.
-     *
-     * Both sides, not just the unlabelled one: a label can be held across a wait - an update under a
-     * lock can spend 73% of itself parked - so leaving that inside the numerator while removing it
-     * from the denominator would be the same mismatch of denominators, pointing the other way. NaN when state was not sampled and the question cannot be
-     * asked.
-     */
-    internal val runnableCoverage: Double
-        get() {
-            if (!stateSampled) return Double.NaN
-            val labelled = labelledHits - labelledWaitingHits
-            val idle = unlabelledHits - unlabelledWaitingHits
-            return if (labelled + idle <= 0) Double.NaN else labelled.toDouble() / (labelled + idle)
-        }
 
     /**
      * Thread-time the sampler observed at all — every slot read on every tick, labelled or not.
@@ -1063,21 +903,6 @@ class Run internal constructor(
     /** Occupancy that was not CPU, in samples. The whole run's supply of stalling. */
     internal val offCpuSamples: Double
         get() = if (duty.available) (1 - duty.duty) * (labelledHits + unlabelledHits) else Double.NaN
-
-    /**
-     * The most an execution can plausibly have cost, from the sampling alone.
-     *
-     * The hit count is a count of rare events, so its upper confidence bound is
-     * `hits + 2√hits + 3` — and that is `3` when nothing was ever sampled, which is the rule of
-     * three and the reason an operation the sampler never caught is still measurable. Seeing it
-     * zero times in *n* samples means its whole occupancy is under three ticks however large *n*
-     * was, so its cost per call is under `3 × tick / calls`. Forty million calls at a 1 ms tick
-     * puts that under 0.075 ns, a fraction of one cycle.
-     *
-     * This is what makes "too small" provable rather than suspected: if even the upper bound is
-     * below the floor, no amount of missing evidence can rescue the label.
-     */
-    internal fun impliedUpperNanosOf(op: OperationStat): Double = impliedUpperNanos(op.hits, op.calls, stepNanos)
 
     /**
      * Operations labelled on something too small for the instrument to describe.
@@ -1332,10 +1157,6 @@ class Run internal constructor(
         return if (big.size + small.size <= FINE_ROWS_SHOWN) big + small.sortedByDescending { it.calls } else big
     }
 
-    /** How much of the observed thread-time happened anywhere under [c]. */
-    internal fun shareOf(c: CoarseStat): Double =
-        if (observedNanos <= 0.0) 0.0 else c.inclusiveHits * stepNanos / observedNanos
-
     /**
      * The share of the run's thread-time [c]'s executions held, from their count and measured mean:
      * once per execution, however many threads ran inside it, which is what timing them costs in
@@ -1426,7 +1247,7 @@ class Run internal constructor(
      * The sibling of [labelledOutsideCoarseShare] and the opposite fault. That one is attribution
      * **lost** — work that reached no span — and it is recoverable by wrapping the hand-off. This is
      * attribution **invented**, and it is the direction the whole design is built to avoid, which is
-     * why it is the one thing the sampler stops a strict session over on its own.
+     * why it is the one thing the sampler stops a session over on its own.
      */
     internal val staleContextShare: Double
         get() = if (coarseSampleHits == 0L) 0.0 else staleContextHits.toDouble() / coarseSampleHits
@@ -1484,8 +1305,8 @@ class Run internal constructor(
         appendLine("  can create work for everything else as well as doing its own. The two numbers are")
         appendLine("  different questions and the gap can be orders of magnitude")
         appendLine("thread-time% and thread-time are the same quantity, relative and absolute: sampled and")
-        appendLine("  summed across threads, with waiting counted in full. NOT CPU${sym.dash}a Careful line under the")
-        appendLine("  header says when the gap matters. The share is of every sample, so it is a share of active")
+        appendLine("  summed across threads, with waiting counted in full. NOT CPU${sym.dash}a warning says when the")
+        appendLine("  gap matters. The share is of every sample, so it is a share of active")
         appendLine("  time and '(no operation)' is the rest; the absolute one is the column to compare between")
         appendLine("  two runs")
         appendLine("wall time = active + paused. Paused is time every thread was stopped: ticks the sampler ran")
@@ -1499,7 +1320,7 @@ class Run internal constructor(
         appendLine("  NOT working${sym.dash}a thread the scheduler merely preempted reads runnable, and so does one")
         appendLine("  stopped inside a native call, which the JVM cannot see into. So the left half is an UPPER")
         appendLine("  BOUND on the work and the CPU clock is the only thing that bounds it in turn, which is what")
-        appendLine("  the Careful line about it says; the right half is waiting that some other thread caused")
+        appendLine("  the warning about it says; the right half is waiting that some other thread caused")
         appendLine("wall-time is the clock with at least one thread inside, and it is NOT summed across threads,")
         appendLine("  which thread-time is. Not latency either: it is every execution's interval unioned, so it")
         appendLine("  says nothing about any single one of them")
@@ -1588,22 +1409,34 @@ class Run internal constructor(
         /** The name as printed: a star marks a row whose full span is in the coarse table. */
         val label: String get() = if (coarse) "$name *" else name
 
+        /**
+         * `Thread-time%`: a share of *all* samples, so a share of active time, and the `(no operation)`
+         * row is the rest. Over all samples rather than labelled ones: adding a label moves samples
+         * out of `(no operation)` and nothing else, where a share of labelled samples would move
+         * every row.
+         */
         fun shareOf(): Double = if (allHits == 0L) 0.0 else hits.toDouble() / allHits
 
         /** NaN with no sample, which is no share, not 0% waiting. */
         val waitingShare: Double get() = if (hits == 0L) Double.NaN else (hits - runningHits).toDouble() / hits
 
-        fun noiseFloor(): Double = if (hits <= 0) 0.0 else 1.0 / sqrt(hits.toDouble())
-
         fun perCallNanos(): Double = if (calls == 0L) Double.NaN else hits * stepNanos / calls
 
-        fun concurrency(): String =
-            if (activeTicks == 0L) "-"
-            else String.format(Locale.ROOT, "%.2f", hits.toDouble() / activeTicks)
+        /** `Concurrency`: threads inside at once, averaged over the ticks where any were. NaN when never seen. */
+        val concurrency: Double get() = if (activeTicks == 0L) Double.NaN else hits.toDouble() / activeTicks
 
-        fun workers(): String = if (peakInside <= 0) "-" else peakInside.toString()
+        /**
+         * `Workers`: the most threads seen inside at one tick, the series whose mean is [concurrency].
+         * Detected rather than measured, so a lower bound: a burst between two ticks is not seen.
+         * NaN when never seen.
+         */
+        val workers: Double get() = if (peakInside <= 0) Double.NaN else peakInside.toDouble()
 
-        fun pool(): String = if (threads <= 0) "-" else threads.toString()
+        /**
+         * `Pool`: the distinct threads that ever called the operation, counted by the hook, so exact:
+         * a thread that entered once and was never sampled still ran it. NaN when none.
+         */
+        val pool: Double get() = if (threads <= 0) Double.NaN else threads.toDouble()
     }
 
     /**
@@ -1645,7 +1478,7 @@ class Run internal constructor(
 
     /**
      * Every warning of the report, for its `WARNINGS` section right under the first line (see
-     * [carefulBlock]).
+     * [warningsSection]).
      *
      * All in one place and before any table, not where each is computed: printed there, a warning
      * about a fine operation would sit under the coarse table and read as one about a coarse one.
@@ -1675,13 +1508,13 @@ class Run internal constructor(
                     words(coarse.maxByOrNull { it.staleHits }?.takeIf { it.staleHits > 0 }?.let { code(it.name) } ?: ""),
                 )
             )
-            addAll(pause.careful(wait, samplingSpanNanos))
+            addAll(pause.warnings(wait, samplingSpanNanos))
             // Thread state cannot see a native wait. Run-wide from the duty cycle, or a coarse row
             // whose Runnable the CPU time contradicts: one warning, and the worst row, with the share
             // of its own Runnable time, in place of the run-wide one.
             val contradicted = coarse.filter { it.count > 0 && workingIsContradicted(it) }
                 .maxByOrNull { it.working / workingCeilingOf(it) }
-            val fromDuty = duty.careful(activeNanos, reclaimedSlots)
+            val fromDuty = duty.warnings(activeNanos, reclaimedSlots)
             addAll(if (contradicted == null) fromDuty else fromDuty.filter { it.kind != Kind.RUNNABLE_OFF_CPU })
             if (contradicted != null) add(
                 Warning(
@@ -1689,7 +1522,7 @@ class Run internal constructor(
                     words(code(contradicted.name)),
                 )
             )
-            addAll(clock.careful())
+            addAll(clock.warnings())
             hookCost()?.let { h ->
                 add(Warning(Kind.HOOKS_COST, words(h.top?.let(::code) ?: ""), figure(h.share, ::shareText), figure(h.wallShare, ::shareText)))
             }
@@ -1736,7 +1569,7 @@ class Run internal constructor(
     /**
      * This run as a report of its own. See [Profile.report].
      */
-    internal fun render(legend: Boolean = false, careful: Warnings = table.warnings()): String = table.report(legend, careful)
+    internal fun render(legend: Boolean = false, warnings: Warnings = table.warnings()): String = table.report(legend, warnings)
 
     /**
      * Writes this run as a new file in [folder], named by the time it is saved -

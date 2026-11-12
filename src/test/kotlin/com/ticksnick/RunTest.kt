@@ -273,8 +273,9 @@ class RunTest {
         val d = duty(labelled = 0.0, runnable = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
         assertTrue(d.unbounded, "the event-loop regime is no longer recognised as unbounded")
         val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
-        assertTrue(lines.contains("was not on a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")
+        assertTrue(lines.contains("Runnable: all of it inside labels may have been off a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")
         assertFalse(lines.contains("may be off by"), "printed a bound it does not have")
+        assertFalse(lines.contains("%"), "printed a share it does not have: $lines")
     }
 
     /** When the bound *did* find something, it prints it — and the diagnosis stays away. */
@@ -284,7 +285,7 @@ class RunTest {
         assertFalse(d.unbounded)
         val lines = d.careful(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
         assertTrue(lines.contains("off by up to 1.56pp"), "the bound was not printed")
-        assertFalse(lines.contains("was not on a CPU"), "printed the diagnosis over a real bound")
+        assertFalse(lines.contains("off a CPU"), "printed the diagnosis over a real bound")
         assertEquals(1.56, d.boundPp, 0.05, "the 1.57pp bound moved")
     }
 

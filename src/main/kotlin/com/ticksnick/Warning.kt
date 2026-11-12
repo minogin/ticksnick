@@ -77,9 +77,11 @@ internal enum class Kind(val text: (List<String>) -> String) {
     }),
     PAUSES_IN_TIMES({ g -> "Paused: ${g[0]} of pauses, ${g[1]} of the run, is counted as work in the times below" }),
     RUNNABLE_UNCHECKED({ g -> "Runnable: not checked against CPU time (${g[0]})${sym.dash}it may include threads waiting in native calls" }),
+    // A row the CPU time contradicts, with the share of its own Runnable time; or run-wide, where the
+    // bound ran out of evidence and the share of all Runnable time inside labels would always be all.
     RUNNABLE_OFF_CPU({ g ->
-        "Runnable: ${g[0]} of it inside labels was not on a CPU${if (g[1].isEmpty()) "" else ", mostly under ${g[1]}"}${sym.dash}" +
-                "a thread waiting in a native call, such as a socket read, shows as Runnable; label the call to give the wait its own row"
+        (if (g[1].isEmpty()) "Runnable: all of it inside labels may have been off a CPU" else "${g[1]}: ${g[0]} of its Runnable time was not on a CPU") +
+                "${sym.dash}a thread waiting in a native call, such as a socket read, shows as Runnable; label the call to give the wait its own row"
     }),
     // The cause line: both causes with their shares, or the one alone, a 0% cause having nothing to do.
     THREAD_TIME_BOUND({ g ->

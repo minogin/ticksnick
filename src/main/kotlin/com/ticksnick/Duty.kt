@@ -983,8 +983,9 @@ internal class Duty internal constructor(
                 else "its threads ended within the first ${duration(windowNanos.toDouble())}"
             ),
         )
-        // The bound has run out of evidence: the waiting off the CPU could all be inside the labels.
-        else if (unbounded) out += Warning(Kind.RUNNABLE_OFF_CPU, figure(invisibleOffCpu, ::shareText), words(""))
+        // The bound has run out of evidence: the waiting off the CPU could all be inside the labels,
+        // so there is no figure to give.
+        else if (unbounded) out += Warning(Kind.RUNNABLE_OFF_CPU, figure(Double.NaN, ::shareText), words(""))
         // What it means for the column a reader looks at, and, where the seconds it happened in say
         // which, the cause with its fix.
         else if (runnableBoundPp > CAREFUL_PP) {

@@ -1677,14 +1677,13 @@ class Run internal constructor(
             )
             addAll(pause.careful(wait, samplingSpanNanos))
             // Thread state cannot see a native wait. Run-wide from the duty cycle, or a coarse row
-            // whose Runnable the CPU time contradicts: one warning, naming the worst row.
+            // whose Runnable the CPU time contradicts: one warning, and the worst row, with the share
+            // of its own Runnable time, in place of the run-wide one.
             val contradicted = coarse.filter { it.count > 0 && workingIsContradicted(it) }
                 .maxByOrNull { it.working / workingCeilingOf(it) }
             val fromDuty = duty.careful(activeNanos, reclaimedSlots)
-            for (w in fromDuty) add(
-                if (w.kind == Kind.RUNNABLE_OFF_CPU && contradicted != null) Warning(w.kind, w.gaps[0], words(code(contradicted.name))) else w
-            )
-            if (contradicted != null && fromDuty.none { it.kind == Kind.RUNNABLE_OFF_CPU }) add(
+            addAll(if (contradicted == null) fromDuty else fromDuty.filter { it.kind != Kind.RUNNABLE_OFF_CPU })
+            if (contradicted != null) add(
                 Warning(
                     Kind.RUNNABLE_OFF_CPU, figure(1 - workingCeilingOf(contradicted) / contradicted.working, ::shareText),
                     words(code(contradicted.name)),

@@ -300,10 +300,23 @@ class CoarseTest {
             instanceTicks = 1_000, activeTicks = 1_000, name = "query",
         )
         val text = report(listOf(bad), labelledDuty = 0.01).render()
-        val line = text.lines().firstOrNull { it.startsWith("  Runnable: ") && "mostly under `query`" in it }
+        val line = text.lines().firstOrNull { it.startsWith("  `query`: ") }
         assertTrue(line != null, "the warning did not appear, or did not name the operation: $text")
         // What the CPU time allows of the row's Runnable time: 3.00 threads against well under 0.1.
-        assertTrue(Regex("""Runnable: 9\d\.\d% of it inside labels was not on a CPU""").containsMatchIn(line), line)
+        assertTrue(Regex("""`query`: 9\d\.\d% of its Runnable time was not on a CPU""").containsMatchIn(line), line)
+    }
+
+    @Test
+    fun `a contradicted row and an unbounded run are one warning, the row's, with its own figure`() {
+        val bad = stat(
+            count = 100, sumNanos = 100_000_000, hits = 4_000, running = 3_000,
+            instanceTicks = 1_000, activeTicks = 1_000, name = "query",
+        )
+        val text = report(listOf(bad), labelledDuty = 0.01, runnableDuty = 0.0, invisibleOffCpu = 0.3).render()
+        val lines = text.lines().filter { "Runnable time was not on a CPU" in it || "off a CPU" in it }
+        assertEquals(1, lines.size, text)
+        // The row's own share, not the run-wide 30.0%.
+        assertTrue(Regex("""`query`: 9\d\.\d% of its Runnable time""").containsMatchIn(lines[0]), lines[0])
     }
 
     @Test
@@ -428,6 +441,9 @@ class CoarseTest {
         fineCalls: Long = labelled,
         /** Labelled samples under no coarse execution. */
         outside: Long = 0,
+        /** The bound over Runnable time; 0 with [invisibleOffCpu] over 0 is a run whose bound ran out of evidence. */
+        runnableDuty: Double = Double.NaN,
+        invisibleOffCpu: Double = 0.0,
     ) = Run(
         operations = listOf(OperationStat(0, fineName, labelled, fineCalls, 0, 0, 0, 0, labelled)),
         idleHits = 0,
@@ -436,7 +452,7 @@ class CoarseTest {
         durationNanos = 1_000_000_000_000,
         threads = 8,
         duty = Duty(
-            labelledDuty = labelledDuty, invisibleOffCpu = 0.0, labelledFraction = 1.0,
+            labelledDuty = labelledDuty, runnableDuty = runnableDuty, invisibleOffCpu = invisibleOffCpu, labelledFraction = 1.0,
             reason = if (dutyAvailable) null else "no window completed",
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000,
             windows = if (dutyAvailable) 20 else 0, threads = 8,

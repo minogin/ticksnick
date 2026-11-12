@@ -1073,6 +1073,9 @@ internal class Sampler(
             }
         }
         if (interrupted) Thread.currentThread().interrupt()
+        // Once more over the whole session, since the loop checks once a second: a run shorter than
+        // that, or stale work in its last second, fails as any other.
+        if (staleStops) checkStaleContexts()
     }
 
     /** Total samples taken: one per slot per tick. */

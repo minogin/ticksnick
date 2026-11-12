@@ -111,6 +111,10 @@ class SamplerCoarseTest {
             stat.inclusiveHits * 20 < stat.staleHits,
             "stale work reached the totals: ${stat.inclusiveHits} credited against ${stat.staleHits} stale"
         )
+        // Nearly all of the coarse time is stale, far over 1%, so the run fails, though it is shorter
+        // than the second between the sampler's own checks: `stop()` checks once more.
+        val failure = assertNotNull(report.failure, "a run with most of its coarse time stale did not fail")
+        assertTrue("mostly `sampler-stale`'s" in failure, failure)
     }
 
     /**

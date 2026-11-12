@@ -656,6 +656,22 @@ class CoarseTest {
         assertTrue(msg.lines().size == 1, "one line: $msg")
     }
 
+    /**
+     * Above the flat floor and too many to time: 5 us apiece, over the 2.5 us floor, but 150 million
+     * executions holding the whole run, so timing each one costs 1.51% of it, a fine label's price
+     * included. The warning is the share one, with what timing them costs, not the floor one.
+     */
+    @Test
+    fun `a coarse label over the flat floor but too many to time is warned about its cost`() {
+        val r = report(coarse = listOf(stat(count = 150_000_000, sumNanos = 750_000_000_000, hits = 1_000_000, running = 1_000_000)))
+        assertEquals(listOf("req"), r.coarseTooSmall().map { it.name })
+        val w = r.warnings().filter { it.kind == Kind.COARSE_OVER_SHARE || it.kind == Kind.COARSE_UNDER_FLOOR }
+        assertEquals(listOf(Kind.COARSE_OVER_SHARE), w.map { it.kind })
+        val msg = w.single().text()
+        assertTrue(msg.startsWith("`req`: timing its executions costs 1.51% of the run"), msg)
+        assertTrue(msg.contains("`registerFine(\"req\")`"), msg)
+    }
+
     @Test
     fun `a legitimate coarse label is not accused`() {
         // A millisecond apiece at a 0.1% share. Nothing here is borderline and the check must stay

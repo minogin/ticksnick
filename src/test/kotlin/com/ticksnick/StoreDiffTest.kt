@@ -159,7 +159,12 @@ class StoreDiffTest {
         }
     }
 
-    private fun profile(ops: List<OperationStat>, tree: List<CoarseNode> = emptyList(), coarse: List<CoarseStat> = emptyList()) = Run(
+    private fun profile(
+        ops: List<OperationStat>, tree: List<CoarseNode> = emptyList(), coarse: List<CoarseStat> = emptyList(),
+        clock: ClockTrace = ClockTrace.NOT_RECORDED,
+        openAtEnd: Int = 0, openAtEndNames: List<String> = emptyList(),
+        openContextsAtEnd: Int = 0, openContextsAtEndByName: Map<String, Int> = emptyMap(),
+    ) = Run(
         operations = ops, idleHits = 0, ticks = 1_001, samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000,
         threads = 1,
         duty = Duty(
@@ -168,8 +173,60 @@ class StoreDiffTest {
             cpuNanos = 990_000_000, wallNanos = 1_000_000_000, minWindowDuty = 0.99, maxWindowDuty = 0.99,
             anomalies = 0, maxSampleNanos = 200_000,
         ),
-        coarse = coarse, coarseTree = tree,
+        coarse = coarse, coarseTree = tree, clock = clock,
+        openAtEnd = openAtEnd, openAtEndNames = openAtEndNames,
+        openContextsAtEnd = openContextsAtEnd, openContextsAtEndByName = openContextsAtEndByName,
     )
+
+    /** A clock that read [v] every second of a three-second run. */
+    private fun steadyAt(v: Double) = ClockTrace(doubleArrayOf(v, v, v), ofBase = true, notMeasured = null)
+
+    @Test
+    fun `a run's clock and the names of what it left open survive the file`() {
+        val p = profile(
+            listOf(stat("a", 100, 1_000)),
+            clock = ClockTrace(doubleArrayOf(205.0, Double.NaN, 135.0), ofBase = true, notMeasured = null),
+            openAtEnd = 1, openAtEndNames = listOf("parse"),
+            openContextsAtEnd = 3, openContextsAtEndByName = mapOf("req" to 2, "step" to 1),
+        )
+        val path = Files.createTempFile("ticksnick", RUN_EXTENSION)
+        try {
+            RunStore.save(p, path)
+            val back = Run.load(path)
+            assertEquals(3, back.clock.samples.size)
+            assertEquals(205.0, back.clock.samples[0])
+            assertTrue(back.clock.samples[1].isNaN(), "an idle second came back as a reading")
+            assertEquals(135.0, back.clock.samples[2])
+            assertTrue(back.clock.ofBase)
+            assertEquals(listOf("parse"), back.openAtEndNames)
+            assertEquals(mapOf("req" to 2, "step" to 1), back.openContextsAtEndByName)
+        } finally {
+            Files.delete(path)
+        }
+    }
+
+    @Test
+    fun `runs of one profile at different clocks are a warning`() {
+        val runs = listOf(
+            profile(listOf(stat("a", 100, 1_000)), clock = steadyAt(200.0)),
+            profile(listOf(stat("a", 100, 1_000)), clock = steadyAt(150.0)),
+        )
+        val text = Profile("p", listOf(Path.of("1.tsr"), Path.of("2.tsr")), runs).render()
+        assertTrue("CPU clock: ran at 150%..200% across the runs" in text, text)
+    }
+
+    @Test
+    fun `a diff names a clock that moved between the sides, and a root run a different number of times`() {
+        fun root(count: Long) = CoarseNode(
+            0, "root", count, count * 1_000_000, 1_000_000, 1_000_000, Spans(), 10, 10, LongArray(MAX_OPERATIONS + 1), 0, emptyList(),
+        )
+        val before = profile(listOf(stat("a", 100, 1_000)), tree = listOf(root(3)), clock = steadyAt(200.0))
+        val after = profile(listOf(stat("a", 100, 1_000)), tree = listOf(root(4)), clock = steadyAt(150.0))
+        val text = diffOf(before, after)
+        assertTrue("CPU clock     200% -> 150%, the mean of each side's runs" in text, text)
+        assertTrue("CPU clock: 200% -> 150% between the sides" in text, text)
+        assertTrue("`root`: ran 3 times before, 4 after" in text, text)
+    }
 
     @Test
     fun `durations survive the file, exact ones and a histogram`() {

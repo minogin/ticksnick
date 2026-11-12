@@ -56,8 +56,8 @@ internal const val NANOTIME_SLOW_FACTOR = 2.0
 internal const val COARSE_HOOK_REST_BODIES = 0.4
 
 /**
- * One body, in ns, for a run saved without one: what a body takes on a typical developer machine.
- * Every limit of such a run is read at it, and its warnings say the floor is a default.
+ * One body, in ns, for a run without one, a session too short to time it: what a body takes on a
+ * typical developer machine. Every limit of such a run is read at it.
  */
 internal const val DEFAULT_BODY_NANOS = 25.0
 

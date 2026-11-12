@@ -19,6 +19,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   which was `ProfileRuns`. A profile is how a program behaves, and a run is one measurement of it.
 - Saved runs are `.tsr` files and start with `ticksnick-run 3`. Older files are refused.
 - `Profiler.start(stepMillis = ...)` is now `tickMillis`.
+- `op` is inline, so code that calls it must be compiled against this version.
+- A missing folder says so, `no profile at 'runs/x': no such folder`, and every message quotes its path.
 
 ### Tags and setup
 
@@ -29,8 +31,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   JVM's identity.
 - Every report prints `Tags` and `Setup` lines under its warnings. A diff prints every tag and what
   differs in the setup.
-- A folder whose runs differ in a tag, the setup, the sampling interval, the wait strategy or
-  `allocations` gets one warning, last, and runs of one JVM get another.
+- A folder whose runs differ in a tag, the setup, the tick, the wait strategy or `allocations` gets one
+  warning, last and never cut by the cap of ten, and runs of one JVM get another.
 
 ### One set of tables
 
@@ -42,31 +44,28 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - A diff has everything a report has. A row is three lines: before, after, and the change.
 - `and N more` is a row, with the time of the rows it folds: what adds up. Their calls, of different
   operations, are left blank.
-- Work outside a span, a label not in the tree, a closed execution and `on a CPU` over what the CPU
-  allows are warnings now, so they reach a report of several runs and a diff.
+- Fine-label time under no coarse row, a label not in the tree, a closed execution and `on a CPU` over
+  what the CPU allows are warnings now, so they reach a report of several runs and a diff.
 - The coarse table has groups, `Load` and `Long`, as the fine table has. `Runnable / Waiting` moved into
   `Load`, before `Mean`.
 - The fine table has no `Trust` group: `Hits` and `Noise` are gone. The `Sampled` line says how many
   samples there are.
 - `Execs` is `Long calls`, and `Per call` is `Thread-time per call` in every table.
-- `Allocated` is a group of two columns: `Total`, which adds up down the tree, and `Per execution`.
+- The line under the fine table names both kinds of label it leaves out: `2 operations called but never
+  sampled: parse, visit; 1 never called: emit`.
 - `+-` is on what says how much, `Runnable / Waiting` included, and not on percentiles, `Max`, or the
   `Long` and `Spread` groups. `Allocated` is counted and has none: the mean of the runs, plainly.
-- A change's interval is in percentage points: `-22% +-2.2 pp`.
 - `faster`, `slower` and `unclear` are gone. A change that could be noise is marked `?`, held to 5%
   divided by the number of changes in the diff, with a note under the table.
-- A figure and its `+-` in one unit say the unit once, at the right: `52 +-0.4%`, `117 +-0.444 s
-  (0.4%)`, and in a diff `-22 +-2.2%` and `+5.3 +-0.6 pp`. A `+-` that is a percent of its figure
-  stays as it was: `42.5 s +-1.1%`. A change's `?` goes last: `-7.7 +-9.5%?`.
 
 ### Warnings
 
-- The report over runs and both diffs show each run's own warnings, which only the report of one run
-  did. The same warning from several runs is one line that says how many, its figures as ranges:
-  `may be off by up to 1.14pp..1.56pp (2 of 2 runs)`.
+- A report of several runs and a diff show each run's own warnings, as a report of one run did. The
+  same warning from several runs is one line that says how many, its figures as ranges: `Paused:
+  1.20s..1.45s of pauses, 3.10%..3.60% of the run, is counted as work in the times below (2 of 3 runs)`.
 - A diff shows the warnings of both its profiles, each naming its profile.
-- The warnings are a `WARNINGS` section under a heading, each two spaces in and its cause further in,
-  in place of `CAREFUL` on every line. Every warning is reworded to say what happened, why it matters
+- The warnings are a `WARNINGS` section under a heading, each two spaces in and a cause line further
+  in, in place of `CAREFUL` on every line. Every warning is reworded to say what happened, why it matters
   and what to do, for someone new to TickSnick; its subject is a name the report shows, and code is in
   backticks: `` `visit`: 12.0% of its time is in calls over 1.00ms, which its per-call time hides -
   register it coarse, `registerCoarse("visit")` ``. Several became one: the pause warnings, the
@@ -76,14 +75,14 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   `Pool` columns show, and CPU clock readings dropped for going backwards.
 - A label still open at `stop()` is named, `` `parse`: entered and never exited by `stop()` ``, and so
   is a coarse execution still open; a run saves their names.
-- A failed run, stopped by a leaked label or work billed to a closed execution, is left out of its
-  profile: the report opens with `FAILED: 1 of 4 runs, left out of the profile` and each failed run's
-  file and failure. When every run failed there is no profile, and the report is that banner alone; so is
-  a diff with such a side. A failure is not a warning, and is not repeated as one.
+- A failed run, stopped by a leaked label, a crossed `exit`, work billed to a closed execution or an
+  error in the sampler, is left out of its profile: the report opens with `FAILED: 1 of 4 runs, left
+  out of the profile` and each failed run's file and failure. When every run failed there is no
+  profile, and the report is that banner alone; so is a diff with such a side. A failure is not a warning, and is not repeated as one.
 - `Profiler.start(strict = false)` is gone: a leaked label, a crossed `exit` and work billed to closed
   executions always fail the run, since its figures would be false.
 - The floors are recommended limits, rounded up to two digits, the second 0 or 5, and the check uses
-  the rounded figure: `` `request`: its executions, 1.2us, are under the recommended 3.5us (Allocated
+  the rounded figure: `` `request`: its executions, 1.20us, are under the recommended 3.5us (Allocated
   adds 650ns) ``. The coarse floor is 100 bodies, about 2.5 us; each registered fine label and counting
   allocated bytes raise it, and the warning names what raised it.
 - The run list's `clock` and a diff's `Clock` line are `CPU clock`.
@@ -98,23 +97,25 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - `Profiler.fine(op)`, `fine(op, times)` and `coarse(op)` enter and return a `FineScope` or a
   `CoarseScope` for try-with-resources. `close()` exits. Nothing is allocated.
 - `registerFine(name, Kind.class)` and `registerCoarse(name, Kind.class)` register an enum family.
-- The Kotlin API is unchanged.
+- Calling from Java changes nothing in Kotlin.
 
 ### The sampler on small machines
 
 - With fewer than 4 processors the sampler parks between samples by default instead of spinning,
   which held one of them. `wait = WaitStrategy.SPIN` still spins.
-- The report has a `Sampling` line: the interval achieved, and whether the sampler held a processor
-  or left it free. A spinning sampler on fewer than 4 processors is named with the remedy.
+- The report has a `Sampling` line: the tick achieved, and whether the sampler held a processor or
+  left it free. A spinning sampler on fewer than 4 processors is named with the remedy.
 
 ### Fine calls per coarse execution
 
 - Fine calls are counted on the coarse path they ran under. A `-` row shows its calls in
   `Executions`, its calls per execution of the row in `Per parent`, and its own time per call in
-  `Mean`. A label called on a path and never sampled there gets a row with its calls.
+  `Mean`. A label called on a path and never sampled there gets a row with its calls, and `-` for its
+  time; in a run where it was not sampled it counts at 0 in `Mean`, as in `Wall`.
 - `x parent` is now `Per parent`, and its figures have no `x`: `5,262`, and `3` for what was `x3.0`.
 - `in all, under N operations` is gone. A row on more than one parent says `(3 parents)`, and its whole
-  is a row of `Under multiple parents` right under the tree, coarse and fine sorted together by Wall.
+  is a row of `Under multiple parents` right under the tree, coarse and fine sorted together by Wall. A
+  recursive operation counts once there, its nested executions inside its whole.
 - Diffs show the `-` rows under coarse rows, and a `Per parent` column. What a diff shows has the
   name and form it has in the report.
 - Each coarse execution costs a little more for every registered fine label, and the coarse floor
@@ -124,16 +125,17 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 - `Profiler.start(allocations = true)` counts the bytes allocated under each coarse path, on every
   thread that runs under it. Off by default.
-- The report, the report over runs and both diffs gain an `Allocated` column, bytes per execution
-  with coarse children included. Without the setting the tables are unchanged.
+- Every report and diff gains an `Allocated` group in the coarse table: `Total`, the row's coarse
+  children and every thread under it included, which adds up down the tree, and `Per execution`.
+  Without the setting the tables are unchanged.
 - Each coarse execution costs more with it on, and the coarse floor check takes that into account.
   A diff warns when only one side counted.
 - On a JVM that cannot report allocated bytes the session runs without them and the report says so.
   On a virtual thread, where the JVM gives none, a row and every row above it read `-`, never 0, and
   a warning says why.
 - `Allocated` counts the program's bytes only: the label's own context, one per execution, is left
-  out, and an execution under a context borrowed by `propagating()` no longer allocates for its path.
-  An execution that allocates nothing reads 0, where it read 57 bytes, and 217 under a borrowed one.
+  out, and an execution under a context borrowed by `propagating()` adds nothing of TickSnick's. An
+  execution that allocates nothing reads 0.
 
 ### Floors that follow the machine
 
@@ -141,13 +143,14 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   against it once at `stop()`. Both are saved with the run.
 - The fine floor is 2 bodies and the coarse floor 100 bodies, read at the run's body: about 50 ns and
   2.5 us on a fast machine, more on a slower one or at a lower clock. The coarse floor rises with a
-  slow `nanoTime`. A run saved without a body is read at 25 ns a body, and its floor warnings say so.
-- A label under its floor in several runs of a profile is one warning, its figures as ranges where the
-  runs differ: `below the 60ns..62ns floor (2 of 3 runs)`.
-- `labels: TickSnick's hooks may add up to P to the work inside labels, and up to W to the wall time`
-  warns when the hooks, at their budgets and the run's body, may add more than 1% to the work inside
-  labels; W is the most they can add to the wall time, all on the run's critical path. A batch label counts as
-  one hook entry for its n calls; a run saves how many times each fine hook ran.
+  slow `nanoTime`. A session too short to time a body is read at 25 ns a body.
+- A label under its floor in several runs of a profile is one warning, its floor a range where the runs
+  differ: `` `visit`: its calls are under the recommended 60ns..70ns ... (2 of 3 runs) ``.
+- ``The labels, mostly `parse`, may add up to P to the work inside them and W to the wall time - fewer,
+  larger labels cost less`` warns when the hooks, at their budgets and the run's body, may add more than
+  1% to the work inside labels; W is the most they can add to the wall time, all on the run's critical
+  path. A batch label counts as one hook entry for its n calls; a run saves how many times each fine
+  hook ran.
 - The README says what TickSnick costs: the sampler's core, each label, a hand-off, and what runs in the
   background.
 
@@ -175,9 +178,17 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - `stop()` on an interrupted thread finishes the session. `start()` refuses a `tickMillis` of 0 or
   less and a `jitter` of 1 or more.
 - A batch label, `op(x, times = n)`, is judged against the floor per entry, as its hook runs.
-- `Runnable / Waiting` leaves out a run that did not read the state or never caught the row. A label
-  called and never sampled counts at 0 in `Mean`, as in `Wall`. `Under multiple parents` counts a
-  recursive operation once. A diff's change from 0 is blank, not `+Infinity%`.
+- `Runnable / Waiting` leaves out a run that did not read the state or never caught the row. A diff's
+  change from 0 is blank, not `+Infinity%`.
+- `stop()` no longer throws `NullPointerException` while another thread is inside a coarse operation
+  opened with a key.
+- A coarse operation that hands work to other threads is no longer told it is too short to time: the
+  1% check counts each execution once, not once per thread inside it. One under the floor is told so,
+  whatever its share.
+- No warning that fine-label time is under no coarse row in a run that uses no coarse label.
+- The `Thread-time%` bound sets each thread's samples against its CPU time over the same windows.
+- Work billed to a closed execution fails a run shorter than a second, or in its last second, as it
+  fails a longer one.
 - A damaged run file is refused with a message.
 
 ## 0.5.0 - 2026-10-27

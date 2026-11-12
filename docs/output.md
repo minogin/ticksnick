@@ -3,8 +3,8 @@
 TickSnick prints three kinds of report:
 
 - **One run**: `TickSnick.load(folder).render()` on a folder that holds one saved run.
-- **Several runs**: the same call on a folder of several runs. Every figure is the mean of the runs,
-  with a 95% interval.
+- **Several runs**: the same call on a folder of several runs. Each figure is the mean of the runs,
+  and what says how much has a 95% interval.
 - **A diff**: `TickSnick.diff(before, after)` on two folders.
 
 The examples come from a program that resolves Java classpaths over the Maven Central dependency
@@ -19,12 +19,14 @@ Runs          1 run of 'naive', one JVM: no interval
 WARNINGS
   Runs: 1 in 'naive', no interval - shares hold, durations need a second run
 
+Tags          warmups: 2; batches: 3; roots: org.apache.*
+Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; CPU: Intel64 Family 6 Model 197 Stepping 2, GenuineIntel; Processors: 14; Heap: 18.0 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
               run  file                               wall   CPU clock   runBatch, each execution
               1    2026-10-26T18-16-43.tsr            117s         99%   27.6s   27.4s   27.0s
-Wall time      117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
-runBatch       27.3s per execution
+Wall time     117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
+runBatch      27.3s per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
-Sampling      every 1.0ms: the sampler keeps one of the 14 processors busy to hold the interval
+Sampling      every 1.0ms: the sampler keeps one of the 14 processors busy to hold the tick
 ```
 
 ### WARNINGS
@@ -50,15 +52,15 @@ The common ones:
 - `` `visit`: its calls are under the recommended 50ns `` - the label is a visible part of what it
   measures. Label the loop around it, with `op(handle, times = n) { }`. The floor is 2 bodies at the
   run's body, rounded up.
-- `` `request`: its executions, 1.2us, are under the recommended 3.0us `` - the operation is too short
+- `` `request`: its executions, 1.20us, are under the recommended 3.0us `` - the operation is too short
   for a coarse label. Register it fine; the `op` calls stay the same. What raises the floor is named.
 - `` `parse`: entered and never exited by `stop()` `` - a label set with `enter` was still open when the
   session stopped, so the time after its missed `exit` may have gone to it. Put `exit` in a `finally`.
-- `Thread-time%: may be off by up to N pp` and the `Runnable` warnings - some time inside labels read
+- `Thread-time%: may be off by up to 1.10pp` and the `Runnable` warnings - some time inside labels read
   as Runnable may have been waiting, so a share of time may differ from a share of CPU. The second line
   splits it: waiting for a free core (run fewer threads) or in I/O, native calls or other programs
   (label the wait).
-- `Paused: 1.85s of pauses, 2.1% of the run, is counted as work in the times below` - GC pauses
+- `Paused: 1.85s of pauses, 2.10% of the run, is counted as work in the times below` - GC pauses
   TickSnick could not tell from work.
 - `Runs: they differ in Heap, so each mean mixes them` - the runs of a folder disagree on a tag, the
   setup, or how many times the root operation ran, so they are not one profile. Split the folder. It is
@@ -69,15 +71,16 @@ Warnings go up. A report over several runs shows each run's own warnings, and th
 several runs is one line ending in `(2 of 4 runs)`, its figures as ranges, `1.04pp..1.29pp`. A diff
 shows the warnings of both its profiles, `(2 of 4 runs in 'naive')`.
 
-A run that **failed** is not a warning: a label left open or work billed to a closed execution stopped
-it, since its figures would be false. It is saved and left out of its profile, and the report opens with a `FAILED`
+A run that **failed** is not a warning: a label left open at `expectBalanced()`, an `exit` that names
+another label, work billed to a closed execution or an error in the sampler stopped it, since its
+figures would be false. It is saved and left out of its profile, and the report opens with a `FAILED`
 banner naming it; when no run is left, the banner is the whole report.
 
 ### Tags and Setup
 
 ```
 Tags          warmups: 2; batches: 3; roots: org.apache.*
-Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; Processors: 14; Heap: 18 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
+Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; CPU: Intel64 Family 6 Model 197 Stepping 2, GenuineIntel; Processors: 14; Heap: 18.0 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
 ```
 
 **Tags** are what the program said about the run. **Setup** is what the run read by itself, and how it
@@ -96,8 +99,8 @@ the rest of the process (GC, the sampler, the JIT) and its parts. Here four work
 busy, while GC took 1.73.
 
 **Sampling** is how often a sample was taken, and what the sampler cost the program. With 4 or more
-processors it spins on one of them to hold the interval, as here. With fewer it sleeps between
-samples, which leaves the processor to the program and makes the interval longer and less regular:
+processors it spins on one of them to hold the tick, as here. With fewer it sleeps between samples,
+which leaves the processor to the program and makes the tick longer and less regular:
 
 ```
 Sampling      every 1.6ms (1.0ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors
@@ -106,8 +109,9 @@ Sampling      every 1.6ms (1.0ms asked): the sampler sleeps between samples, so 
 A sampler told to spin on fewer than 4 processors gets the remedy at the end of the line:
 `start(wait = PARK) to free it`.
 
-The CPU's clock is recorded through the run, as a share of its base frequency. A single report
-mentions it only in `WARNINGS`, when it moved; the reports over runs list it for every run.
+The CPU's clock is recorded through the run, as a share of its base frequency, or in MHz where the OS
+gives no base. The run list gives each run's mean; `WARNINGS` says when it moved during a run or across
+the runs.
 
 ### Coarse operations
 
@@ -115,6 +119,7 @@ mentions it only in `WARNINGS`, when it moved; the reports over runs list it for
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
                                |                                             Load                                             |                    Long
 Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
+-------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
 runBatch                       |           3                          82.0s               4.20s      80.0% / 20.0%      27.3s |      27.4s          -          -      27.6s
   resolveRoot                  |      92,667     30,889      4.0      82.0s     100%      4.20s          100% / 0%     3.53ms |      602us     7.50ms     61.6ms      434ms
     resolve                    |     278,001          3               82.0s     100%      4.20s          100% / 0%     1.18ms |      146us     2.57ms     19.0ms      358ms
@@ -126,8 +131,9 @@ runBatch                       |           3                          82.0s     
 The table is a tree: each operation sits under the one it ran inside, and its figures cover the
 executions on that path only. The same label on two paths is two rows.
 
-The columns come in two groups, the same two words as in the fine table below. **Load** says what the
-row cost, and **Long** says how long single executions ran.
+The columns come in groups, two of them the same words as in the fine table below. **Load** says what
+the row cost, and **Long** says how long single executions ran; **Allocated** is a third, when the
+run counted it.
 
 - **Executions** - how many times it ran on this path. Measured, not sampled.
 - **Per parent** - executions per execution of the parent: 30,889 `resolveRoot` per `runBatch`, three
@@ -151,24 +157,31 @@ row cost, and **Long** says how long single executions ran.
 children:
 
 ```
-Coarse operation                Executions Per parent Parallel     Wall v % parent     Paused       Mean
-batch                                    1                          1.16s                   -      1.16s
-  plan                                  10         10               1.01s      87%          -      101ms
-    - rule                           3,400        340               710ms      70%                 209us
-    - visit (2 parents)              1,000        100               201ms      20%                 201us
-    - rare                             500         50              99.2ms      10%                 198us
-    - and 1 more                                                              <1%
-  cleanup                               10         10               150ms      13%          -     15.0ms
-    - visit (2 parents)                100         10              98.2ms      65%                 982us
-    - unlabelled                       own                         49.6ms      33%
-    - rare                              10          1                   -
+                               |                                             Load                                             |                    Long
+Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
+-------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
+batch                          |           1                          1.14s                   -          100% / 0%      1.14s |          -          -          -      1.14s
+  plan                         |          10         10               984ms      87%          -          100% / 0%     98.4ms |     98.3ms     98.6ms          -     99.5ms
+    - rule                     |       3,400        340               682ms      69%                                    201us
+    - visit (2 parents)        |       1,000        100               205ms      21%                                    205us
+    - rare (2 parents)         |         500         50              97.2ms      10%                                    194us
+    - and 1 more               |                                     2.00ms      <1%
+  cleanup                      |          10         10               150ms      13%          -          100% / 0%     15.0ms |     15.0ms     15.0ms          -     15.1ms
+    - visit (2 parents)        |         100         10              97.2ms      65%                                    972us
+    - unlabelled               |         own                         51.1ms      34%
+    - rare (2 parents)         |          10          1                   -
+-------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
+Under multiple parents - each over all of them
+  - visit                      |       1,100                          303ms                                             275us
+  - rare                       |         510                         97.2ms                                             191us
+-------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
 ```
 
 - **Executions** - the label's calls on this path, counted. **Per parent** - calls per execution of
   the row above: 340 `rule` per `plan`. It does not depend on how many plans the run made, so it
   can be compared between runs of different sizes.
-- **Wall, % parent** - its time, sampled, and its share of the row's own time.
-- **Mean** - its own time per call: `visit` is 201 us under `plan` and 982 us under `cleanup`.
+- **Wall, % parent** - its time, sampled, and its share of the row's Wall, as a coarse child's is.
+- **Mean** - its own time per call: `visit` is 205 us under `plan` and 972 us under `cleanup`.
 - A label called on a path and never sampled there still has its row, with `-` for the time:
   `rare` ran once per `cleanup`, too briefly to be caught.
 - `unlabelled` is time under no fine label.
@@ -177,7 +190,7 @@ batch                                    1                          1.16s       
   runs do not have it. A diff writes the same with `->` where the sides differ: `(3 parents, 3 -> 0
   runs)`.
 - **Under multiple parents**, right under the tree and above the keys, has each such operation, coarse or fine, over all of its
-  rows: `visit` 300 ms and 1,100 calls, under `plan` and `cleanup` together. It is sorted by Wall, so a
+  rows: `visit` 303 ms and 1,100 calls, under `plan` and `cleanup` together. It is sorted by Wall, so a
   label spread over three rows ranks by its whole, and not by its largest part.
 - `and 1 more` folds the small rows into one row, with their time in the same columns: only what adds up,
   so not their calls, which are of different operations. Small rows with calls are drawn while they
@@ -186,13 +199,14 @@ batch                                    1                          1.16s       
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns
 when only one did.
 
-A coarse label suits an operation from 100 bodies, about 2.5 us on a fast machine: under it the part of
+A coarse label suits an operation from 100 bodies, about 2.5 us on a fast machine, with no fine label
+registered: under it the part of
 TickSnick's hook that runs inside the span makes its share of the samples read high, and a very short
 one loses samples. A body is a fixed piece of CPU work that TickSnick times once a second during the
 run, so the floor follows the machine and its clock. The hook is mostly its two `System.nanoTime()`
-calls, so where `nanoTime` is slow the floor rises with it. Counting the calls per path adds 0.4 bodies
-to the floor for every registered fine label, and `Allocated` 24 bodies: 2.7 us with 20 fine labels,
-3.3 us with `Allocated` too, 5 us with 250 labels, at 25 ns a body. An operation under the floor is still
+calls, so where `nanoTime` is slow the floor rises with it. Counting the calls per path adds 0.48
+bodies to the floor for every registered fine label, and `Allocated` 25.6 bodies: at 25 ns a body, about
+2.7 us with 20 fine labels, 3.4 us with `Allocated` too, 5.5 us with 250 labels, before rounding up. An operation under the floor is still
 measured; a warning says it is under the recommended floor, rounded up, and what raises it.
 
 **`Allocated`** appears only in a run started with `allocations = true`: the bytes created under the
@@ -201,13 +215,14 @@ its executions together, so it follows the tree as `Wall` does: a parent's is it
 exactly. **Per execution** is that over `Executions`, which compares runs of different sizes, as `Mean`
 does. It is bytes allocated, not memory held: an operation can allocate gigabytes and hold none of it.
 What it measures is the collector's work - a young collection comes every time the young generation
-fills - and not how much memory the program needs. The label's own context, one per execution, is left
+fills - and not how much memory the program needs. Work on a virtual thread is not counted: the rows it
+ran under, and every row above them, read `-`, and a warning says so. The label's own context, one per execution, is left
 out, so an execution that allocates nothing reads 0; the first execution on a path still includes a few
 KB of the label's own, which matters only for an operation that allocates very little. A thread
 counts from its first coarse boundary in the session, so an execution already open at `start` misses
 what it allocates up to there, and one still open at `stop` misses what came after its last.
 
-**`slowest:`** appears under an operation registered with a key (`op(X, key = { id }) { }`): its
+**`slowest:`** appears under an operation opened with a key (`op(X, key = { id }) { }`): its
 longest executions on that path, with their keys.
 
 ### Coarse and fine operations
@@ -216,6 +231,7 @@ longest executions on that path, with their keys.
 COARSE AND FINE OPERATIONS - own time, out of 104s active time
                            |                                       Load                                       |             Long             |               Spread
 Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+---------------------------+----------------------------------------------------------------------------------+------------------------------+------------------------------------
 onCentral                  |          28.1%        117s          100% / 0%   569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
 runBatch *                 |          18.8%       77.8s     0.198% / 99.8%             3                25.9s |          -        -        - |     77.8s        1.00       2     1
 merge                      |          14.1%       58.4s          100% / 0%   199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
@@ -264,7 +280,7 @@ Sampled       414,466 samples - 103,684 ticks at 1.001ms mean (jittered) x 5 thr
 
 How many samples the fine table is made of: the ticks, the mean time between them, and the threads
 read on each. A row's share of them carries an error of about `1/sqrt(samples)` from sampling alone: 96
-samples is 10%, 100,000 is 0.3%. With two runs or more the `+-` includes it.
+samples is 10%, 100,000 is 0.3%.
 
 ## Several runs
 
@@ -286,6 +302,7 @@ Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs +- 95%
                                    |                                                                      Load                                                                      |                    Long
 Coarse operation                   |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
+-----------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
 runBatch                           |           3                          82.4s +-0.9%                            4.29s +-5.2%           80.0 / 20.0 +-0.0%         27.5s +-0.9%    |      27.5s          -          -      28.1s
   resolveRoot                      |      92,667     30,889      4.0      82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        3.55ms +-0.9%    |      602us     7.54ms     61.3ms      449ms
     resolve                        |     278,001          3               82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        1.18ms +-0.9%    |      148us     2.57ms     18.9ms      358ms
@@ -296,7 +313,8 @@ runBatch                           |           3                          82.4s 
 clock of the moment, so they are not independent. The interval comes from how much whole runs
 differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval.
 
-- **The run list** shows each run's wall time, its clock, and each execution of the root operation.
+- **The run list** shows each run's wall time, its clock, and each execution of the root operation,
+  while it ran at most ten times.
   A run that stands out is visible here before it widens every interval below.
 - **% parent** is each run's share of its own parent, with its interval in percentage points. The
   run's speed cancels out, so it shows whether the structure held while the whole run got faster or
@@ -326,7 +344,7 @@ answers. `Tags` lists every tag, and `Setup` only what differs:
 
 ```
 Tags          step: naive -> centralEdges; roots: org.apache.* =; batches: 3 =
-Setup         Heap: 12 GB -> 18 GB
+Setup         Heap: 12.0 GB -> 18.0 GB
 ```
 
 A warning about either profile is repeated here, and that includes a profile whose runs are mixed.
@@ -340,6 +358,7 @@ runBatch        27.5s -> 19.4s   -8.09 +-0.361s        -29 +-1.3%       per exec
 COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%
                                              |                                                                      Load                                                                      |                    Long
 Coarse operation                             |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
+---------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
       select                                 |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
                                              |     278,001                          33.1s +-2.9%          57 +-0.6%         3.70s +-8.0%               100 / 0 +-0.0%         475us +-2.9%    |     49.9us      995us     8.75ms      190ms
                                              |           =          =                 -22 +-2.2%        +5.3 +-0.6pp        -7.7? +-9.5%                    =                  -22 +-2.2%    |       -21%       -22%       -25%       -45%
@@ -347,6 +366,7 @@ Coarse operation                             |  Executions Per parent Parallel  
 COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%
                            |                                                           Load                                                           |             Long             |               Spread
 Operation                  |   Thread-time%           Thread-time           Runnable / Waiting                   Calls Thread-time per call           | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+---------------------------+--------------------------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------
 onCentral (4 -> 0 runs)    |           28.3 +-0.3%           118s +-1.6%               100 / 0 +-0.0%      569,233,860                207ns +-1.6%    |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
                            |              -                     -                            -                       -                    -           |          -        -        - |         -           -       -     -
 
@@ -360,8 +380,8 @@ merge                      |           14.2 +-0.2%          59.0s +-2.1%        
 
 A diff has everything a report has, with the same names and forms. A row is three lines: before, after,
 and the change, so a diff is as wide as a report and every number sits above the one it compares with.
-`Cores`, `Sampling` and `Sampled` are a line per side, `slowest:` is before's list and then after's, `in
-all` stands at the end of each side's line, and a note under a table that only one side has names it.
+`Cores`, `Sampling` and `Sampled` are a line per side, `slowest:` is before's list and then after's,
+and a note under a table that only one side has names it.
 
 - **The change** is a percentage, `pp` for what is itself a percentage, and `=` for no change. Its `+-`
   is in the change's own unit, written once at the right: `-22 +-2.2%` is between -24.2% and -19.8%,
@@ -378,8 +398,8 @@ all` stands at the end of each side's line, and a note under a table that only o
 - **A row on one side only** reads `-` on the other and has no change: `onCentral (4 -> 0 runs)` was
   removed.
 - **One run on a side** gives the change with no interval and no `?`, and a warning says so.
-- When the two sides ran at different CPU clocks, a warning says by how much. Times are then not
-  comparable; shares still are.
+- **`CPU clock`** under the header is each side's mean. When the two differ, a warning says by how
+  much: times are then not comparable, while shares still are.
 
 ## The foot
 
@@ -391,6 +411,7 @@ HOW TO READ THIS
   runnable/waiting splits the thread-time beside it; runnable is NOT the same as working
   concurrency is threads INSIDE at once, running or parked - not a speedup
   a share is where time went, NOT what removing the operation would save
+  full notes: docs/output.md
 ```
 
 The last line matters most. A share says where the time went. It does not say what removing the

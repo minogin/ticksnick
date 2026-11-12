@@ -16,7 +16,7 @@ half a billion times, or a 30-second batch. TickSnick reports, per label:
 Apache-2.0. Java 21 or later. Its only dependency is the Kotlin standard library.
 
 ```kotlin
-dependencies { implementation("com.ticksnick:ticksnick:0.5.0") }
+dependencies { implementation("com.ticksnick:ticksnick:0.6.0") }
 ```
 
 ## Quick start

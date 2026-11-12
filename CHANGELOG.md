@@ -16,6 +16,13 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   its time; `Long` within the noise is blank; a row on one side of a diff is blank on the other.
 - In a diff, `Per parent` 1 and `Paused` 0 print where the other side has a figure, and the header's
   `Paused` line is left out when neither side paused.
+- The key under the coarse table says what a percentile's `?` needs: p50, p90 and p99 need 2, 10 and
+  100 executions in a run.
+
+### The coarse table
+
+- `Under multiple parents` has a heading of its own, in the table's places, naming only the columns it
+  shows, and a `% root` column where `% parent` stands: each operation's share of the root's Wall.
 
 ## 0.6.0 - 2026-11-12
 

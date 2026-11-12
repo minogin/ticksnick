@@ -174,12 +174,13 @@ batch                          |           1                          1.14s     
     - and 1 more               |                                     2.00ms      <1%
   cleanup                      |          10         10               150ms      13%                     100% / 0%     15.0ms |     15.0ms     15.0ms          ?     15.1ms
     - visit (2 parents)        |         100         10              97.2ms      65%                                    972us
-    - unlabelled               |         own                         51.1ms      34%
+    - unlabelled               |                                     51.1ms      34%
     - rare (2 parents)         |          10          1                   ?        ?                                        ?
 -------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
 Under multiple parents - each over all of them
-  - visit                      |       1,100                          303ms                                             275us
-  - rare                       |         510                         97.2ms                                             191us
+Coarse operation               |  Executions                         Wall v   % root                                     Mean
+  - visit                      |       1,100                          303ms      27%                                    275us
+  - rare                       |         510                         97.2ms       9%                                    191us
 -------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
 ```
 
@@ -197,7 +198,10 @@ Under multiple parents - each over all of them
   runs)`.
 - **Under multiple parents**, right under the tree and above the keys, has each such operation, coarse or fine, over all of its
   rows: `visit` 303 ms and 1,100 calls, under `plan` and `cleanup` together. It is sorted by Wall, so a
-  label spread over three rows ranks by its whole, and not by its largest part.
+  label spread over three rows ranks by its whole, and not by its largest part. Its heading names only
+  what it shows, in the same places, and `% root` stands where `% parent` does: the share of the root's
+  Wall, `batch` here (of all roots together when there are several), since an operation over all its
+  parents has no one parent to be a share of.
 - `and 1 more` folds the small rows into one row, with their time in the same columns: only what adds up,
   so not their calls, which are of different operations. Small rows with calls are drawn while they
   fit within six rows.

@@ -248,6 +248,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
 
     private fun wallOf(i: Int, n: CoarseNode): Double = walls[i][n] ?: n.spanSumNanos.toDouble()
 
+    /** [wall] of run [i] as a share of its roots' Wall, in percent: `% root` in the block under the coarse table. */
+    private fun rootShare(i: Int, wall: Double): Double =
+        runs[i].coarseTree.sumOf { wallOf(i, it) }.let { root -> if (root > 0) wall * 100 / root else Double.NaN }
+
     private fun estimateOf(m: Matched, f: (Int, CoarseNode) -> Double): Estimate =
         Estimate(m.present.map { f(it, m.nodes[it]!!) }.filter { !it.isNaN() })
 
@@ -492,6 +496,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 mapOf(
                     EXECUTIONS to of { _, c, _ -> c.count.toDouble() },
                     WALL to of { i, _, n -> n.sumOf { wallOf(i, it) } },
+                    PARENT_SHARE to of { i, _, n -> rootShare(i, n.sumOf { wallOf(i, it) }) },
                     PAUSED to of { _, _, n -> n.sumOf { it.pausedNanos }.toDouble() },
                     MEAN to of { _, c, _ -> c.meanSpanNanos },
                     ALLOCATED to Estimate(with.filter { runs[it].allocations }.map { i -> nodes[i][name]!!.sumOf { runs[i].allocatedTotal(it) }.toDouble() }),
@@ -525,6 +530,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 EXECUTIONS to of { r -> if (r.any { it.calls < 0 }) Double.NaN else r.sumOf { it.calls }.toDouble() },
                 // A label called on a path and never sampled there counts at 0, in Wall and in Mean.
                 WALL to of { r -> r.sumOf { it.wallNanos }.takeIf { it > 0 || r.any { o -> o.calls > 0 } } ?: Double.NaN },
+                PARENT_SHARE to Estimate(with.map { i -> rootShare(i, rows[i].sumOf { it.wallNanos }) }.filter { !it.isNaN() }),
                 MEAN to of { r ->
                     val called = r.filter { it.calls > 0 }
                     if (called.isEmpty()) Double.NaN
@@ -678,6 +684,11 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
         if (all.any { it.parents > 1 }) add(
             "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is in the block above"
+        )
+        if (coarseTable.shared.isNotEmpty()) add(
+            "  $ROOT_SHARE in that block is each run's share of the Wall of " +
+                    (coarseTable.rows.map { it.name }.distinct().singleOrNull()?.let { "its root, $it" } ?: "its roots together") +
+                    if (runs.size > 1) ", ${sym.plusMinus} in percentage points" else ""
         )
         if (runs.size > 1) {
             add("  % parent is each run's share of its own parent, ${sym.plusMinus} in percentage points: the run's speed cancels out of it")

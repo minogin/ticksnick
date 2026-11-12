@@ -902,6 +902,17 @@ class CoarseTest {
         assertEquals(3, rows.size, "parse should be under each caller and once over both: $text")
         assertTrue(SHARED_HEADING in text, "the figure over both callers is missing: $text")
         assertTrue(rows.any { "2.00s" in it } && rows.any { "1.00s" in it }, "the per-caller figures are not per caller: $rows")
+
+        // The block has a heading of its own, in the same places: only what it shows is named, and its share is
+        // of the roots' Wall, both roots here, 2 s and 1 s, so the 3 s of parse are all of it.
+        val lines = text.lines()
+        val heading = lines[lines.indexOf(SHARED_HEADING) + 1]
+        val table = lines.first { it.startsWith("Coarse operation") }
+        assertTrue(ROOT_SHARE in heading && "% parent" !in heading && "Per parent" !in heading && "Executions" in heading, heading)
+        assertEquals(table.indexOf("% parent") + "% parent".length, heading.indexOf(ROOT_SHARE) + ROOT_SHARE.length, "out of line: $heading")
+        val whole = lines.drop(lines.indexOf(SHARED_HEADING) + 2).first { it.trim().startsWith("parse ") }
+        assertEquals("100%", whole.substring(heading.indexOf(ROOT_SHARE), heading.indexOf(ROOT_SHARE) + ROOT_SHARE.length).trim(), whole)
+        assertTrue(lines.any { "$ROOT_SHARE in that block is each run's share of the Wall of its roots together" in it }, text)
     }
 
     @Test

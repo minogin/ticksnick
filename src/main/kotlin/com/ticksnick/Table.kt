@@ -19,6 +19,12 @@ internal const val INTERVAL_COLUMN = 8
  */
 internal const val UNKNOWN = "?"
 
+/**
+ * `% parent`'s name in the block under the coarse table: an operation there is over all its parents, so its share
+ * is of the root's Wall, which the tree's Wall is already a part of.
+ */
+internal const val ROOT_SHARE = "% root"
+
 /** How a column's figures read. Text only: a [Row] holds raw values, so that another writer can take them. */
 internal enum class Form(val percentage: Boolean = false) {
     COUNT, PER_PARENT, WHOLE, ONE_DECIMAL, TWO_DECIMALS, TIME, BYTES, PARENT_SHARE(true), SHARE(true), RUNNABLE_WAITING(true)
@@ -213,7 +219,8 @@ private fun cellText(c: Column, r: Row?, own: Boolean): String =
     if (r != null && r.foldedRows > 0 && r.figures[c].let { it == null || it.n == 0 }) "" else figureText(c, r?.figures?.get(c), own)
 
 private class Layout(
-    private val columns: List<Column>, private val intervals: Boolean, heading: String, minName: Int, names: List<String>, sortedBy: Column?,
+    private val columns: List<Column>, private val intervals: Boolean, private val heading: String, minName: Int, names: List<String>,
+    private val sortedBy: Column?,
 ) {
     private val widths: IntArray = intArrayOf(maxOf(heading.length, minName, names.maxOfOrNull { it.length } ?: 0)) +
             columns.map { it.width + if (hasInterval(it)) INTERVAL_COLUMN else 0 }.toIntArray()
@@ -300,6 +307,15 @@ private class Layout(
         appendLine(line(headings))
         appendLine(rule())
     }
+
+    /**
+     * The heading of the block under the table, in the same places: a column is named only where the block shows
+     * something in it, and `% parent` is [ROOT_SHARE].
+     */
+    fun sharedHeading(shown: Set<Column>): String = line(listOf(heading) + columns.map { c ->
+        val name = if (c === PARENT_SHARE) ROOT_SHARE else c.name
+        cell(c, if (c in shown) name + if (c === sortedBy) " v" else "" else "", "")
+    })
 }
 
 /**
@@ -355,8 +371,9 @@ internal class TableText(private val table: Table, heading: String, minName: Int
     private fun cells(name: String, r: Row): List<String> =
         listOf(name) + table.columns.map { layout.cell(it, cellText(it, r, r.own), intervalText(it, r.figures[it])) }
 
-    /** The rows under more than one caller, after the rule. */
+    /** The rows under more than one caller, after the rule, under a heading of their own. */
     fun StringBuilder.shared() {
+        appendLine(layout.sharedHeading(table.columns.filter { c -> table.shared.any { cellText(c, it, it.own).isNotEmpty() } }.toSet()))
         for (r in table.shared) appendLine(layout.line(cells(nameOf(r, 1, shared = true), r)))
         appendLine(layout.rule())
     }
@@ -445,8 +462,9 @@ internal class DiffText(
         appendLine(layout.rule())
     }
 
-    /** The rows under more than one caller, after the rule. */
+    /** The rows under more than one caller, after the rule, under a heading of their own. */
     fun StringBuilder.shared() {
+        appendLine(layout.sharedHeading(columns.filter { c -> shared.any { r -> listOf(r.before, r.after).any { cellText(c, it, r.own).isNotEmpty() } } }.toSet()))
         for (r in shared) row(r, 1, shared = true)
         appendLine(layout.rule())
     }

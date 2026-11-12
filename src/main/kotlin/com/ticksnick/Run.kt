@@ -73,7 +73,7 @@ internal const val COARSE_BUDGET_BODIES = 4.0
  * The most each registered fine label may add to a coarse execution, in bodies: the pass that moves
  * its calls onto the path they ran under, at every boundary. See `OpSlot.flushCalls`.
  */
-internal const val COARSE_PER_FINE_LABEL_BODIES = 0.02
+internal const val COARSE_PER_FINE_LABEL_BODIES = 0.024
 
 /**
  * What an opt-in's price is divided by to raise the coarse floor: a label at the floor pays at most
@@ -82,7 +82,7 @@ internal const val COARSE_PER_FINE_LABEL_BODIES = 0.02
 internal const val COARSE_MAX_OVERHEAD = 0.05
 
 /** The most counting allocated bytes may add to a coarse execution, in bodies, when a session asks for it: two reads of the thread's total. */
-internal const val COARSE_ALLOCATIONS_BODIES = 1.2
+internal const val COARSE_ALLOCATIONS_BODIES = 1.28
 
 /** The most all the coarse executions together may cost of the run. */
 internal const val COARSE_MAX_RUN_SHARE = 0.01

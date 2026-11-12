@@ -83,8 +83,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - `Profiler.start(strict = false)` is gone: a leaked label, a crossed `exit` and work billed to closed
   executions always fail the run, since its figures would be false.
 - The floors are recommended limits, rounded up to two digits, the second 0 or 5, and the check uses
-  the rounded figure: `` `request`: its executions, 1.2us, are under the recommended 3.0us (Allocated
-  adds 600ns) ``. The coarse floor is 100 bodies, about 2.5 us; each registered fine label and counting
+  the rounded figure: `` `request`: its executions, 1.2us, are under the recommended 3.5us (Allocated
+  adds 650ns) ``. The coarse floor is 100 bodies, about 2.5 us; each registered fine label and counting
   allocated bytes raise it, and the warning names what raised it.
 - The run list's `clock` and a diff's `Clock` line are `CPU clock`.
 

@@ -639,9 +639,9 @@ class CoarseTest {
     /** Every registered fine label adds its price to each coarse execution, so the floor rises with them. */
     @Test
     fun `the floor rises with the fine labels registered`() {
-        assertEquals(100.4, coarseFlatFloorBodies(1), 1e-9)
-        assertEquals(200.0, coarseFlatFloorBodies(250), 1e-9)
-        assertEquals("Allocated adds 600ns, 20 fine labels add 200ns", coarseFloorRaised(20, true))
+        assertEquals(100.48, coarseFlatFloorBodies(1), 1e-9)
+        assertEquals(220.0, coarseFlatFloorBodies(250), 1e-9)
+        assertEquals("Allocated adds 650ns, 20 fine labels add 250ns", coarseFloorRaised(20, true))
     }
 
     @Test
@@ -691,8 +691,8 @@ class CoarseTest {
     // --- the Allocated column ---------------------------------------------------------
 
     /**
-     * 3.2 us clears 100.4 bodies at the default body, 2.51 us recommended as 3.0 us, and not 124.4,
-     * 3.11 us recommended as 3.5 us: the same operation, the same run, one setting apart.
+     * 3.2 us clears 100.48 bodies at the default body, 2.51 us recommended as 3.0 us, and not 126.08,
+     * 3.15 us recommended as 3.5 us: the same operation, the same run, one setting apart.
      */
     @Test
     fun `counting allocations flags an operation the floor would otherwise pass`() {
@@ -703,7 +703,7 @@ class CoarseTest {
         assertEquals(listOf("req"), counted.coarseTooSmall().map { it.name })
         val text = counted.render()
         assertTrue(
-            "`req`: its executions, 3.20us, are under the recommended 3.5us (Allocated adds 600ns, 1 fine label adds 10ns)" in text,
+            "`req`: its executions, 3.20us, are under the recommended 3.5us (Allocated adds 650ns, 1 fine label adds 15ns)" in text,
             "the floor does not say what raises it: $text"
         )
     }

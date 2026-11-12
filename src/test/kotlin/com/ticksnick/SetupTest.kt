@@ -75,6 +75,15 @@ class SetupTest {
         assertEquals(emptyList(), mixedNames(listOf(mapOf("a" to "1"), mapOf("a" to "1"))))
     }
 
+    /** `Allocated` is written only when counted: a run without it did not count, which is known. */
+    @Test
+    fun `a setting a run leaves out when off reads as off, not as unknown`() {
+        val setups = listOf(mapOf("Heap" to "14.0 GB"), mapOf("Heap" to "14.0 GB", "Allocated" to "counted"), mapOf("Wait" to "SPIN"))
+        val text = buildString { factLines(emptyList(), setups) }
+        assertTrue("Allocated: not counted, counted" in text, text)
+        assertTrue("Heap: 14.0 GB, ?" in text && "Wait: ?, SPIN" in text, text)
+    }
+
     @Test
     fun `a diff line says what differs and, when asked, what does not`() {
         val before = listOf(mapOf("step" to "naive", "batches" to "3"))

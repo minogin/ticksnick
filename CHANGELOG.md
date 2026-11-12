@@ -8,7 +8,8 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 - A cell holds a figure, `?` or nothing. `?` is a figure that could not be measured, or was measured
   too little to say: a percentile with too few executions, a label never sampled where it was called,
-  `Allocated` on a virtual thread, a run without a tag's value. It was `-`, which reads as zero in many
+  `Allocated` on a virtual thread, a run without a tag's value (a run that did not count `Allocated`
+  reads `not counted`). It was `-`, which reads as zero in many
   tables. A blank cell has nothing to look at: the column's usual value or a column that does not
   apply to the row.
 - `Paused` 0 is blank, not `-`; `unlabelled` has no `Executions` (was `own`); `(no operation)` shows only

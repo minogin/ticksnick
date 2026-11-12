@@ -7,6 +7,12 @@ import java.nio.file.Path
 /** How many different values of one name a line lists before it gives their range or counts the rest. */
 internal const val MAX_VALUES_LISTED = 3
 
+/**
+ * A setup name a run leaves out when the setting is off: its absence is that value, known, not
+ * [UNKNOWN]. Any other name a run lacks is unknown - a run saved before it was recorded.
+ */
+private val SETUP_WHEN_ABSENT = mapOf("Allocated" to "not counted")
+
 /** The argument with which OpenJ9 names its own options file. */
 private const val OPTIONS_FILE = "-Xoptionsfile="
 
@@ -111,28 +117,34 @@ internal fun valuesOf(values: List<String>): String {
 
 private fun namesIn(runs: List<Map<String, String>>): List<String> = runs.flatMap { it.keys }.distinct()
 
-private fun valuesOf(name: String, runs: List<Map<String, String>>): String = valuesOf(runs.map { it[name] ?: UNKNOWN })
+private fun valuesOf(name: String, runs: List<Map<String, String>>, absent: Map<String, String>): String =
+    valuesOf(runs.map { it[name] ?: absent[name] ?: UNKNOWN })
 
-/** `warmups: 2; batches: 1, 3`: every name in [runs], one map per run, with `?` for a run that lacks it. */
-internal fun factsLine(runs: List<Map<String, String>>): String =
-    namesIn(runs).joinToString("; ") { "$it: ${valuesOf(it, runs)}" }
+/**
+ * `warmups: 2; batches: 1, 3`: every name in [runs], one map per run, with `?` for a run that lacks it,
+ * or the value [absent] gives a name whose absence is a value.
+ */
+internal fun factsLine(runs: List<Map<String, String>>, absent: Map<String, String> = emptyMap()): String =
+    namesIn(runs).joinToString("; ") { "$it: ${valuesOf(it, runs, absent)}" }
 
 /** The names [runs] do not agree on. */
 internal fun mixedNames(runs: List<Map<String, String>>): List<String> =
     namesIn(runs).filter { name -> runs.map { it[name] }.distinct().size > 1 }
 
 /** `step: naive -> centralEdges; batches: 3 =`: what differs, and with [all] what does not. */
-internal fun factsDiffLine(before: List<Map<String, String>>, after: List<Map<String, String>>, all: Boolean): String =
+internal fun factsDiffLine(
+    before: List<Map<String, String>>, after: List<Map<String, String>>, all: Boolean, absent: Map<String, String> = emptyMap(),
+): String =
     namesIn(before + after).mapNotNull { name ->
-        val b = valuesOf(name, before)
-        val a = valuesOf(name, after)
+        val b = valuesOf(name, before, absent)
+        val a = valuesOf(name, after, absent)
         if (b != a) "$name: $b ${sym.arrow} $a" else if (all) "$name: $b =" else null
     }.joinToString("; ")
 
 /** The `Tags` and `Setup` lines of a report: one map per run, nothing for what none of them has. */
 internal fun StringBuilder.factLines(tags: List<Map<String, String>>, setups: List<Map<String, String>>) {
     if (tags.any { it.isNotEmpty() }) appendLine(row("Tags", factsLine(tags)))
-    if (setups.any { it.isNotEmpty() }) appendLine(row("Setup", factsLine(setups)))
+    if (setups.any { it.isNotEmpty() }) appendLine(row("Setup", factsLine(setups, SETUP_WHEN_ABSENT)))
 }
 
 /**
@@ -147,5 +159,5 @@ internal fun StringBuilder.factDiffLines(
     factsDiffLine(tagsBefore, tagsAfter, all = true).takeIf { it.isNotEmpty() }?.let { appendLine(row("Tags", it)) }
     // Only where both sides have one: a side saved without a setup does not differ, it does not say.
     if (setupsBefore.isEmpty() || setupsAfter.isEmpty()) return
-    factsDiffLine(setupsBefore, setupsAfter, all = false).takeIf { it.isNotEmpty() }?.let { appendLine(row("Setup", it)) }
+    factsDiffLine(setupsBefore, setupsAfter, all = false, SETUP_WHEN_ABSENT).takeIf { it.isNotEmpty() }?.let { appendLine(row("Setup", it)) }
 }

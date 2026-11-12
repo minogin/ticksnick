@@ -932,10 +932,9 @@ object Profiler {
         // the sampler's arrays and stop it.
         require(op.id in 0 until MAX_COARSE_TYPES) { "not a coarse operation: ${op.id}" }
         val s = local.get()
-        val parent = s.contextOpaque()
-        s.flushCounts(parent)
+        // Before the context is made, so the push is not in the execution's time.
         s.pushCoarseEntered(op.id)
-        s.setContextOpaque(CoarseContext(op.id, parent, System.nanoTime(), s.pathFor(parent, op.id)))
+        s.openCoarse(op.id)
     }
 
     /**
@@ -956,10 +955,7 @@ object Profiler {
         }
         if (ctx.type != op.id) mismatch(nameOf(op), coarseNameOf(ctx.type))
         if (s.coarseDepth > 0) s.coarseDepth--
-        s.setContextOpaque(ctx.parent)
-        ctx.markClosed()
-        s.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
-        s.flushCounts(ctx)
+        s.closeCoarse(ctx)
     }
 
     /** One scope per operation, made once, so opening one allocates nothing. */

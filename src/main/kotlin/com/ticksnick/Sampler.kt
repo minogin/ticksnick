@@ -359,6 +359,23 @@ internal class Sampler(
      */
     private fun firstUnder(parent: Any, type: Int): Boolean = bump(parent, type) == 1
 
+    /**
+     * Whether the visited thread is still mounted on its innermost context: -1 not asked yet this
+     * visit, 0 moved on, 1 still there. Reset at each visit; see [stale].
+     */
+    private var stillMounted = -1
+
+    /**
+     * Whether [p], a context in the chain of [ctx], the innermost one this visit found on slot [s], is
+     * stale: closed while [s] still holds [ctx]. The slot is read again on the first closed context of
+     * a visit and the answer kept for the rest of it, so a sample is stale for every counter or for none.
+     */
+    private fun stale(p: CoarseContext, s: OpSlot, ctx: CoarseContext): Boolean {
+        if (!p.isClosed()) return false
+        if (stillMounted < 0) stillMounted = if (s.contextOpaque() === ctx) 1 else 0
+        return stillMounted == 1
+    }
+
     /** Types already credited while walking one parent chain. Reused; never escapes the tick loop. */
     private val chain = IntArray(MAX_COARSE_DEPTH)
 
@@ -711,12 +728,12 @@ internal class Sampler(
                     // was taken while the execution was open and is credited normally. If it is
                     // still mounted on an execution that has ended, that is the real thing. One
                     // extra opaque read, and only on the rare visit that sees a closed context.
-                    var stillMounted = -1
-                    if (ctx.isClosed()) stillMounted = if (s.contextOpaque() === ctx) 1 else 0
+                    // [stale] asks it, once a visit.
+                    stillMounted = -1
                     // A context confirmed stale is excluded from its own self counters as well as
                     // from the inclusive walk below. Everything about this execution is over; the
                     // only honest thing left to record is that somebody is still working under it.
-                    if (stillMounted != 1) {
+                    if (!stale(ctx, s, ctx)) {
                         coarseHits[t]++
                         if (!waiting) coarseRunningHits[t]++
                         // This execution's own time, by fine label. An unlabelled thread waiting here
@@ -759,11 +776,12 @@ internal class Sampler(
                     var anyStale = false
                     while (p != null && d < MAX_COARSE_DEPTH) {
                         val pt = p.type
+                        val stale = stale(p, s, ctx)
                         // The node: every context in the chain is its own path, so each is
                         // credited, with no once-per-type rule to apply. Skipped when stale, for
                         // the reason the per-type counters skip it.
                         val node = p.path
-                        if (node != null && !(p.isClosed() && (if (stillMounted < 0) s.contextOpaque() === ctx else stillMounted == 1))) {
+                        if (node != null && !stale) {
                             node.inclusiveHits++
                             if (!waiting) node.runningInclusiveHits++
                             bump(p, OCCUPIED)
@@ -789,32 +807,25 @@ internal class Sampler(
                             // Recorded in the chain either way, stale or not, so that a type
                             // appearing twice at different depths is still counted at most once.
                             chain[n++] = pt
-                            var stale = false
-                            if (p.isClosed()) {
-                                if (stillMounted < 0) {
-                                    stillMounted = if (s.contextOpaque() === ctx) 1 else 0
-                                }
-                                stale = stillMounted == 1
-                            }
                             if (stale) {
                                 coarseStaleHits[pt]++
                                 anyStale = true
                             } else {
-                            coarseInclusiveHits[pt]++
-                            if (!waiting) coarseRunningInclusiveHits[pt]++
-                            // The pair, and the whole reason both halves are read in one visit.
-                            pairHits[pt * (MAX_OPERATIONS + 1) + fine]++
-                            if (coarseSeenAt[pt] != ticks) {
-                                coarseSeenAt[pt] = ticks
-                                coarseActiveTicks[pt]++
-                            }
-                            // Stamped on the instance, so an execution occupied by four threads at
-                            // one tick counts once here and four times in the hits above. That
-                            // ratio is the parallelism.
-                            if (p.tickStamp != ticks) {
-                                p.tickStamp = ticks
-                                coarseInstanceTicks[pt]++
-                            }
+                                coarseInclusiveHits[pt]++
+                                if (!waiting) coarseRunningInclusiveHits[pt]++
+                                // The pair, and the whole reason both halves are read in one visit.
+                                pairHits[pt * (MAX_OPERATIONS + 1) + fine]++
+                                if (coarseSeenAt[pt] != ticks) {
+                                    coarseSeenAt[pt] = ticks
+                                    coarseActiveTicks[pt]++
+                                }
+                                // Stamped on the instance, so an execution occupied by four threads at
+                                // one tick counts once here and four times in the hits above. That
+                                // ratio is the parallelism.
+                                if (p.tickStamp != ticks) {
+                                    p.tickStamp = ticks
+                                    coarseInstanceTicks[pt]++
+                                }
                             }
                         }
                         p = p.parent

@@ -597,28 +597,52 @@ internal object PathIds {
  */
 inline fun <T> op(op: CoarseOp, body: () -> T): T {
     val slot = Profiler.slot()
-    val parent = slot.contextOpaque()
-    slot.flushCounts(parent)
-    val ctx = CoarseContext(op.id, parent, System.nanoTime(), slot.pathFor(parent, op.id))
-    slot.setContextOpaque(ctx)
+    val ctx = slot.openCoarse(op.id)
     try {
         return body()
     } finally {
-        // Restored before the span is recorded, so the recording itself is never billed to the
-        // execution it is closing.
-        slot.setContextOpaque(parent)
-        // Marked the moment this thread leaves it, and before the span is recorded: from here on,
-        // any thread still mounted on this context is working under an execution that is over.
-        //
-        // After the slot is restored, deliberately. The sampler treats a closed context as stale
-        // only if the slot still holds it, so marking first would leave a window — one opaque store
-        // wide — in which this thread's own exit looks like an escape. **No test covers this**: the
-        // window is a nanosecond or two against a 1 ms sampling step, so swapping these two lines
-        // leaves the suite green.
-        ctx.markClosed()
-        slot.recordSpan(ctx, System.nanoTime() - ctx.startNanos)
-        slot.flushCounts(ctx)
+        slot.closeCoarse(ctx)
     }
+}
+
+/**
+ * Opens an execution of coarse type [type] on this thread and returns it: the one way an execution
+ * opens, for `op` and [Profiler.enter] alike. The calls made so far go to the execution being left.
+ *
+ * Inline, so `op` compiles to what it would hold written out; the tree walk stays behind
+ * [OpSlot.pathFor], which is not.
+ */
+@PublishedApi
+internal inline fun OpSlot.openCoarse(type: Int): CoarseContext {
+    val parent = contextOpaque()
+    flushCounts(parent)
+    val ctx = CoarseContext(type, parent, System.nanoTime(), pathFor(parent, type))
+    setContextOpaque(ctx)
+    return ctx
+}
+
+/**
+ * Closes [ctx], the innermost execution on this thread, and records its time: the one way an
+ * execution closes, for `op` and [Profiler.exit] alike. [recorded] gets the node and the time before
+ * the calls are flushed, for the keyed form to keep the slowest in.
+ */
+@PublishedApi
+internal inline fun OpSlot.closeCoarse(ctx: CoarseContext, recorded: (CoarsePath?, Long) -> Unit = { _, _ -> }) {
+    // Restored before the span is recorded, so the recording itself is never billed to the
+    // execution it is closing.
+    setContextOpaque(ctx.parent)
+    // Marked the moment this thread leaves it, and before the span is recorded: from here on,
+    // any thread still mounted on this context is working under an execution that is over.
+    //
+    // After the slot is restored, deliberately. The sampler treats a closed context as stale
+    // only if the slot still holds it, so marking first would leave a window — one opaque store
+    // wide — in which this thread's own exit looks like an escape. **No test covers this**: the
+    // window is a nanosecond or two against a 1 ms sampling step, so swapping these two lines
+    // leaves the suite green.
+    ctx.markClosed()
+    val nanos = System.nanoTime() - ctx.startNanos
+    recorded(recordSpan(ctx, nanos), nanos)
+    flushCounts(ctx)
 }
 
 /**
@@ -635,20 +659,14 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
  */
 inline fun <T> op(op: CoarseOp, key: () -> Any?, body: () -> T): T {
     val slot = Profiler.slot()
-    val parent = slot.contextOpaque()
-    slot.flushCounts(parent)
-    val ctx = CoarseContext(op.id, parent, System.nanoTime(), slot.pathFor(parent, op.id))
-    slot.setContextOpaque(ctx)
+    val ctx = slot.openCoarse(op.id)
     try {
         return body()
     } finally {
-        // As the plain form, then the one compare.
-        slot.setContextOpaque(parent)
-        ctx.markClosed()
-        val nanos = System.nanoTime() - ctx.startNanos
-        val node = slot.recordSpan(ctx, nanos)
-        if (node != null && nanos > node.slowFloor) node.recordSlow(nanos, keyOf(key))
-        slot.flushCounts(ctx)
+        // As the plain form, and the one compare.
+        slot.closeCoarse(ctx) { node, nanos ->
+            if (node != null && nanos > node.slowFloor) node.recordSlow(nanos, keyOf(key))
+        }
     }
 }
 

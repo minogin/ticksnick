@@ -471,6 +471,10 @@ class AllocationsTest {
         assertTrue("Allocated: counted on one side only" in diff, diff)
         val row = diffRow(diff, "alloc.outer")
         assertTrue("3.00 MB" in row[0] && "MB" !in row[1], row.toString())
+        // Not asked for is not unknown: the side that did not count is blank there, not `?`.
+        val head = diff.lines().first { it.startsWith("Coarse operation") }
+        val cells = row[1].padEnd(head.length).substring(head.indexOf("Total") - 5, head.indexOf("Per execution") + "Per execution".length)
+        assertTrue(cells.isBlank(), "the side that did not count: ${row[1]}")
     }
 
     @Test

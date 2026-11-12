@@ -469,6 +469,14 @@ internal class OperationStat internal constructor(
 
 }
 
+/** How many executions a run needs for the percentile [p] to mean something: p50 2, p90 10, p99 100. */
+internal fun executionsNeeded(p: Double): Long = if (p >= 1.0) 1L else Math.round(1.0 / (1.0 - p))
+
+/** Why a percentile reads [UNKNOWN], and what gives it: the key under the coarse table says it where one does. */
+internal fun percentilesNeedText(): String =
+    "p50, p90 and p99 need ${executionsNeeded(0.50)}, ${executionsNeeded(0.90)} and ${executionsNeeded(0.99)} executions in a run," +
+            " and show $UNKNOWN with fewer: more executions give them"
+
 /**
  * The [p]-th percentile of [count] executions' [spans], or NaN when there are **fewer than
  * `1 / (1 - p)` executions: 2 for a p50, 10 for a p90, 100 for a p99.** Below that the percentile is
@@ -479,8 +487,7 @@ internal class OperationStat internal constructor(
  * Clamped to the exact [min] and [max], which the middle of a bucket can otherwise pass by a little.
  */
 internal fun spanPercentile(spans: Spans, count: Long, min: Long, max: Long, p: Double): Double {
-    val needed = if (p >= 1.0) 1L else Math.round(1.0 / (1.0 - p))
-    if (count < needed) return Double.NaN
+    if (count < executionsNeeded(p)) return Double.NaN
     val v = spans.percentile(p)
     return if (v.isNaN()) v else v.coerceIn(min.toDouble(), max.toDouble())
 }
@@ -1344,7 +1351,7 @@ class Run internal constructor(
             appendLine("  for coarse operations:")
             appendLine("  executions, mean and the percentiles are MEASURED, two timestamps per execution${sym.dash}the")
             appendLine("    only numbers here that are not sampled. Percentiles are exact up to $EXACT_SPANS executions and")
-            appendLine("    within 0.8% past them; a p90 needs 10 executions and a p99 100, and shows $UNKNOWN with fewer")
+            appendLine("    within 0.8% past them; ${percentilesNeedText()}")
             appendLine("  wall is the part of its root's wall time a row took: its durations summed, divided by")
             appendLine("    how many ran at a time under each parent, at its level and above. % parent is of the")
             appendLine("    parent's wall, and the rest of 100% is the parent's own time outside this child")

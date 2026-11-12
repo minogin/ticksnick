@@ -270,6 +270,12 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     internal val allocations: Boolean get() = runs.any { it.allocations }
 
     /** Bytes allocated under [m], [f] of each run that counted them. See [Run.allocatedTotal]. */
+    /**
+     * Whether the column [c] has figures here: `Allocated` only where a run counted it. Not asked for, it is not
+     * unknown but not counted, and a diff with the other side counting shows it blank, not [UNKNOWN].
+     */
+    private fun counted(c: Column): Boolean = c.group != ALLOCATED.group || allocations
+
     private fun allocated(m: Matched, f: (Run, CoarseNode) -> Double): Estimate =
         Estimate(m.present.filter { runs[it].allocations }.map { f(runs[it], m.nodes[it]!!) }.filter { !it.isNaN() })
 
@@ -391,7 +397,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 P99 to timed { it.percentileNanos(0.99) },
                 MAX to timed { it.spanMaxNanos.toDouble() },
                 COARSE_WAITING to overAll { i, n -> waiting(runs[i], n.inclusiveHits, n.runningInclusiveHits) },
-            ).filterKeys { it != PARENT_SHARE || parents.any { p -> p != null } },  // a root has no parent to be a share of
+            ).filterKeys { (it != PARENT_SHARE || parents.any { p -> p != null }) && counted(it) },  // a root has no parent to be a share of
             nodes.size,
             children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 } + listOfNotNull(folded),
             slowest = m.nodes.flatMap { it?.slowest.orEmpty() }.sortedByDescending { it.nanos }.take(m.nodes.maxOf { it?.slowest?.size ?: 0 }),
@@ -499,7 +505,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     P99 to of { _, c, _ -> c.percentileNanos(0.99) },
                     MAX to of { _, c, _ -> c.spanMaxNanos.toDouble() },
                     COARSE_WAITING to of { i, c, _ -> waiting(runs[i], c.inclusiveHits, c.runningInclusiveHits) },
-                ),
+                ).filterKeys(::counted),
                 with.size,
             )
         }
@@ -675,8 +681,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
         if (runs.size > 1) {
             add("  % parent is each run's share of its own parent, ${sym.plusMinus} in percentage points: the run's speed cancels out of it")
-            add("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval; $UNKNOWN where a run had too few executions for it")
+            add("  Max is the largest of the runs, and a percentile the mean of the runs' percentiles, with no interval")
         }
+        if (all.any { r -> listOf(P50, P90, P99).any { r.figures[it]?.n == 0 } }) add("  ${percentilesNeedText()}")
     }
 
     /**

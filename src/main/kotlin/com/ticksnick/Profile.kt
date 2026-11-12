@@ -431,8 +431,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     PARALLEL to Estimate(nodes.mapNotNull { of[it]?.parallel }.filter { it >= PARALLEL_SHOWN }),
                     WALL to anyOver0(ofTimed.map { of[it]?.wallNanos ?: 0.0 }),
                     PARENT_SHARE to anyOver0(ofTimed.map { i -> of[i]?.share?.takeIf { !it.isNaN() }?.times(100) ?: 0.0 }),
-                    // A run where the label was called and never sampled counts at 0, as in Wall.
-                    MEAN to Estimate(nodes.mapNotNull { i ->
+                    // A run where the label was called and never sampled counts at 0, as in Wall; never
+                    // sampled in any run, it reads `-`, as Wall does and as the key under the table says.
+                    MEAN to anyOver0(nodes.mapNotNull { i ->
                         of[i]?.perCallNanos?.takeIf { !it.isNaN() } ?: calls.firstOrNull { it.first == i }?.second?.takeIf { it > 0 }?.let { 0.0 }
                     }),
                 ),

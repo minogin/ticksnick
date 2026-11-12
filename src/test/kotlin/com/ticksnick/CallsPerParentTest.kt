@@ -189,5 +189,12 @@ class CallsPerParentTest {
 
         val wrong = check("A", 10, reportA) + check("B", 2, reportB)
         if (wrong.isNotEmpty()) fail(wrong.joinToString("\n"))
+
+        // `rare` under `cleanup`, about 100 ns once a plan, is never caught: its time reads `-`, in
+        // Wall and in Mean alike, as the key under the table says.
+        val lines = reportB.lines()
+        val cleanup = lines.indexOfFirst { it.trimStart().startsWith("cleanup ") }
+        val rareRow = lines.drop(cleanup + 1).first { it.trimStart().startsWith("- rare") }
+        assertFalse(Regex("[0-9](ns|us|ms|s)\\b").containsMatchIn(rareRow.substringAfter("|")), rareRow)
     }
 }

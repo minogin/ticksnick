@@ -477,7 +477,7 @@ class RunTest {
     @Test
     fun `a spinning sampler on enough processors says what it holds, with no remedy`() {
         assertEquals(
-            "every 1.0ms: the sampler keeps one of the 14 processors busy to hold the interval",
+            "every 1.0ms: the sampler keeps one of the 14 processors busy to hold the tick",
             sampled(WaitStrategy.SPIN, processors = 14, ticks = 1_001).samplingLine(),
         )
     }
@@ -485,7 +485,7 @@ class RunTest {
     @Test
     fun `a spinning sampler on few processors names the remedy`() {
         assertEquals(
-            "every 1.0ms: the sampler keeps one of the 2 processors busy to hold the interval - start(wait = PARK) to free it",
+            "every 1.0ms: the sampler keeps one of the 2 processors busy to hold the tick - start(wait = PARK) to free it",
             sampled(WaitStrategy.SPIN, processors = 2, ticks = 1_001).samplingLine(),
         )
     }

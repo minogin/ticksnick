@@ -833,7 +833,7 @@ class Run internal constructor(
         val n = duty.processors
         val processors = if (n > 0) "one of the $n processors" else "a processor"
         return if (w == WaitStrategy.SPIN) {
-            "every ${stepText(stepNanos)}: the sampler keeps $processors busy to hold the interval" +
+            "every ${stepText(stepNanos)}: the sampler keeps $processors busy to hold the tick" +
                     if (n in 1 until SPIN_MIN_PROCESSORS) "${sym.dash}start(wait = PARK) to free it" else ""
         } else {
             val asked = if (askedStepNanos > 0 && abs(stepNanos / askedStepNanos - 1) > ASKED_STEP_TOLERANCE)

@@ -73,7 +73,8 @@ labels its own time went to, and how many times each was called per execution.
 Below its floor a fine label is a visible part of what it measures. The report says so and names the
 label. The floors are counted in bodies, a fixed piece of CPU work that TickSnick times once a second
 during the run, so they follow the machine and its clock: a fine label needs 2 bodies, about 50 ns on a
-fast machine, and a coarse one 100 bodies, about 2.5 us. Label the enclosing loop instead, and pass the number of operations inside:
+fast machine, and a coarse one 100 bodies, about 2.5 us, a little more for each registered fine label and
+with `Allocated`. Label the enclosing loop instead, and pass the number of operations inside:
 
 ```kotlin
 op(LOOKUP, times = keys.size) { for (k in keys) table.find(k) }
@@ -126,10 +127,11 @@ Profiler.expectBalanced()   // where no label should be open
 ```
 
 `enter` and `exit` have no `finally`, so an exception between them leaves the label set. TickSnick
-counts that as a leak and stops the session at the first one: every sample after it would be charged
-to the wrong operation. The run has failed: its report says why and shows no figures, and a profile
+finds such a leak at `expectBalanced()`, or at an `exit` that names another label, and stops the
+session there: every sample after it would be charged to the wrong operation. The run has failed: its report says why and shows no figures, and a profile
 leaves it out. TickSnick never reports figures it knows are false, so there is no switch to profile
-anyway. Where the labels are in code you cannot fix, label one level up, where a `finally` fits.
+anyway. A label still open at `stop()` is a warning instead. Where the labels are in code you cannot
+fix, label one level up, where a `finally` fits.
 
 ### Settings
 
@@ -139,15 +141,17 @@ anyway. Where the labels are in code you cannot fix, label one level up, where a
   thread takes a few microseconds, so it is set by how many threads there are, not by the resolution
   you want.
 - `wait` (`SPIN` with 4 or more processors, `PARK` below): how the sampler waits between samples.
-  `SPIN` takes a core and keeps the interval exact. `PARK` and `SLEEP` leave the core free, and the
-  interval grows longer and less regular. The report's `Sampling` line says which one ran.
-- `jitter` (0.25): each interval varies at random by up to this fraction, so sampling does not fall
+  `SPIN` takes a core and keeps the tick exact. `PARK` and `SLEEP` leave the core free, and the tick
+  grows longer and less regular. The `Setup` line names the one that ran, and the `Sampling` line
+  says what it cost.
+- `jitter` (0.25): each tick varies at random by up to this fraction, so sampling does not fall
   in step with a loop in the program.
 - `sampleState` (true): record whether each sampled thread was running or waiting.
 - `allocations` (false): count the bytes allocated under each coarse operation, for the report's
-  `Allocated` column. It adds about 30 ns to each coarse execution. It needs a JVM that reports
+  `Allocated` columns. It adds about 30 ns to each coarse execution. It needs a JVM that reports
   them, as HotSpot and OpenJ9 do; on one that does not, the session runs without and the report says so.
-  Work on virtual threads is not counted: its rows read `-`.
+  Work on a virtual thread is not counted: the rows it ran under, and every row above them, read `-`,
+  and a warning says so.
 - `tags` (none): what the run cannot say by itself, see [Tags and setup](#tags-and-setup).
 
 ### From Java
@@ -168,8 +172,10 @@ System.out.println(TickSnick.load(Path.of("profiles", "baseline")).render());
 
 - A fine and a coarse handle are both `int`, so Java cannot tell them apart. The calls name the
   kind instead: `fine` and `coarse`, `enterFine`/`exitFine` and `enterCoarse`/`exitCoarse`. Passing
-  one kind to the other's call compiles and reports the wrong operation.
-- Opening a scope allocates nothing: each operation has one, made at startup.
+  one kind to the other's call compiles and reports the wrong operation, or throws, for a fine handle
+  past the coarse ones.
+- A scope is not allocated: each operation has one, made at startup. A coarse execution still makes
+  its context.
 - `Profiler.fine(LOOKUP, keys.size())` is `op(LOOKUP, times = keys.size) { }`.
 - Families: `LEVEL.get(depth)`, and `Profiler.registerCoarse("resolve", Kind.class)` for an enum.
 - Settings by position, from the left: `Profiler.start(1.0, WaitStrategy.PARK)`.
@@ -187,8 +193,8 @@ runs, and on disk it is a folder of them.
   named by the time. A save never overwrites another run.
 - **A folder holds one profile.** Save a run that differs in code, workload or setup to a new folder.
   If a run should not count, move it out of the folder. Each run should come from its own JVM.
-- `TickSnick.load(folder).render()` reports the profile: every figure is the mean of the runs, with
-  its 95% interval.
+- `TickSnick.load(folder).render()` reports the profile: each figure is the mean of the runs, Max the
+  largest, and what says how much has its 95% interval.
 - `TickSnick.diff(before, after)` compares two profiles and gives each change its 95% interval. A
   change that could be noise is marked `?`. Which of code, workload or setup differs between the two
   is the question it answers.
@@ -208,8 +214,8 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
 - **The sampler takes a core.** With 4 or more processors it spins between samples, so one core is
   busy for the whole session. A program that leaves a core free loses nothing to it; one that uses
   every core loses that core. `wait = PARK` frees it and samples less exactly.
-- **A fine label:** about 1-3 ns a call, at most 2.5 ns by design. Beside other work it is often
-  hidden altogether. A batch label, `op(X, times = n)`, costs one call for its n.
+- **A fine label:** about 1 ns a call on its own, at most 2.5 ns by design. In real code it depends on
+  the code around it: beside other work it is often hidden altogether, behind a wrapper a few ns. A batch label, `op(X, times = n)`, costs one call for its n.
 - **A coarse label:** about 45-55 ns an execution, at most 100 ns, and 56 bytes for its context, which
   `Allocated` leaves out. Most of it is two `System.nanoTime()` calls, so it costs more where
   `nanoTime` is slow, as on some VMs.
@@ -224,8 +230,8 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
 ## Tags and setup
 
 A run reads its own setup at `start`: the Java version, the JVM, the OS, the CPU, the processors, the
-heap, the collector and the JVM flags that change how it runs: heap, collector, processors and
-compiler, and no others, so no path or secret. It cannot see what the program did before `start`,
+heap, the collector and the JVM flags that change how it runs: heap, thread stacks, collector,
+processors, memory pages and compiler, and no others, so no path or secret. It cannot see what the program did before `start`,
 or which workload it was given. Tags say that:
 
 ```kotlin
@@ -257,7 +263,7 @@ In a clone of this repository: `./gradlew cli --args="render profiles/baseline"`
   work moves somewhere else.
 - **Coroutines and virtual threads are not tested.** A fine label belongs to the thread that set it.
   A coroutine that suspends inside a label and resumes on another thread leaves the label behind.
-- Up to 256 operations, and up to 1024 threads at once. A thread past that is not sampled, and the
+- Up to 256 fine and 64 coarse operations, and up to 1024 threads at once. A thread past that is not sampled, and the
   report says so.
 - The CPU clock is recorded on Windows and Linux. On macOS it needs root, so the report says it was
   not measured.

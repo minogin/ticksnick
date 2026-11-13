@@ -195,7 +195,7 @@ runs, and on disk it is a folder of them.
   If a run should not count, move it out of the folder. Each run should come from its own JVM.
 - `TickSnick.load(folder).render()` reports the profile: each figure is the mean of the runs, Max the
   largest, and what says how much has its 95% interval.
-- `TickSnick.diff(before, after)` compares two profiles and gives each change its 95% interval. Which of code, workload or setup differs between the two
+- `TickSnick.diff(before, after)` compares two profiles and gives each change as the range of its 95% interval. Which of code, workload or setup differs between the two
   is the question it answers.
 
 Reports are ASCII. `render(unicode = true)` and `diff(before, after, unicode = true)` print `±`, `µs`,

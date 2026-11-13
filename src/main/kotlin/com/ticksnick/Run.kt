@@ -337,14 +337,18 @@ private fun durationUnitOf(nanos: Double): DurationUnit {
     return DURATION_UNITS[i]
 }
 
-/**
- * A duration and its `+-` in one unit, the larger one's, said once at the right: `9.15 +-2.59 s`,
- * `-0.380 +-6.17 s`. [value] may be negative, a change; [signed] puts `+` on a positive one.
- */
-internal fun durationPlusMinus(value: Double, half: Double, signed: Boolean = false): String {
-    val unit = durationUnitOf(maxOf(abs(value), half))
-    val sign = if (value < 0) "-" else if (signed) "+" else ""
-    return sign + significant(abs(value) / unit.scale) + " ${sym.plusMinus}" + significant(half / unit.scale) + unit.text
+/** `6.34s ±5.0%`: a duration and its interval relative to it, the form of a certain figure. */
+internal fun durationCertain(value: Double, half: Double): String = duration(value) + " " + relativeText(half / value * 100)
+
+/** `±5.0%`, `±12%`: an interval relative to its figure. */
+internal fun relativeText(pct: Double): String =
+    if (pct < 9.95) String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.1f%%", pct) else String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.0f%%", pct)
+
+/** `4.39..458ms`, `-5.65..-3.65s`: two durations in the larger one's unit. */
+internal fun durationRange(lo: Double, hi: Double, signed: Boolean = false): String {
+    val unit = durationUnitOf(maxOf(kotlin.math.abs(lo), kotlin.math.abs(hi)))
+    fun one(v: Double) = (if (v < 0) "-" else if (signed && v > 0) "+" else "") + significant(kotlin.math.abs(v) / unit.scale)
+    return one(lo) + ".." + one(hi) + unit.text
 }
 
 /** Three significant digits, below 1 as well as above it: `0.444`, `0.00128`, `9.15`, `117`. */
@@ -1300,7 +1304,7 @@ class Run internal constructor(
         // draw the wrong conclusion, and nothing else. Everything below them is reference, and
         // reference belongs in output.md where it can be read once rather than skipped thirty times.
         appendLine("  thread-time is sampled and summed across threads over ACTIVE time, NOT CPU")
-        appendLine("  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working")
+        appendLine("  waiting is a part of the thread-time beside it, NOT added to it")
         appendLine("  concurrency is threads INSIDE at once, running or parked${sym.dash}not a speedup")
         appendLine("  a share is where time went, NOT what removing the operation would save")
         if (!full) {
@@ -1472,7 +1476,7 @@ class Run internal constructor(
     /**
      * [rows], and time inside no label as a row rather than a `Coverage` line: it is the time the
      * reader has no information about, and it belongs in the ranking with everything else. Its
-     * `Runnable / Waiting` is the first question about it - idle threads, or work nobody labelled -
+     * `Waiting` is the first question about it - idle threads, or work nobody labelled -
      * and the row answers it.
      */
     internal fun tableRows(): List<OperationRow> = rows() + if (unlabelledHits > 0) listOf(

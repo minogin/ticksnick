@@ -18,9 +18,16 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   `Paused` line is left out when neither side paused.
 - The key under the coarse table says what a percentile's `?` needs: p50, p90 and p99 need 2, 10 and
   100 executions in a run.
-- A change in a diff has no `?` any more, and no note under the tables: its `+-` is the only word on
-  how sure it is. `+1.1 +-3.2%` says by itself that it could go either way. `?` now only means that a
-  figure is not known.
+- A change in a diff has no `?` any more, and no note under the tables: its interval is the only word on
+  how sure it is. `?` now only means that a figure is not known.
+- **A figure is written by how sure it is**, the same in a report and a diff. Up to 20% of the figure,
+  the figure and its interval relative to it: `6.34s +-5.0%`, a percentage in points, `63% +-9.2pp`.
+  Wider, the interval's two ends: `371..561ms`, a share's stopping at 100%. As wide as the figure or more,
+  so that it would reach 0: `?`. The forms `35 +-3s` and `63 +-9.2%` are gone.
+- **A change in a diff is always a range**, the ends of its 95% interval: `-30..-18%`, `+4.7..+5.9pp`,
+  `-5.65..-3.65s` in the header; a decrease stops at -100%.
+- **`Waiting` replaces `Runnable / Waiting`**: the part of a row's time spent waiting, blank where
+  nothing waited. Runnable was 100% less it.
 
 ### The coarse table
 

@@ -8,8 +8,9 @@ TickSnick prints three kinds of report:
 - **A diff**: `TickSnick.diff(before, after)` on two folders.
 
 **A cell holds a figure, `?` or nothing.** `?` is a figure TickSnick could not measure, or measured
-too little of to say: a p90 with under 10 executions, a label never sampled where it was called. More
-runs, more executions or another setup would give it. A blank cell has nothing to look at: the
+too little of to say: a p90 with under 10 executions, a label never sampled where it was called, a
+figure whose interval is as wide as the figure itself. More runs, more executions or another setup
+would give it. A blank cell has nothing to look at: the
 column's usual value (`Per parent` 1, `Paused` 0) or a column that does not apply to the row. A 0 is
 a measured nothing.
 
@@ -28,7 +29,7 @@ WARNINGS
 Tags          warmups: 2; batches: 3; roots: org.apache.*
 Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; CPU: Intel64 Family 6 Model 197 Stepping 2, GenuineIntel; Processors: 14; Heap: 18.0 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
               run  file                               wall   CPU clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s   27.4s   27.0s
+              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s  27.4s  27.0s
 Wall time     117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
 runBatch      27.3s per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
@@ -71,7 +72,7 @@ The common ones:
 - `Runs: they differ in Heap, so each mean mixes them` - the runs of a folder disagree on a tag, the
   setup, or how many times the root operation ran, so they are not one profile. Split the folder. It is
   always the last warning.
-- `Runs: 2 of 4 shared a JVM` - two sessions of one JVM are not independent, so the +- is too narrow.
+- `Runs: 2 of 4 shared a JVM` - two sessions of one JVM are not independent, so every interval is too narrow.
 
 Warnings go up. A report over several runs shows each run's own warnings, and the same warning from
 several runs is one line ending in `(2 of 4 runs)`, its figures as ranges, `1.04pp..1.29pp`. A diff
@@ -123,15 +124,15 @@ the runs.
 
 ```
 COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
-                               |                                             Load                                             |                    Long
-Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
--------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
-runBatch                       |           3                          82.0s               4.20s      80.0% / 20.0%      27.3s |      27.4s          ?          ?      27.6s
-  resolveRoot                  |      92,667     30,889      4.0      82.0s     100%      4.20s          100% / 0%     3.53ms |      602us     7.50ms     61.6ms      434ms
-    resolve                    |     278,001          3               82.0s     100%      4.20s          100% / 0%     1.18ms |      146us     2.57ms     19.0ms      358ms
-      select                   |     278,001                          42.5s      52%      3.90s          100% / 0%      611us |     62.7us     1.27ms     11.6ms      348ms
-      via                      |     278,001                          28.1s      34%      2.99s          100% / 0%      404us |     47.9us      856us     6.06ms      339ms
-      reach                    |     278,001                          10.1s      12%      1.15s          100% / 0%      145us |     27.8us      362us     1.65ms      166ms
+                                   |                                        Load                                         |                    Long
+Coarse operation                   |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
+-----------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
+runBatch                           |           3                          82.0s               4.20s     20.0%      27.3s |      27.4s          ?          ?      27.6s
+  resolveRoot                      |      92,667     30,889      4.0      82.0s     100%      4.20s               3.53ms |      602us     7.50ms     61.6ms      434ms
+    resolve                        |     278,001          3               82.0s     100%      4.20s               1.18ms |      146us     2.57ms     19.0ms      358ms
+      select                       |     278,001                          42.5s      52%      3.90s                611us |     62.7us     1.27ms     11.6ms      348ms
+      via                          |     278,001                          28.1s      34%      2.99s                404us |     47.9us      856us     6.06ms      339ms
+      reach                        |     278,001                          10.1s      12%      1.15s                145us |     27.8us      362us     1.65ms      166ms
 ```
 
 The table is a tree: each operation sits under the one it ran inside, and its figures cover the
@@ -153,9 +154,9 @@ run counted it.
   the parent spent outside them.
 - **Paused** - GC pauses that fell inside its executions. A pause is charged to every execution it
   interrupted, not to the one that caused it.
-- **Runnable / Waiting** - of the samples inside the row, the share whose thread could run and the
-  share whose thread was parked, blocked or waiting. `runBatch` is 20% waiting: the main thread
-  waits for the workers.
+- **Waiting** - of the samples inside the row, the share whose thread was parked, blocked or
+  waiting: a part of the row's time, not added to it. Blank where nothing waited. `runBatch` is 20%
+  waiting: the main thread waits for the workers.
 - **Mean, p50, p90, p99, Max** - measured per execution. Percentiles are exact up to 2,624
   executions and within 0.8% after. A p90 needs 10 executions and a p99 100; with fewer, a row run once included, it shows `?`.
 
@@ -163,25 +164,25 @@ run counted it.
 children:
 
 ```
-                               |                                             Load                                             |                    Long
-Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused Runnable / Waiting       Mean |        p50        p90        p99        Max
--------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
-batch                          |           1                          1.14s                              100% / 0%      1.14s |          ?          ?          ?      1.14s
-  plan                         |          10         10               984ms      87%                     100% / 0%     98.4ms |     98.3ms     98.6ms          ?     99.5ms
-    - rule                     |       3,400        340               682ms      69%                                    201us
-    - visit (2 parents)        |       1,000        100               205ms      21%                                    205us
-    - rare (2 parents)         |         500         50              97.2ms      10%                                    194us
+                               |                                         Load                                        |                    Long
+Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
+-------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
+batch                          |           1                          1.14s                                    1.14s |          ?          ?          ?      1.14s
+  plan                         |          10         10               984ms      87%                          98.4ms |     98.3ms     98.6ms          ?     99.5ms
+    - rule                     |       3,400        340               682ms      69%                           201us
+    - visit (2 parents)        |       1,000        100               205ms      21%                           205us
+    - rare (2 parents)         |         500         50              97.2ms      10%                           194us
     - and 1 more               |                                     2.00ms      <1%
-  cleanup                      |          10         10               150ms      13%                     100% / 0%     15.0ms |     15.0ms     15.0ms          ?     15.1ms
-    - visit (2 parents)        |         100         10              97.2ms      65%                                    972us
+  cleanup                      |          10         10               150ms      13%                          15.0ms |     15.0ms     15.0ms          ?     15.1ms
+    - visit (2 parents)        |         100         10              97.2ms      65%                           972us
     - unlabelled               |                                     51.1ms      34%
-    - rare (2 parents)         |          10          1                   ?        ?                                        ?
--------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
+    - rare (2 parents)         |          10          1                   ?        ?                               ?
+-------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
 Under multiple parents - each over all of them
-Coarse operation               |  Executions                         Wall v   % root                                     Mean
-  - visit                      |       1,100                          303ms      27%                                    275us
-  - rare                       |         510                         97.2ms       9%                                    191us
--------------------------------+----------------------------------------------------------------------------------------------+--------------------------------------------
+Coarse operation               |  Executions                         Wall v   % root                            Mean
+  - visit                      |       1,100                          303ms      27%                           275us
+  - rare                       |         510                         97.2ms       9%                           191us
+-------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
 ```
 
 - **Executions** - the label's calls on this path, counted. **Per parent** - calls per execution of
@@ -239,15 +240,15 @@ longest executions on that path, with their keys.
 
 ```
 COARSE AND FINE OPERATIONS - own time, out of 104s active time
-                           |                                       Load                                       |             Long             |               Spread
-Operation                  | Thread-time% v Thread-time Runnable / Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
----------------------------+----------------------------------------------------------------------------------+------------------------------+------------------------------------
-onCentral                  |          28.1%        117s          100% / 0%   569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
-runBatch *                 |          18.8%       77.8s     0.198% / 99.8%             3                25.9s |                              |     77.8s        1.00       2     1
-merge                      |          14.1%       58.4s          100% / 0%   199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
-visit                      |          14.0%       58.2s          100% / 0%   562,928,865                103ns |                              |     43.5s        1.34       4    12
-(no operation)             |          6.37%       26.4s     99.0% / 0.950%
-passedOn                   |          6.00%       24.9s          100% / 0%   222,178,167                112ns |                              |     21.9s        1.14       4    12
+                           |                                  Load                                   |             Long             |               Spread
+Operation                  | Thread-time% v Thread-time   Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+---------------------------+-------------------------------------------------------------------------+------------------------------+------------------------------------
+onCentral                  |          28.1%        117s             569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
+runBatch *                 |          18.8%       77.8s     99.8%             3                25.9s |                              |     77.8s        1.00       2     1
+merge                      |          14.1%       58.4s             199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
+visit                      |          14.0%       58.2s             562,928,865                103ns |                              |     43.5s        1.34       4    12
+(no operation)             |          6.37%       26.4s    0.950%
+passedOn                   |          6.00%       24.9s             222,178,167                112ns |                              |     21.9s        1.14       4    12
 ```
 
 One row per label, across the whole run, in its **own** time: time inside it and inside no label
@@ -259,9 +260,9 @@ above. `(no operation)` is time on profiled threads under no label.
 - **Thread-time%** and **Thread-time** - the same figure as a share of all samples and as seconds,
   summed across threads. It is time inside the label, running or waiting, not CPU time. The share
   is of active time; compare the seconds between runs.
-- **Runnable / Waiting** - splits that thread-time into samples whose thread could run and samples
-  whose thread was parked, blocked or waiting. Runnable is an upper bound on work: a thread waiting
-  for a core, or inside a native call, also reads runnable.
+- **Waiting** - the part of that thread-time whose thread was parked, blocked or waiting, not added
+  to it; blank where nothing waited. The rest could run, which is an upper bound on work: a thread
+  waiting for a core, or inside a native call, also reads runnable.
 - **Calls** - exact, counted by the label.
 - **Thread-time per call** - thread-time divided by calls: the cost of one call, measured without
   timing any.
@@ -299,24 +300,24 @@ One run is a folder of one, so a report prints the same lines however many runs 
 With two runs or more, each figure is the mean of the runs, and what says how much has a 95% interval:
 
 ```
-Runs          4 runs of 'naive', one JVM each: every figure below is their mean, +- its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
+Runs          4 runs of 'naive', one JVM each: every figure below is their mean, with its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
               run  file                               wall   CPU clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s   27.4s   27.0s
-              2    2026-10-26T18-23-49.tsr            117s         99%   27.4s   27.1s   27.5s
-              3    2026-10-26T18-30-57.tsr            117s         99%   27.8s   27.1s   28.1s
-              4    2026-10-26T18-38-06.tsr            117s         99%   27.5s   27.4s   27.6s
-Wall time     117 +-0.444s (0.4%) = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 59 pauses, longest 2.01s
-runBatch      27.5 +-0.260s (0.9%) per execution
+              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s  27.4s  27.0s
+              2    2026-10-26T18-23-49.tsr            117s         99%   27.4s  27.1s  27.5s
+              3    2026-10-26T18-30-57.tsr            117s         99%   27.8s  27.1s  28.1s
+              4    2026-10-26T18-38-06.tsr            117s         99%   27.5s  27.4s  27.6s
+Wall time     117s +-0.4% = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 59 pauses, longest 2.01s
+runBatch      27.5s +-0.9% per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
 
-COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs +- 95%
-                                   |                                                                      Load                                                                      |                    Long
-Coarse operation                   |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
-runBatch                           |           3                          82.4s +-0.9%                            4.29s +-5.2%           80.0 / 20.0 +-0.0%         27.5s +-0.9%    |      27.5s          ?          ?      28.1s
-  resolveRoot                      |      92,667     30,889      4.0      82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        3.55ms +-0.9%    |      602us     7.54ms     61.3ms      449ms
-    resolve                        |     278,001          3               82.4s +-0.9%         100 +-0.0%         4.29s +-5.2%               100 / 0 +-0.0%        1.18ms +-0.9%    |      148us     2.57ms     18.9ms      358ms
-      select                       |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
+COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
+                                   |                                                            Load                                                             |                    Long
+Coarse operation                   |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
+-----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
+runBatch                           |           3                           82.4s +-0.9%                        4.29s +-5.2%     20.0% +-0.0pp       27.5s +-0.9% |      27.5s          ?          ?      28.1s
+  resolveRoot                      |      92,667     30,889      4.0       82.4s +-0.9%     100% +-0.0pp       4.29s +-5.2%                        3.55ms +-0.9% |      602us     7.54ms     61.3ms      449ms
+    resolve                        |     278,001          3                82.4s +-0.9%     100% +-0.0pp       4.29s +-5.2%                        1.18ms +-0.9% |      148us     2.57ms     18.9ms      358ms
+      select                       |     278,001                           42.5s +-1.1%      52% +-0.4pp       4.01s +-9.1%                         611us +-1.1% |     62.8us     1.28ms     11.7ms      348ms
 ```
 
 **Each run is one sample.** Batches inside one JVM share its compiled code, its heap and the CPU
@@ -329,11 +330,14 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
 - **% parent** is each run's share of its own parent, with its interval in percentage points. The
   run's speed cancels out, so it shows whether the structure held while the whole run got faster or
   slower.
-- **`+-` goes on what says how much:** Wall, % parent, Paused, Runnable / Waiting, Mean,
-  Thread-time%, Thread-time and Thread-time per call. Where the figure and its `+-` share a unit, the
-  unit is written once, at the right: `52 +-0.4%` is 51.6% to 52.4%, `117 +-0.444s` is 116.6 to 117.4 s.
-  Where they do not, the `+-` is a percent of the figure: `42.5s +-1.1%`. One run has no `+-`, and its
-  figures keep their units: `52%`.
+- **What says how much has an interval:** Wall, % parent, Paused, Waiting, Mean, Thread-time%,
+  Thread-time and Thread-time per call. How it is written depends on how wide it is against the figure:
+  - **up to 20%:** the figure and its interval, `42.5s +-1.1%`, the interval a percent of the figure; a
+    percentage takes points, `52% +-0.4pp`;
+  - **over 20%:** the interval's two ends, `371..561ms`; a percentage's stop at 100%;
+  - **as wide as the figure or more**, so that it would reach 0: `?`, measured too little to say.
+
+  One run has no interval: the figure alone, `52%`.
 - **No `+-` on what says how it ran:** a percentile is the mean of the runs' percentiles, Max is the
   largest of the runs, and the Long and Spread columns have none.
 - **Counted figures** print plainly when the runs agree, and `~` their mean when not: Executions, Per
@@ -361,31 +365,31 @@ A warning about either profile is repeated here, and that includes a profile who
 
 ```
 Diff          naive (4 runs) -> centralEdges (4 runs)
-Wall time        117s -> 91.6s   -25.4 +-1.75s         -22 +-1.5%
-  Active         104s -> 79.2s   -24.6 +-1.53s         -24 +-1.5%
-runBatch        27.5s -> 19.4s   -8.09 +-0.361s        -29 +-1.3%       per execution
+Wall time        117s -> 91.6s    -27.1..-23.6s          -23..-20%
+  Active         104s -> 79.2s    -26.1..-23.1s          -25..-22%
+runBatch        27.5s -> 19.4s    -8.45..-7.73s          -31..-28%        per execution
 
-COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change +- 95%
-                                             |                                                                      Load                                                                      |                    Long
-Coarse operation                             |  Executions Per parent Parallel     Wall v           % parent               Paused           Runnable / Waiting                 Mean           |        p50        p90        p99        Max
----------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
-      select                                 |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
-                                             |     278,001                          33.1s +-2.9%          57 +-0.6%         3.70s +-8.0%               100 / 0 +-0.0%         475us +-2.9%    |     49.9us      995us     8.75ms      190ms
-                                             |           =          =                 -22 +-2.2%        +5.3 +-0.6pp         -7.7 +-9.5%                    =                  -22 +-2.2%    |       -21%       -22%       -25%       -45%
+COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change its 95% interval
+                                             |                                                            Load                                                             |                    Long
+Coarse operation                             |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
+---------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
+      select                                 |     278,001                           42.5s +-1.1%      52% +-0.4pp       4.01s +-9.1%                         611us +-1.1% |     62.8us     1.28ms     11.7ms      348ms
+                                             |     278,001                           33.1s +-2.9%      57% +-0.6pp       3.70s +-8.0%                         475us +-2.9% |     49.9us      995us     8.75ms      190ms
+                                             |           =          =                   -24..-20%     +4.7..+5.9pp         -17..+1.8%                 =          -24..-20% |       -21%       -22%       -25%       -45%
 
-COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%
-                           |                                                           Load                                                           |             Long             |               Spread
-Operation                  |   Thread-time%           Thread-time           Runnable / Waiting                   Calls Thread-time per call           | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
----------------------------+--------------------------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------
-onCentral (4 -> 0 runs)    |           28.3 +-0.3%           118s +-1.6%               100 / 0 +-0.0%      569,233,860                207ns +-1.6%    |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
+COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
+                           |                                                  Load                                                   |             Long             |               Spread
+Operation                  |           Thread-time%         Thread-time           Waiting         Calls         Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+---------------------------+---------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------
+onCentral (4 -> 0 runs)    |          28.3% +-0.3pp         118s +-1.6%                     569,233,860                 207ns +-1.6% |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
 
 
-dependencies               |           5.58 +-0.1%          23.2s +-2.6%               100 / 0 +-0.0%      222,178,167                104ns +-2.6%    |         ~5   14.5ms   9.01ms |     20.7s        1.12       4    12
-                           |           14.5 +-0.2%          43.1s +-3.1%               100 / 0 +-0.0%      222,178,167                194ns +-3.1%    |          6   23.5ms   12.0ms |     31.6s        1.37       4    12
-                           |           +9.0 +-0.2pp          +86 +-5.5%                     =                       =                  +86 +-5.5%    |       +33%     +62%     +33% |      +52%        +22%       =     =
-merge                      |           14.2 +-0.2%          59.0s +-2.1%               100 / 0 +-0.0%      199,138,728                296ns +-2.1%    |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
-                           |           20.1 +-0.5%          59.7s +-3.3%               100 / 0 +-0.0%      199,138,728                300ns +-3.3%    |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
-                           |           +5.9 +-0.4pp          +1.1 +-3.2%                    =                       =                  +1.1 +-3.2%   |       -56%     -66%     -22% |      -12%        +15%       =     =
+dependencies               |          5.58% +-0.1pp        23.2s +-2.6%                     222,178,167                 104ns +-2.6% |         ~5   14.5ms   9.01ms |     20.7s        1.12       4    12
+                           |          14.5% +-0.2pp        43.1s +-3.1%                     222,178,167                 194ns +-3.1% |          6   23.5ms   12.0ms |     31.6s        1.37       4    12
+                           |           +8.7..+9.2pp           +80..+91%                 =             =                    +80..+91% |       +33%     +62%     +33% |      +52%        +22%       =     =
+merge                      |          14.2% +-0.2pp        59.0s +-2.1%                     199,138,728                 296ns +-2.1% |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
+                           |          20.1% +-0.5pp        59.7s +-3.3%                     199,138,728                 300ns +-3.3% |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
+                           |           +5.5..+6.4pp         -2.1..+4.3%                 =             =                  -2.1..+4.3% |       -56%     -66%     -22% |      -12%        +15%       =     =
 ```
 
 A diff has everything a report has, with the same names and forms. A row is three lines: before, after,
@@ -393,12 +397,10 @@ and the change, so a diff is as wide as a report and every number sits above the
 `Cores`, `Sampling` and `Sampled` are a line per side, `slowest:` is before's list and then after's,
 and a note under a table that only one side has names it.
 
-- **The change** is a percentage, `pp` for what is itself a percentage, and `=` for no change. Its `+-`
-  is in the change's own unit, written once at the right: `-22 +-2.2%` is between -24.2% and -19.8%,
-  `+5.3 +-0.6pp` between +4.7 and +5.9 pp.
-- **The `+-` is all that is said about how sure a change is.** `-22 +-2.2%` is a change; `+1.1 +-3.2%`,
-  whose `+-` is larger than the change, could go either way, and more runs would narrow it. No mark
-  judges a change on top of that.
+- **The change is always a range**, the ends of its 95% interval: `-24..-20%` is between 20 and 24%
+  less, `+4.7..+5.9pp` for what is itself a percentage, `=` for no change. A decrease stops at -100%.
+  The range is all that is said about how sure a change is: `-2.1..+4.3%`, across zero, could go
+  either way, and more runs would narrow it.
 - **Calls and Executions are the check.** `=` means both sides did the same work, so a change in
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was
@@ -414,7 +416,7 @@ Every report ends with a short legend:
 ```
 HOW TO READ THIS
   thread-time is sampled and summed across threads over ACTIVE time, NOT CPU
-  runnable/waiting splits the thread-time beside it; runnable is NOT the same as working
+  waiting is a part of the thread-time beside it, NOT added to it
   concurrency is threads INSIDE at once, running or parked - not a speedup
   a share is where time went, NOT what removing the operation would save
   full notes: docs/output.md

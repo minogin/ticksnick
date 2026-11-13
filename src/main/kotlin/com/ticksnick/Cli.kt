@@ -11,7 +11,7 @@ internal const val USAGE = "usage: [--unicode] render <folder> | [--unicode] dif
  *
  * ```
  * ./gradlew :cli --args="render profiles/presized"                # every run in the folder, with intervals
- * ./gradlew :cli --args="diff profiles/naive profiles/presized"   # before, after: the change +- 95%
+ * ./gradlew :cli --args="diff profiles/naive profiles/presized"   # before, after: the change as its 95% range
  * java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli diff profiles/naive profiles/presized
  * ```
  *

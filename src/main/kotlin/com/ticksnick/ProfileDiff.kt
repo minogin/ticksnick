@@ -5,7 +5,7 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.sqrt
 
-/** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative. */
+/** The header lines, wall, active, paused and the root row: before -> after, the change as a range, absolute and relative. */
 internal val RUNS_DIFF_HEADER: String get() = "%7s ${sym.arrow} %-7s  %-22s %-16s %s"
 
 /** A change from [before] to [after] as a fraction of [before]: the one rule for it. NaN from 0, which no fraction describes. */
@@ -44,17 +44,6 @@ internal fun signedPercent(f: Double): String {
 }
 
 /**
- * A change's interval, in points of the change, with the change's [unit]: `+-2.2 pp` for a share's,
- * `+-119%` for a relative one. Written after the change without its unit, `-22 +-119%`, so the unit is
- * said once. Nothing where there is none.
- */
-internal fun pointsHalf(points: Double, unit: String): String = when {
-    points.isNaN() -> ""
-    points < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%s", points, unit)
-    else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%s", points, unit)
-}
-
-/**
  * [before] -> [after] as text. The banner of each side's failed runs leads; a side whose runs all failed
  * has no profile, so the diff is the banners and nothing else.
  */
@@ -85,7 +74,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, emptyList(), "Operation", FINE_NAME_WIDTH, null)
     private val width = maxOf(coarseText.width, fineText.width)
 
-    private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change ${sym.plusMinus} 95%" else ""
+    private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
     private fun Profile.active() = Estimate(runs.map { it.activeNanos.toDouble() })
@@ -96,11 +85,14 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     private fun header(key: String, b: Estimate, a: Estimate, suffix: String = ""): String {
         val c = Change(b, a)
         val sign = if (c.delta < 0) "-" else "+"
-        val absolute = if (c.half.isNaN()) sign + duration(abs(c.delta)) else durationPlusMinus(c.delta, c.half, signed = true)
-        // The change without its unit, the interval with it: `-27 +-67%`. The interval is the whole of what is said about
-        // how sure the change is: no mark judges it.
-        val relative = if (c.relativeHalf.isNaN()) signedPercent(c.relative)
-        else signedPercent(c.relative).removeSuffix("%") + " " + pointsHalf(c.relativeHalf * 100, "%")
+        // A change is always a range, the interval's own ends, in time and in percent: `-5.65..-3.65s  -42..-27%`.
+        val ranged = sureness(c.delta, c.half, change = true) == Sure.RANGE
+        val absolute = if (ranged) durationRange(c.delta - c.half, c.delta + c.half, signed = true) else sign + duration(abs(c.delta))
+        val r = c.relative * 100
+        val h = c.relativeHalf * 100
+        fun signed(x: Double) = (if (abs(x) < 9.95) String.format(Locale.ROOT, "%+.1f", x) else String.format(Locale.ROOT, "%+.0f", x))
+            .let { if (it.drop(1).trimEnd('0', '.').isEmpty()) it.drop(1) else it }
+        val relative = if (sureness(r, h, change = true) == Sure.RANGE) signed(maxOf(-100.0, r - h)) + ".." + signed(r + h) + "%" else signedPercent(c.relative)
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 
@@ -112,7 +104,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val rootName = (after.root() ?: before.root())?.name
         warningsSection(warnings(rootName))
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
-        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change ${sym.plusMinus} its 95% interval (Welch's t)"))
+        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change the range of its 95% interval (Welch's t)"))
         with(before) { runList("before") }
         with(after) { runList("after", header = false) }
         appendLine(header("Wall time", before.wallTime(), after.wallTime()))

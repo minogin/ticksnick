@@ -19,6 +19,9 @@ internal const val INTERVAL_COLUMN = 8
  */
 internal const val UNKNOWN = "?"
 
+/** The share of its figure an interval may be with the figure still written `±`: past it, a range. */
+internal const val CERTAIN = 0.20
+
 /**
  * `% parent`'s name in the block under the coarse table: an operation there is over all its parents, so its share
  * is of the root's Wall, which the tree's Wall is already a part of.
@@ -27,7 +30,7 @@ internal const val ROOT_SHARE = "% root"
 
 /** How a column's figures read. Text only: a [Row] holds raw values, so that another writer can take them. */
 internal enum class Form(val percentage: Boolean = false) {
-    COUNT, PER_PARENT, WHOLE, ONE_DECIMAL, TWO_DECIMALS, TIME, BYTES, PARENT_SHARE(true), SHARE(true), RUNNABLE_WAITING(true)
+    COUNT, PER_PARENT, WHOLE, ONE_DECIMAL, TWO_DECIMALS, TIME, BYTES, PARENT_SHARE(true), SHARE(true), WAITING(true)
 }
 
 /**
@@ -60,7 +63,7 @@ internal val PARALLEL = Column("Parallel", "Load", Form.ONE_DECIMAL, interval = 
 internal val WALL = Column("Wall", "Load", Form.TIME, interval = true, width = 10)
 internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interval = true, width = 8)
 internal val PAUSED = Column("Paused", "Load", Form.TIME, interval = true, width = 10, zeroIsAbsent = true)
-internal val COARSE_WAITING = Column("Runnable / Waiting", "Load", Form.RUNNABLE_WAITING, interval = true, width = 18)
+internal val COARSE_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
 internal val MEAN = Column("Mean", "Load", Form.TIME, interval = true, width = 10)
 internal val ALLOCATED = Column("Total", "Allocated", Form.BYTES, interval = false, width = 10)
 internal val ALLOCATED_PER_EXECUTION = Column("Per execution", "Allocated", Form.BYTES, interval = false, width = 13)
@@ -76,7 +79,7 @@ internal val COARSE_COLUMNS = listOf(
 
 internal val THREAD_SHARE = Column("Thread-time%", "Load", Form.SHARE, interval = true, width = 14)
 internal val THREAD_TIME = Column("Thread-time", "Load", Form.TIME, interval = true, width = 11)
-internal val FINE_WAITING = Column("Runnable / Waiting", "Load", Form.RUNNABLE_WAITING, interval = true, width = 18)
+internal val FINE_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
 internal val CALLS = Column("Calls", "Load", Form.COUNT, interval = false, width = 13)
 internal val PER_CALL = Column("Thread-time per call", "Load", Form.TIME, interval = true, width = 20)
 // Blank, not unknown, where the long calls are within the noise: the ordinary case, and nothing to look at.
@@ -171,35 +174,70 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
         Form.BYTES -> bytes(v)
         Form.PARENT_SHARE -> parentShareText(v)
         Form.SHARE -> percent(v)
-        Form.RUNNABLE_WAITING -> runnableSplit(v)
+        Form.WAITING -> percent(v * 100)
     }
 }
 
+/** How a figure with an interval is written, by how sure it is. See [sureness]. */
+internal enum class Sure {
+    /** No interval: one run, or runs that agree exactly. The figure alone. */
+    PLAIN,
+    /** The interval at most [CERTAIN] of the figure: `6.34s ±5.0%`, a share `63% ±9.2pp`. */
+    CERTAIN,
+    /** Wider: the interval's own ends, `374..558ms`. A change in a diff is always this. */
+    RANGE,
+    /** As wide as the figure or more, so it would reach 0: [UNKNOWN], measured too little to say. */
+    UNKNOWN,
+}
+
 /**
- * The two halves of an operation's thread-time, as `7.2% / 92.8%`, summing to 100.
- *
- * Printed as a pair because a reader could not tell whether `waiting` was a part of the
- * thread-time beside it or an addition to it, and no unit settles that - seconds against
- * seconds is as ambiguous as a percentage. Two shares that add to the whole are not readable
- * as an addition to it.
- *
- * The left half is **runnable**, which is not *working*: it counts a preempted thread and a
- * thread stopped inside a native call, both of which the JVM reports as `RUNNABLE`. It is an
- * upper bound on the work, and the time-on-CPU block is the only thing that bounds it in turn.
+ * **How sure a figure is: the one rule** for every figure with an interval, in a report and in a diff. [mean] and
+ * [half], the 95% interval's half-width, in the figure's unit. A [change] can be negative and its interval may cross
+ * zero, which is its normal "either way": it is always a range, never `±` and never unknown.
  */
-internal fun runnableSplit(waiting: Double): String =
-    percent((1 - waiting) * 100) + " / " + percent(waiting * 100)
+internal fun sureness(mean: Double, half: Double, change: Boolean = false): Sure = when {
+    half.isNaN() || half == 0.0 -> Sure.PLAIN
+    change -> Sure.RANGE
+    mean != 0.0 && half / abs(mean) <= CERTAIN -> Sure.CERTAIN
+    half >= abs(mean) -> Sure.UNKNOWN
+    else -> Sure.RANGE
+}
+
+/** A share as the rule writes it, without an interval: `63%`, `5.80%`. */
+private fun shareText(c: Column, v: Double): String = if (c.form == Form.PARENT_SHARE) parentShareText(v) else percent(v)
+
+/** `+-9.2pp`, `+-12pp`. */
+private fun pointsText(p: Double): String =
+    if (p < 9.95) String.format(Locale.ROOT, "${sym.plusMinus}%.1fpp", p) else String.format(Locale.ROOT, "${sym.plusMinus}%.0fpp", p)
+
+/** `59..67%`, `0.84..1.13%`: whole percents from 10% up, three digits below, where whole ones would round a range away. */
+private fun shareRange(c: Column, lo: Double, hi: Double): String =
+    if (c.form == Form.PARENT_SHARE && hi >= 10) String.format(Locale.ROOT, "%.0f..%.0f%%", lo, hi) else threeDigits(lo) + ".." + threeDigits(hi) + "%"
+
+/**
+ * **A figure and its interval as a cell writes them**, value text and interval text, by [sureness]. [plain] is the
+ * figure alone as [figureText] gives it; a share's range stops at 100%, and no range goes below 0.
+ */
+internal fun ruledText(c: Column, f: Estimate?, plain: String): Pair<String, String> {
+    if (f == null || f.n < 2 || !c.interval || plain.isEmpty() || plain == UNKNOWN) return plain to ""
+    val scale = if (c.form == Form.WAITING) 100.0 else 1.0
+    val mean = f.mean * scale
+    val half = f.half * scale
+    val share = c.form.percentage
+    return when (sureness(mean, half)) {
+        Sure.PLAIN -> (if (share) shareText(c, mean) else plain) to ""
+        Sure.CERTAIN -> if (share) shareText(c, mean) to pointsText(half) else plain to relativeText(half / abs(mean) * 100)
+        Sure.UNKNOWN -> UNKNOWN to ""
+        Sure.RANGE -> {
+            val lo = maxOf(0.0, mean - half)
+            val hi = if (share) minOf(100.0, mean + half) else mean + half
+            (if (share) shareRange(c, lo, hi) else if (c.form == Form.TIME) durationRange(lo, hi) else plain) to ""
+        }
+    }
+}
 
 /** A share of the parent as the tables print it, in percent. */
 internal fun parentShareText(share: Double): String = if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
-
-/** The `+-` of a figure: `pp` for what is itself a percentage, whose relative interval would read two ways. */
-internal fun intervalText(c: Column, f: Estimate?): String = when {
-    f == null || f.n == 0 || (c.zeroIsAbsent && f.mean == 0.0) -> ""
-    c.form == Form.RUNNABLE_WAITING -> plusMinusPoints(Estimate(f.values.map { it * 100 }))
-    c.form == Form.PARENT_SHARE || c.form == Form.SHARE -> plusMinusPoints(f)
-    else -> plusMinus(f)
-}
 
 /**
  * Where a table's columns fall in text, shared by a report and a diff so that they read the same. Each
@@ -258,8 +296,8 @@ private class Layout(
      * the interval, `57 +-0.3%`, so it is said once; without one it keeps it, `57%`.
      */
     fun cell(c: Column, value: String, interval: String): String {
-        val figure = if (interval.isNotEmpty() && c.form.percentage) value.replace("%", "") else value
-        return if (hasInterval(c)) figure.padStart(c.width) + " " + interval.padEnd(INTERVAL_COLUMN - 1) else figure
+        // Every form right-aligned to the column's one edge: `6.34s ±5.0%`, `422..490ms`, a heading.
+        return if (hasInterval(c)) (if (interval.isEmpty()) value else "$value $interval").padStart(c.width + INTERVAL_COLUMN) else value
     }
 
     /** One line of the table, with nothing after its last figure: no bar closes an empty group. */
@@ -369,7 +407,7 @@ internal class TableText(private val table: Table, heading: String, minName: Int
     }
 
     private fun cells(name: String, r: Row): List<String> =
-        listOf(name) + table.columns.map { layout.cell(it, cellText(it, r, r.own), intervalText(it, r.figures[it])) }
+        listOf(name) + table.columns.map { c -> ruledText(c, r.figures[c], cellText(c, r, r.own)).let { (v, i) -> layout.cell(c, v, i) } }
 
     /** The rows under more than one caller, after the rule, under a heading of their own. */
     fun StringBuilder.shared() {
@@ -483,7 +521,11 @@ internal class DiffText(
     /** Before, after, the change, what is attached to the row on each side, and the rows under it. */
     private fun StringBuilder.row(r: DiffRow, depth: Int, shared: Boolean = false) {
         fun side(name: String, row: Row?, other: Row?) = layout.line(
-            listOf(name) + columns.map { c -> layout.cell(c, sideText(c, row, other, r.own), intervalText(c, row?.figures?.get(c))) }
+            listOf(name) + columns.map { c ->
+                val text = sideText(c, row, other, r.own)
+                val (v, i) = if (text != cellText(c, row, r.own)) text to "" else ruledText(c, row?.figures?.get(c), text)
+                layout.cell(c, v, i)
+            }
         )
         appendLine(side(nameOf(r, depth, shared), r.before, r.after))
         appendLine(side("", r.after, r.before))
@@ -499,8 +541,8 @@ internal class DiffText(
         val b = if (c.largest) change.before.values.max() else change.before.mean
         val a = if (c.largest) change.after.values.max() else change.after.mean
         if (a == b || (!c.interval && figureText(c, change.before, r.own) == figureText(c, change.after, r.own))) return layout.cell(c, "=", "")
-        val share = c.form == Form.PARENT_SHARE || c.form == Form.SHARE || c.form == Form.RUNNABLE_WAITING
-        val scale = if (c.form == Form.RUNNABLE_WAITING) 100.0 else 1.0
+        val share = c.form == Form.PARENT_SHARE || c.form == Form.SHARE || c.form == Form.WAITING
+        val scale = if (c.form == Form.WAITING) 100.0 else 1.0
         // A share that moved by less than it prints is no change, and `+0.0 pp` is not a sign to read.
         if (share && abs((a - b) * scale) < MIN_SHARE_CHANGE) return layout.cell(c, "=", "")
         // From 0 no fraction describes the change: blank, as for a row with nothing to compare.
@@ -509,8 +551,16 @@ internal class DiffText(
         if (!c.interval) return value
         val half = if (share) change.half * scale else change.relativeHalf * 100
         if (half.isNaN()) return layout.cell(c, value, "")
-        // The change without its unit, the interval with it: `-22 +-119%`, `+4.6 +-4.7pp`. No mark judges it.
+        val v = if (share) (a - b) * scale else relativeChange(b, a) * 100
         val unit = if (share) "pp" else "%"
-        return layout.cell(c, value.removeSuffix(unit), pointsHalf(half, unit))
+        // A change is always a range, the interval's own ends, stopping at -100% (sureness: change).
+        if (sureness(v, half, change = true) == Sure.PLAIN) return layout.cell(c, value, "")
+        val lo = if (share) v - half else maxOf(-100.0, v - half)
+        return layout.cell(c, signedText(lo) + ".." + signedText(v + half) + unit, "")
     }
+
+    /** `-30`, `+4.7`: a signed number of a change, three significant digits' worth. */
+    private fun signedText(x: Double): String =
+        (if (abs(x) < 9.95) String.format(Locale.ROOT, "%+.1f", x) else String.format(Locale.ROOT, "%+.0f", x))
+            .let { if (it.drop(1).trimEnd('0', '.').isEmpty()) it.drop(1) else it }
 }

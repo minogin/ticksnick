@@ -97,7 +97,8 @@ class ProfileDiffTest {
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
             // The interval is all that is said about how sure the change is: no mark beside it.
-            assertTrue("11.0s -> 8.00s" in header && Regex("""-27 \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
+            // A change is always a range, the interval's ends, in time and in percent.
+            assertTrue("11.0s -> 8.00s" in header && Regex("""-[0-9.]+\.\.-?[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             assertTrue("?" !in diffRow(text, "same")[2] && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)

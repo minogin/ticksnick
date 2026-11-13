@@ -122,31 +122,12 @@ internal class Estimate(val values: List<Double>) {
     val relative: Double get() = if (mean == 0.0) Double.NaN else half / mean
 }
 
-/**
- * A duration with its interval, the form a header quotes, absolute and relative: `9.15 +-2.59 s (28%)`,
- * the unit once at the right. Just the duration where there is no interval.
- */
-internal fun durationWithInterval(e: Estimate): String =
-    if (e.half.isNaN()) duration(e.mean) else "${durationPlusMinus(e.mean, e.half)} (${plusMinus(e).removePrefix(sym.plusMinus)})"
-
-/**
- * A percentage's interval, in its points, `+-0.3%`: written after the figure without its unit, `57
- * +-0.3%`, so the unit is said once. A relative interval of a percentage would read two ways.
- */
-internal fun plusMinusPoints(e: Estimate): String = when {
-    e.half.isNaN() -> ""
-    e.half < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%%", e.half)
-    else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%%", e.half)
-}
-
-/** `+-2.3%`, `+-12%`, or [UNKNOWN] where there is no interval. */
-internal fun plusMinus(e: Estimate): String {
-    val r = e.relative * 100
-    return when {
-        r.isNaN() -> UNKNOWN
-        r < 9.95 -> String.format(Locale.ROOT, "${sym.plusMinus}%.1f%%", r)
-        else -> String.format(Locale.ROOT, "${sym.plusMinus}%.0f%%", r)
-    }
+/** A duration with its interval, as a header line quotes it, by [sureness]: `6.34s ±5.0%`, `6.02..6.66s`, `?`. */
+internal fun durationWithInterval(e: Estimate): String = when (if (e.n < 2) Sure.PLAIN else sureness(e.mean, e.half)) {
+    Sure.PLAIN -> duration(e.mean)
+    Sure.CERTAIN -> durationCertain(e.mean, e.half)
+    Sure.UNKNOWN -> UNKNOWN
+    Sure.RANGE -> durationRange(maxOf(0.0, e.mean - e.half), e.mean + e.half)
 }
 
 /**
@@ -302,7 +283,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             row(
                 "Runs", if (n == 1) "1 run of '$name', one JVM: no interval"
                 else "$n runs of '$name', one JVM each: every figure below is their mean, " +
-                        "${sym.plusMinus} its 95% interval from how much the runs differ (Student's t, ${Run.plural((n - 1).toLong(), "degree")} of freedom)"
+                        "with its 95% interval from how much the runs differ (Student's t, ${Run.plural((n - 1).toLong(), "degree")} of freedom)"
             )
         )
         warningsSection(warnings)
@@ -598,7 +579,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     /** The widest table, for the rules around a report. */
     internal val pageWidth: Int get() = maxOf(coarseText.width, fineText.width)
 
-    private val overRuns: String get() = if (runs.size > 1) "; each figure the mean of the runs ${sym.plusMinus} 95%" else ""
+    private val overRuns: String get() = if (runs.size > 1) "; each figure the mean of the runs, with its 95% interval" else ""
 
     /**
      * The coarse table with its keys, each once and next to the rows that need it.

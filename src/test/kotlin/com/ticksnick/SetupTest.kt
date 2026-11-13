@@ -188,7 +188,7 @@ class SetupTest {
         save(dir, "b", run(setup = setup("18 GB", "1@1")))
         save(dir, "c", run(setup = setup("18 GB", "2@2")))
         val text = Profile.load(dir).render()
-        assertTrue("  Runs: 2 of 3 shared a JVM - the +- is too narrow; give each run its own JVM" in text, text)
+        assertTrue("  Runs: 2 of 3 shared a JVM - every interval is too narrow; give each run its own JVM" in text, text)
     }
 
     @Test

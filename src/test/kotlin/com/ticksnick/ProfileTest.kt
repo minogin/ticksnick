@@ -17,12 +17,29 @@ class ProfileTest {
         val e = Estimate(listOf(6.08, 6.50, 7.16))
         assertEquals(6.58, e.mean, 1e-9)
         assertTrue(abs(e.half - 1.35) < 0.01, "half-width ${e.half}")
-        assertEquals("+-21%", plusMinus(e))
         assertTrue(Estimate(listOf(6.08)).half.isNaN(), "one run has no interval")
-        assertEquals("?", plusMinus(Estimate(listOf(6.08))))
         assertEquals(2.0395, t95(31), 1e-4)
         assertEquals(1.9840, t95(100), 1e-4)
         assertTrue(t95(30) > t95(31) && t95(31) > t95(100) && t95(100) > 1.96)
+    }
+
+    /**
+     * The one rule: `±` up to 20% of the figure, the interval's ends past it, `?` from 100%, the figure alone with no
+     * interval; a change always a range. Three runs each, worked by hand: 422, 486, 490ms is 466 ±94.8ms.
+     */
+    @Test
+    fun `a figure is written by how sure it is`() {
+        assertEquals(Sure.CERTAIN, sureness(6.34, 0.32))
+        assertEquals(Sure.RANGE, sureness(466.0, 94.8))
+        assertEquals(Sure.UNKNOWN, sureness(173.0, 617.0))
+        assertEquals(Sure.PLAIN, sureness(6.08, Double.NaN))
+        assertEquals(Sure.RANGE, sureness(-24.0, 6.0, change = true), "a change is always a range")
+        assertEquals(Sure.RANGE, sureness(2.4, 15.0, change = true), "and crossing zero is not unknown")
+
+        assertEquals("6.34s +-5.0%", durationWithInterval(Estimate(listOf(6.20e9, 6.37e9, 6.45e9))))
+        assertEquals("371..561ms", durationWithInterval(Estimate(listOf(422e6, 486e6, 490e6))))
+        assertEquals("?", durationWithInterval(Estimate(listOf(56.1e6, 4.39e6, 458e6))), "the interval reaches 0")
+        assertEquals("6.08s", durationWithInterval(Estimate(listOf(6.08e9))), "one run: the figure alone")
     }
 
     @Test
@@ -43,10 +60,11 @@ class ProfileTest {
             assertTrue("runBatch, each execution" in text, text)
             assertTrue("6.22s  5.96s  5.90s" in text, "the first run's batches, in order: $text")
             val row = text.lines().first { it.startsWith("runBatch") }
-            // The runs' mean batches are 6.03, 6.50 and 7.16 s: 6.56 s.
-            assertTrue("6.56 +-" in row, row)
+            // The runs' mean batches are 6.03, 6.50 and 7.16 s: 6.56 s, ±1.41 s with three runs, 21%: a range.
+            assertTrue("5.15..7.97s" in row, row)
             assertTrue(text.lines().any { it.trim().startsWith("rare (1 of 3 runs)") }, text)
-            assertTrue(Regex("""runBatch +6.56 \+-[0-9.]+s \([0-9.]+%\) per execution""").containsMatchIn(text), "the batch, quotable: $text")
+            // Over 20% of the figure with three runs: the interval's own ends.
+            assertTrue(Regex("""runBatch +[0-9.]+\.\.[0-9.]+s per execution""").containsMatchIn(text), "the batch, quotable: $text")
             assertTrue("WARNINGS" !in text, "nothing to warn about: $text")
         } finally {
             dir.toFile().deleteRecursively()

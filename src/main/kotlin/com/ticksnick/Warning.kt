@@ -126,7 +126,7 @@ internal enum class Kind(val text: (List<String>) -> String) {
 
     // The runs of a profile together.
     ONE_RUN({ g -> "Runs: 1 in '${g[0]}', no interval${sym.dash}shares hold, durations need a second run" }),
-    RUNS_ONE_JVM({ g -> "Runs${g[0]}: ${g[1]} of ${g[2]} shared a JVM${sym.dash}the ${sym.plusMinus} is too narrow; give each run its own JVM" }),
+    RUNS_ONE_JVM({ g -> "Runs${g[0]}: ${g[1]} of ${g[2]} shared a JVM${sym.dash}every interval is too narrow; give each run its own JVM" }),
     RUNS_MIXED({ g ->
         "Runs${g[0]}: they differ in ${g[1]}, so each mean mixes them${sym.dash}split the folder by them; the run list shows which run has what"
     }),

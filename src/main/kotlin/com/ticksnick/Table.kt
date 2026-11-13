@@ -77,8 +77,8 @@ internal val COARSE_COLUMNS = listOf(
     P50, P90, P99, MAX,
 )
 
-internal val THREAD_SHARE = Column("Thread-time%", "Load", Form.SHARE, interval = true, width = 14)
-internal val THREAD_TIME = Column("Thread-time", "Load", Form.TIME, interval = true, width = 11)
+internal val THREAD_SHARE = Column("Thread-time%", "Load", Form.SHARE, interval = true, width = 12)
+internal val THREAD_TIME = Column("Thread-time", "Load", Form.TIME, interval = true, width = 13)
 internal val FINE_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
 internal val CALLS = Column("Calls", "Load", Form.COUNT, interval = false, width = 13)
 internal val PER_CALL = Column("Thread-time per call", "Load", Form.TIME, interval = true, width = 20)
@@ -92,7 +92,7 @@ internal val WORKERS = Column("Workers", "Spread", Form.WHOLE, interval = false,
 internal val POOL = Column("Pool", "Spread", Form.WHOLE, interval = false, width = 5)
 
 internal val FINE_COLUMNS = listOf(
-    THREAD_SHARE, THREAD_TIME, FINE_WAITING, CALLS, PER_CALL, LONG_CALLS, LONG_TIME, LONGEST, WALL_TIME, CONCURRENCY, WORKERS, POOL,
+    THREAD_TIME, THREAD_SHARE, FINE_WAITING, CALLS, PER_CALL, LONG_CALLS, LONG_TIME, LONGEST, WALL_TIME, CONCURRENCY, WORKERS, POOL,
 )
 
 /** An operation the sampler never caught, with the most calls any run made of it. */

@@ -241,14 +241,14 @@ longest executions on that path, with their keys.
 ```
 COARSE AND FINE OPERATIONS - own time, out of 104s active time
                            |                                  Load                                   |             Long             |               Spread
-Operation                  | Thread-time% v Thread-time   Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+Operation                  | Thread-time v Thread-time%   Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+-------------------------------------------------------------------------+------------------------------+------------------------------------
-onCentral                  |          28.1%        117s             569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
-runBatch *                 |          18.8%       77.8s     99.8%             3                25.9s |                              |     77.8s        1.00       2     1
-merge                      |          14.1%       58.4s             199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
-visit                      |          14.0%       58.2s             562,928,865                103ns |                              |     43.5s        1.34       4    12
-(no operation)             |          6.37%       26.4s    0.950%
-passedOn                   |          6.00%       24.9s             222,178,167                112ns |                              |     21.9s        1.14       4    12
+onCentral                  |          117s        28.1%             569,233,860                205ns |          8   10.0ms   2.00ms |     65.5s        1.78       4    12
+runBatch *                 |         77.8s        18.8%     99.8%             3                25.9s |                              |     77.8s        1.00       2     1
+merge                      |         58.4s        14.1%             199,138,728                293ns |          5   7.01ms   2.00ms |     43.1s        1.36       4    12
+visit                      |         58.2s        14.0%             562,928,865                103ns |                              |     43.5s        1.34       4    12
+(no operation)             |         26.4s        6.37%    0.950%
+passedOn                   |         24.9s        6.00%             222,178,167                112ns |                              |     21.9s        1.14       4    12
 ```
 
 One row per label, across the whole run, in its **own** time: time inside it and inside no label
@@ -257,9 +257,9 @@ above. `(no operation)` is time on profiled threads under no label.
 
 **Load** - what the time went to.
 
-- **Thread-time%** and **Thread-time** - the same figure as a share of all samples and as seconds,
-  summed across threads. It is time inside the label, running or waiting, not CPU time. The share
-  is of active time; compare the seconds between runs.
+- **Thread-time** and **Thread-time%** - the same figure in seconds, summed across threads, and as a
+  share of all samples. It is time inside the label, running or waiting, not CPU time. The share
+  is of active time; compare the seconds between runs. The table is sorted by the seconds.
 - **Waiting** - the part of that thread-time whose thread was parked, blocked or waiting, not added
   to it; blank where nothing waited. The rest could run, which is an upper bound on work: a thread
   waiting for a core, or inside a native call, also reads runnable.
@@ -379,17 +379,17 @@ Coarse operation                             |  Executions Per parent Parallel  
 
 COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
                            |                                                  Load                                                   |             Long             |               Spread
-Operation                  |           Thread-time%         Thread-time           Waiting         Calls         Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+Operation                  |           Thread-time         Thread-time%           Waiting         Calls         Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+---------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------
-onCentral (4 -> 0 runs)    |          28.3% +-0.3pp         118s +-1.6%                     569,233,860                 207ns +-1.6% |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
+onCentral (4 -> 0 runs)    |           118s +-1.6%        28.3% +-0.3pp                     569,233,860                 207ns +-1.6% |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
 
 
-dependencies               |          5.58% +-0.1pp        23.2s +-2.6%                     222,178,167                 104ns +-2.6% |         ~5   14.5ms   9.01ms |     20.7s        1.12       4    12
-                           |          14.5% +-0.2pp        43.1s +-3.1%                     222,178,167                 194ns +-3.1% |          6   23.5ms   12.0ms |     31.6s        1.37       4    12
-                           |           +8.7..+9.2pp           +80..+91%                 =             =                    +80..+91% |       +33%     +62%     +33% |      +52%        +22%       =     =
-merge                      |          14.2% +-0.2pp        59.0s +-2.1%                     199,138,728                 296ns +-2.1% |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
-                           |          20.1% +-0.5pp        59.7s +-3.3%                     199,138,728                 300ns +-3.3% |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
-                           |           +5.5..+6.4pp         -2.1..+4.3%                 =             =                  -2.1..+4.3% |       -56%     -66%     -22% |      -12%        +15%       =     =
+dependencies               |          23.2s +-2.6%        5.58% +-0.1pp                     222,178,167                 104ns +-2.6% |         ~5   14.5ms   9.01ms |     20.7s        1.12       4    12
+                           |          43.1s +-3.1%        14.5% +-0.2pp                     222,178,167                 194ns +-3.1% |          6   23.5ms   12.0ms |     31.6s        1.37       4    12
+                           |             +80..+91%         +8.7..+9.2pp                 =             =                    +80..+91% |       +33%     +62%     +33% |      +52%        +22%       =     =
+merge                      |          59.0s +-2.1%        14.2% +-0.2pp                     199,138,728                 296ns +-2.1% |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
+                           |          59.7s +-3.3%        20.1% +-0.5pp                     199,138,728                 300ns +-3.3% |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
+                           |           -2.1..+4.3%         +5.5..+6.4pp                 =             =                  -2.1..+4.3% |       -56%     -66%     -22% |      -12%        +15%       =     =
 ```
 
 A diff has everything a report has, with the same names and forms. A row is three lines: before, after,

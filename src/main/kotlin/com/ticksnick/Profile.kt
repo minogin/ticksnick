@@ -567,7 +567,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             )
         }
         Table(
-            FINE_COLUMNS, table.sortedByDescending { it.figures[THREAD_SHARE]!!.mean }, runs.size, THREAD_SHARE,
+            FINE_COLUMNS, table.sortedByDescending { it.figures[THREAD_TIME]!!.mean }, runs.size, THREAD_TIME,
             contained = contained.sortedByDescending { l -> inRuns(l).sumOf { it.inclusiveHits } }.map { inRuns(it).first().name },
             folded = unseen.map { l -> inRuns(l).let { r -> Unsampled(r.first().name, r.first().coarse, r.maxOf { it.calls }) } },
         )

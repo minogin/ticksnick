@@ -30,6 +30,11 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - **`Waiting` replaces `Runnable / Waiting`**: the part of a row's time spent waiting, blank where
   nothing waited. Runnable was 100% less it.
 
+### The fine table
+
+- `Thread-time` comes first and `Thread-time%` second, in a report and a diff, and a report is sorted by
+  `Thread-time`: a diff is read by how much time changed. In one run the two sort the same.
+
 ### The coarse table
 
 - `Under multiple parents` has a heading of its own, in the table's places, naming only the columns it

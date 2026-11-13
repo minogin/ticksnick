@@ -8,13 +8,6 @@ import kotlin.math.sqrt
 /** The header lines, wall, active, paused and the root row: before -> after, the change +- 95% absolute and relative. */
 internal val RUNS_DIFF_HEADER: String get() = "%7s ${sym.arrow} %-7s  %-22s %-16s %s"
 
-/** The chance a diff may run of showing one false change, across all of it. */
-internal const val FALSE_CHANGE = 0.05
-
-/** Under a diff's table that has a change marked `?`: what it means, and what to do about it. */
-internal const val NOISE_NOTE = "  ? the change could be noise: the runs differ too much to tell, given how many changes this diff shows; " +
-        "more runs of each profile can settle it"
-
 /** A change from [before] to [after] as a fraction of [before]: the one rule for it. NaN from 0, which no fraction describes. */
 internal fun relativeChange(before: Double, after: Double): Double = if (before == 0.0) Double.NaN else (after - before) / before
 
@@ -40,21 +33,6 @@ internal class Change(val before: Estimate, val after: Estimate) {
 
     val relative: Double get() = relativeChange(before.mean, after.mean)
     val relativeHalf: Double get() = if (before.mean == 0.0) Double.NaN else half / before.mean
-
-    /**
-     * **Whether this change could be noise, in a diff of [changes] changes.** A 95% interval misses
-     * zero one time in twenty when nothing changed, so a diff of 80 of them would show four changes
-     * that are not there, looking much like `+10% +-9 pp`. So each is held to 5% divided by [changes]
-     * (Bonferroni), and the whole diff has about a 5% chance of showing one false change. Changes that
-     * move together, as Wall and Mean do, make it cautious.
-     *
-     * This asks whether the change is real. How well its size is known is the `+-`, whatever this says.
-     */
-    fun isNoise(changes: Int): Boolean {
-        if (half.isNaN() || delta.isNaN() || delta == 0.0) return false
-        if (a + b == 0.0) return false
-        return studentTail(abs(delta) / sqrt(a + b), degrees) > FALSE_CHANGE / changes
-    }
 }
 
 /** A fraction as a signed percentage, `-21%`, `+2.4%`. */
@@ -103,19 +81,10 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         abs(time(r.after) - time(r.before))
     }
 
-    /** How many changes this diff shows with an interval, in either table. See [Change.isNoise]. */
-    private val changes: Int by lazy {
-        fun count(r: DiffRow, columns: List<Column>): Int =
-            columns.count { c -> c.interval && r.change(c)?.half?.isNaN() == false } + r.children.sumOf { count(it, columns) }
-        ((coarseRows + sharedRows).sumOf { count(it, COARSE_COLUMNS) } + fineRows.sumOf { count(it, FINE_COLUMNS) }).coerceAtLeast(1)
-    }
-
-    private val coarseText = DiffText(before.coarseTable, after.coarseTable, coarseRows, sharedRows, "Coarse operation", COARSE_NAME_WIDTH, WALL) { it.isNoise(changes) }
-    private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, emptyList(), "Operation", FINE_NAME_WIDTH, null) { it.isNoise(changes) }
+    private val coarseText = DiffText(before.coarseTable, after.coarseTable, coarseRows, sharedRows, "Coarse operation", COARSE_NAME_WIDTH, WALL)
+    private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, emptyList(), "Operation", FINE_NAME_WIDTH, null)
     private val width = maxOf(coarseText.width, fineText.width)
 
-    /** Whether a header line printed a `?`, which no table's note may be there to explain. */
-    private var headerNoise = false
     private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change ${sym.plusMinus} 95%" else ""
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
@@ -128,10 +97,10 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val c = Change(b, a)
         val sign = if (c.delta < 0) "-" else "+"
         val absolute = if (c.half.isNaN()) sign + duration(abs(c.delta)) else durationPlusMinus(c.delta, c.half, signed = true)
-        headerNoise = headerNoise || c.isNoise(changes)
-        // The change without its unit and with its `?`, the interval with the unit: `-27? +-67%`.
+        // The change without its unit, the interval with it: `-27 +-67%`. The interval is the whole of what is said about
+        // how sure the change is: no mark judges it.
         val relative = if (c.relativeHalf.isNaN()) signedPercent(c.relative)
-        else signedPercent(c.relative).removeSuffix("%") + (if (c.isNoise(changes)) "?" else "") + " " + pointsHalf(c.relativeHalf * 100, "%")
+        else signedPercent(c.relative).removeSuffix("%") + " " + pointsHalf(c.relativeHalf * 100, "%")
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 
@@ -168,15 +137,12 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
                 appendLine(SHARED_HEADING)
                 with(coarseText) { shared() }
             }
-            if (coarseText.anyNoise) appendLine(NOISE_NOTE)
             perSide(before.coarseKeys(), after.coarseKeys())
         }
         appendLine()
         appendLine("COARSE AND FINE OPERATIONS${sym.dash}own thread-time, matched by name, sorted by the change$overRuns")
         with(fineText) { rows() }
-        if (fineText.anyNoise) appendLine(NOISE_NOTE)
         perSide(before.fineNotes(), after.fineNotes())
-        if (headerNoise && !coarseText.anyNoise && !fineText.anyNoise) appendLine(NOISE_NOTE)
         appendLine()
         bothSides("Sampled", before.sampledText(), after.sampledText())
         appendLine("-".repeat(width))

@@ -11,7 +11,7 @@ TickSnick prints three kinds of report:
 too little of to say: a p90 with under 10 executions, a label never sampled where it was called. More
 runs, more executions or another setup would give it. A blank cell has nothing to look at: the
 column's usual value (`Per parent` 1, `Paused` 0) or a column that does not apply to the row. A 0 is
-a measured nothing. After a change in a diff, `?` means the change could be noise.
+a measured nothing.
 
 The examples come from a program that resolves Java classpaths over the Maven Central dependency
 graph. It runs on four threads in three batches of about 27 s each. Its coarse labels are `runBatch`,
@@ -371,7 +371,7 @@ Coarse operation                             |  Executions Per parent Parallel  
 ---------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
       select                                 |     278,001                          42.5s +-1.1%          52 +-0.4%         4.01s +-9.1%               100 / 0 +-0.0%         611us +-1.1%    |     62.8us     1.28ms     11.7ms      348ms
                                              |     278,001                          33.1s +-2.9%          57 +-0.6%         3.70s +-8.0%               100 / 0 +-0.0%         475us +-2.9%    |     49.9us      995us     8.75ms      190ms
-                                             |           =          =                 -22 +-2.2%        +5.3 +-0.6pp        -7.7? +-9.5%                    =                  -22 +-2.2%    |       -21%       -22%       -25%       -45%
+                                             |           =          =                 -22 +-2.2%        +5.3 +-0.6pp         -7.7 +-9.5%                    =                  -22 +-2.2%    |       -21%       -22%       -25%       -45%
 
 COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change +- 95%
                            |                                                           Load                                                           |             Long             |               Spread
@@ -385,7 +385,7 @@ dependencies               |           5.58 +-0.1%          23.2s +-2.6%        
                            |           +9.0 +-0.2pp          +86 +-5.5%                     =                       =                  +86 +-5.5%    |       +33%     +62%     +33% |      +52%        +22%       =     =
 merge                      |           14.2 +-0.2%          59.0s +-2.1%               100 / 0 +-0.0%      199,138,728                296ns +-2.1%    |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
                            |           20.1 +-0.5%          59.7s +-3.3%               100 / 0 +-0.0%      199,138,728                300ns +-3.3%    |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
-                           |           +5.9 +-0.4pp         +1.1? +-3.2%                    =                       =                 +1.1? +-3.2%   |       -56%     -66%     -22% |      -12%        +15%       =     =
+                           |           +5.9 +-0.4pp          +1.1 +-3.2%                    =                       =                  +1.1 +-3.2%   |       -56%     -66%     -22% |      -12%        +15%       =     =
 ```
 
 A diff has everything a report has, with the same names and forms. A row is three lines: before, after,
@@ -396,18 +396,14 @@ and a note under a table that only one side has names it.
 - **The change** is a percentage, `pp` for what is itself a percentage, and `=` for no change. Its `+-`
   is in the change's own unit, written once at the right: `-22 +-2.2%` is between -24.2% and -19.8%,
   `+5.3 +-0.6pp` between +4.7 and +5.9 pp.
-- **`?` at the end of a change means it could be noise:** the runs differ too much to tell, given how many
-  changes the diff shows. A 95% interval misses zero one time in twenty when nothing changed, so a
-  diff of 80 such changes would show four that are not there. So each change is held to 5% divided by
-  the number of changes with an interval (Bonferroni), and the whole diff has about a 5% chance of
-  showing one false change. `?` does not mean no change: more runs can settle it. No `?` does not mean
-  the size is precise: that is what the `+-` says. The note under the table repeats the first part, and
-  prints too when the only `?` is on a line over the tables.
+- **The `+-` is all that is said about how sure a change is.** `-22 +-2.2%` is a change; `+1.1 +-3.2%`,
+  whose `+-` is larger than the change, could go either way, and more runs would narrow it. No mark
+  judges a change on top of that.
 - **Calls and Executions are the check.** `=` means both sides did the same work, so a change in
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was
   removed.
-- **One run on a side** gives the change with no interval and no `?`, and a warning says so.
+- **One run on a side** gives the change with no interval, and a warning says so.
 - **`CPU clock`** under the header is each side's mean. When the two differ, a warning says by how
   much: times are then not comparable, while shares still are.
 

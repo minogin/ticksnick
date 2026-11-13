@@ -2,12 +2,8 @@ package com.ticksnick
 
 import java.nio.file.Path
 import java.util.Locale
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.atan
-import kotlin.math.cos
 import kotlin.math.pow
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
@@ -20,23 +16,6 @@ private val T95 = doubleArrayOf(
     2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
     2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
 )
-/**
- * The chance of a t this far from 0 or further, on either side, with [df] degrees of freedom: Student's
- * t by its closed form for whole degrees of freedom (Abramowitz and Stegun 26.7.3, 26.7.4).
- */
-internal fun studentTail(t: Double, df: Int): Double {
-    val theta = atan(abs(t) / sqrt(df.toDouble()))
-    val cos2 = cos(theta) * cos(theta)
-    var term = if (df % 2 == 1) cos(theta) else 1.0
-    var sum = if (df == 1) 0.0 else term
-    for (k in (if (df % 2 == 1) 3 else 2)..(df - 2) step 2) {
-        term *= (k - 1.0) / k * cos2
-        sum += term
-    }
-    val inside = if (df % 2 == 1) 2 / PI * (theta + sin(theta) * sum) else sin(theta) * sum
-    return (1 - inside).coerceAtLeast(0.0)
-}
-
 /** The normal distribution's two-sided 95% point: where t goes as the degrees of freedom grow. */
 private const val Z95 = 1.959964
 

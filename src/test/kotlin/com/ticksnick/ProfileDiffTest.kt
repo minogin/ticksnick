@@ -22,35 +22,6 @@ class ProfileDiffTest {
         assertTrue(abs(c.half - 2.776 * Math.sqrt(2.0 / 3)) < 1e-9, "half-width ${c.half}")
         val one = Change(before, Estimate(listOf(8.0)))
         assertTrue(one.half.isNaN(), "one run on a side has no interval")
-        assertTrue(!one.isNoise(1), "no interval, nothing to say")
-    }
-
-    /** Values from a table of Student's t. */
-    @Test
-    fun `the tail of Student's t`() {
-        assertEquals(0.05, studentTail(12.706, 1), 1e-4)
-        assertEquals(0.05, studentTail(4.303, 2), 1e-4)
-        assertEquals(0.05, studentTail(3.182, 3), 1e-4)
-        assertEquals(0.05, studentTail(2.447, 6), 1e-4)
-        assertEquals(0.05, studentTail(2.228, 10), 1e-4)
-        assertEquals(0.05 / 80, studentTail(6.51, 6), 1e-5)
-        assertEquals(1.0, studentTail(0.0, 6), 1e-12)
-    }
-
-    /**
-     * 10, 11, 12 against 7, 8, 9: -3 +- 2.27, clear of 0, t 3.67 with 4 degrees of freedom, which is
-     * one chance in 47. Enough for one change, and not for 80 of them, where it would be held to one
-     * in 1,600. Against 8, 9, 10 the interval itself includes 0.
-     */
-    @Test
-    fun `a change could be noise by how many changes the diff shows`() {
-        val before = Estimate(listOf(10.0, 11.0, 12.0))
-        val clear = Change(before, Estimate(listOf(7.0, 8.0, 9.0)))
-        assertTrue(!clear.isNoise(1))
-        assertTrue(clear.isNoise(80))
-        assertTrue(Change(before, Estimate(listOf(8.0, 9.0, 10.0))).isNoise(1))
-        assertTrue(!Change(before, Estimate(listOf(1.0, 2.0, 3.0))).isNoise(80), "far beyond the spread")
-        assertTrue(Change(before, Estimate(listOf(13.0, 14.0, 15.0))).isNoise(80), "up as well as down")
     }
 
     /**
@@ -72,8 +43,7 @@ class ProfileDiffTest {
         assertEquals(12.706, Estimate(listOf(1.0, 3.0)).half, 1e-9)
         val flat = Estimate(listOf(5.0, 5.0, 5.0))
         assertEquals(0.0, flat.half)
-        assertTrue(!Change(flat, Estimate(listOf(4.0, 4.0, 4.0))).isNoise(80), "no spread at all: a change is a change")
-        assertTrue(!Change(flat, Estimate(listOf(5.0, 5.0, 5.0))).isNoise(80), "and no change is none")
+        assertEquals(0.0, Change(flat, Estimate(listOf(4.0, 4.0, 4.0))).half, "no spread at all: a change is a change, exactly")
         // One side flat: all of the spread is the other's, df 2.
         assertEquals(4.303 * Math.sqrt(1.0 / 3), Change(flat, Estimate(listOf(4.0, 5.0, 6.0))).half, 1e-9)
     }
@@ -126,9 +96,10 @@ class ProfileDiffTest {
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
-            assertTrue("11.0s -> 8.00s" in header && Regex("""-27\? \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
+            // The interval is all that is said about how sure the change is: no mark beside it.
+            assertTrue("11.0s -> 8.00s" in header && Regex("""-27 \+-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
-            assertTrue("?" in diffRow(text, "same")[2] && NOISE_NOTE in text, text)
+            assertTrue("?" !in diffRow(text, "same")[2] && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)
         } finally {
             dir.toFile().deleteRecursively()
@@ -327,24 +298,6 @@ class ProfileDiffTest {
     }
 
     /** A `?` on a line over the tables, with none in them, still has its key. */
-    @Test
-    fun `a header line with a question mark has the note`() {
-        val dir = Files.createTempDirectory("ticksnick")
-        try {
-            val before = dir.resolve("before").also { Files.createDirectories(it) }
-            val after = dir.resolve("after").also { Files.createDirectories(it) }
-            fun spans(folder: Path, vararg nanos: Long) = nanos.forEachIndexed { i, span ->
-                RunStore.save(profile(emptyList(), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
-            }
-            spans(before, 1_000_000_000, 1_200_000_000)
-            spans(after, 1_050_000_000, 1_250_000_000)
-            val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
-            assertTrue("?" in text.lines().first { it.startsWith("Wall time") }, text)
-            assertTrue(NOISE_NOTE in text, text)
-        } finally {
-            dir.toFile().deleteRecursively()
-        }
-    }
 
     private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
         RunStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))

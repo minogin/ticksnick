@@ -15,7 +15,7 @@ internal const val INTERVAL_COLUMN = 8
 /**
  * A figure TickSnick could not measure, or measured too little of to say: never 0, which is a measured
  * nothing. A blank, by contrast, has nothing to look at: the column's default, or a column that does not
- * apply to the row. After a change in a diff, `?` says the same thing: whether the change is real.
+ * apply to the row.
  */
 internal const val UNKNOWN = "?"
 
@@ -406,12 +406,10 @@ internal fun paired(before: List<Row>, after: List<Row>): List<DiffRow> {
  * **Two tables as text**, for a diff: the report's columns, names and forms, each row three lines, so a
  * diff is as wide as a report and every number sits above the one it compares with. Before, after, and
  * the change: a percentage, `pp` for what is itself a percentage, `=` for no change.
- *
- * @param noise whether a change could be noise. See [Change.isNoise].
  */
 internal class DiffText(
     private val before: Table, private val after: Table, private val rows: List<DiffRow>, private val shared: List<DiffRow>,
-    heading: String, minName: Int, sortedBy: Column?, private val noise: (Change) -> Boolean,
+    heading: String, minName: Int, sortedBy: Column?,
 ) {
     private val columns = (before.columns + after.columns).distinct().sortedBy { c -> (COARSE_COLUMNS + FINE_COLUMNS).indexOf(c) }
 
@@ -451,10 +449,6 @@ internal class DiffText(
 
     /** The full width of the table. */
     val width: Int get() = layout.width
-
-    /** Whether any change printed so far could be noise, for the note under the table. */
-    var anyNoise = false
-        private set
 
     fun StringBuilder.rows() {
         with(layout) { heading() }
@@ -515,10 +509,8 @@ internal class DiffText(
         if (!c.interval) return value
         val half = if (share) change.half * scale else change.relativeHalf * 100
         if (half.isNaN()) return layout.cell(c, value, "")
-        val isNoise = noise(change)
-        anyNoise = anyNoise || isNoise
-        // The change without its unit and with its `?`, the interval with the unit: `-22? +-119%`, `+4.6? +-4.7pp`.
+        // The change without its unit, the interval with it: `-22 +-119%`, `+4.6 +-4.7pp`. No mark judges it.
         val unit = if (share) "pp" else "%"
-        return layout.cell(c, value.removeSuffix(unit) + if (isNoise) "?" else "", pointsHalf(half, unit))
+        return layout.cell(c, value.removeSuffix(unit), pointsHalf(half, unit))
     }
 }

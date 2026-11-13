@@ -18,6 +18,9 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   `Paused` line is left out when neither side paused.
 - The key under the coarse table says what a percentile's `?` needs: p50, p90 and p99 need 2, 10 and
   100 executions in a run.
+- A change in a diff has no `?` any more, and no note under the tables: its `+-` is the only word on
+  how sure it is. `+1.1 +-3.2%` says by itself that it could go either way. `?` now only means that a
+  figure is not known.
 
 ### The coarse table
 

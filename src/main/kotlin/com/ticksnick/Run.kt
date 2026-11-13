@@ -199,8 +199,19 @@ internal fun labelsText(names: List<String>, count: Int): String =
  */
 internal fun rangeText(values: List<Double>, format: (Double) -> String): String = rangeText(format(values.min()), format(values.max()))
 
-/** A range already written at both ends, `3..10`: the one way a range is put together. See [rangeText]. */
+/** A range already written at both ends, `3..10`: the one way a range of figures is put together. See [rangeText]. */
 internal fun rangeText(low: String, high: String): String = if (low == high) low else "$low..$high"
+
+/**
+ * **An interval as a range**: one figure with its margin, so its two ends in one unit, said once at the right,
+ * `1.26..1.73s`, `59..67%`, `-30..-18%`. Unlike [rangeText], whose ends are figures of their own, each with its unit.
+ */
+internal fun intervalRange(low: String, high: String, unit: String): String = "$low..$high$unit"
+
+/** An end of a change's range, signed: `-30`, `+4.7`; a 0 is `0.0`, not `-0.0`. */
+internal fun signedEnd(x: Double): String =
+    (if (kotlin.math.abs(x) < 9.95) String.format(Locale.ROOT, "%+.1f", x) else String.format(Locale.ROOT, "%+.0f", x))
+        .let { if (it.drop(1).trimEnd('0', '.').isEmpty()) it.drop(1) else it }
 
 
 /**
@@ -348,7 +359,7 @@ internal fun relativeText(pct: Double): String =
 internal fun durationRange(lo: Double, hi: Double, signed: Boolean = false): String {
     val unit = durationUnitOf(maxOf(kotlin.math.abs(lo), kotlin.math.abs(hi)))
     fun one(v: Double) = (if (v < 0) "-" else if (signed && v > 0) "+" else "") + significant(kotlin.math.abs(v) / unit.scale)
-    return one(lo) + ".." + one(hi) + unit.text
+    return intervalRange(one(lo), one(hi), unit.text)
 }
 
 /** Three significant digits, below 1 as well as above it: `0.444`, `0.00128`, `9.15`, `117`. */

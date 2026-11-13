@@ -212,7 +212,8 @@ private fun pointsText(p: Double): String =
 
 /** `59..67%`, `0.84..1.13%`: whole percents from 10% up, three digits below, where whole ones would round a range away. */
 private fun shareRange(c: Column, lo: Double, hi: Double): String =
-    if (c.form == Form.PARENT_SHARE && hi >= 10) String.format(Locale.ROOT, "%.0f..%.0f%%", lo, hi) else threeDigits(lo) + ".." + threeDigits(hi) + "%"
+    if (c.form == Form.PARENT_SHARE && hi >= 10) intervalRange(String.format(Locale.ROOT, "%.0f", lo), String.format(Locale.ROOT, "%.0f", hi), "%")
+    else intervalRange(threeDigits(lo), threeDigits(hi), "%")
 
 /**
  * **A figure and its interval as a cell writes them**, value text and interval text, by [sureness]. [plain] is the
@@ -556,11 +557,7 @@ internal class DiffText(
         // A change is always a range, the interval's own ends, stopping at -100% (sureness: change).
         if (sureness(v, half, change = true) == Sure.PLAIN) return layout.cell(c, value, "")
         val lo = if (share) v - half else maxOf(-100.0, v - half)
-        return layout.cell(c, signedText(lo) + ".." + signedText(v + half) + unit, "")
+        return layout.cell(c, intervalRange(signedEnd(lo), signedEnd(v + half), unit), "")
     }
 
-    /** `-30`, `+4.7`: a signed number of a change, three significant digits' worth. */
-    private fun signedText(x: Double): String =
-        (if (abs(x) < 9.95) String.format(Locale.ROOT, "%+.1f", x) else String.format(Locale.ROOT, "%+.0f", x))
-            .let { if (it.drop(1).trimEnd('0', '.').isEmpty()) it.drop(1) else it }
 }

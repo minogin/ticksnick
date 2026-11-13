@@ -90,9 +90,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val absolute = if (ranged) durationRange(c.delta - c.half, c.delta + c.half, signed = true) else sign + duration(abs(c.delta))
         val r = c.relative * 100
         val h = c.relativeHalf * 100
-        fun signed(x: Double) = (if (abs(x) < 9.95) String.format(Locale.ROOT, "%+.1f", x) else String.format(Locale.ROOT, "%+.0f", x))
-            .let { if (it.drop(1).trimEnd('0', '.').isEmpty()) it.drop(1) else it }
-        val relative = if (sureness(r, h, change = true) == Sure.RANGE) signed(maxOf(-100.0, r - h)) + ".." + signed(r + h) + "%" else signedPercent(c.relative)
+        val relative = if (sureness(r, h, change = true) == Sure.RANGE) intervalRange(signedEnd(maxOf(-100.0, r - h)), signedEnd(r + h), "%") else signedPercent(c.relative)
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 

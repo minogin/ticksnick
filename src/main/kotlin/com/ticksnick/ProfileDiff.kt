@@ -84,6 +84,9 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
 
     private fun header(key: String, b: Estimate, a: Estimate, suffix: String = ""): String {
         val c = Change(b, a)
+        // Not knowing a side is not knowing the change.
+        if (b.unknown() || a.unknown())
+            return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), UNKNOWN, UNKNOWN, suffix).trimEnd())
         val sign = if (c.delta < 0) "-" else "+"
         // A change is always a range, the interval's own ends, in time and in percent: `-5.65..-3.65s  -42..-27%`.
         val ranged = sureness(c.delta, c.half, change = true) == Sure.RANGE

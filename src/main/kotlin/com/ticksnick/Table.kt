@@ -203,6 +203,9 @@ internal fun sureness(mean: Double, half: Double, change: Boolean = false): Sure
     else -> Sure.RANGE
 }
 
+/** Whether this figure, in its unit times [scale], is [Sure.UNKNOWN] by [sureness]: and so is any change from or to it. */
+internal fun Estimate.unknown(scale: Double = 1.0): Boolean = n >= 2 && sureness(mean * scale, half * scale) == Sure.UNKNOWN
+
 /** A share as the rule writes it, without an interval: `63%`, `5.80%`. */
 private fun shareText(c: Column, v: Double): String = if (c.form == Form.PARENT_SHARE) parentShareText(v) else percent(v)
 
@@ -541,9 +544,11 @@ internal class DiffText(
         val change = r.change(c) ?: return layout.cell(c, "", "")
         val b = if (c.largest) change.before.values.max() else change.before.mean
         val a = if (c.largest) change.after.values.max() else change.after.mean
-        if (a == b || (!c.interval && figureText(c, change.before, r.own) == figureText(c, change.after, r.own))) return layout.cell(c, "=", "")
         val share = c.form == Form.PARENT_SHARE || c.form == Form.SHARE || c.form == Form.WAITING
         val scale = if (c.form == Form.WAITING) 100.0 else 1.0
+        // Not knowing a side is not knowing the change: a - b of an unknown a is unknown.
+        if (c.interval && (change.before.unknown(scale) || change.after.unknown(scale))) return layout.cell(c, UNKNOWN, "")
+        if (a == b || (!c.interval && figureText(c, change.before, r.own) == figureText(c, change.after, r.own))) return layout.cell(c, "=", "")
         // A share that moved by less than it prints is no change, and `+0.0 pp` is not a sign to read.
         if (share && abs((a - b) * scale) < MIN_SHARE_CHANGE) return layout.cell(c, "=", "")
         // From 0 no fraction describes the change: blank, as for a row with nothing to compare.

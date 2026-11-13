@@ -400,7 +400,7 @@ and a note under a table that only one side has names it.
 - **The change is always a range**, the ends of its 95% interval: `-24..-20%` is between 20 and 24%
   less, `+4.7..+5.9pp` for what is itself a percentage, `=` for no change. A decrease stops at -100%.
   The range is all that is said about how sure a change is: `-2.1..+4.3%`, across zero, could go
-  either way, and more runs would narrow it.
+  either way, and more runs would narrow it. A change from or to a figure that is `?` is `?` too.
 - **Calls and Executions are the check.** `=` means both sides did the same work, so a change in
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was

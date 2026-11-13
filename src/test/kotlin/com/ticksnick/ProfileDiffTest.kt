@@ -300,6 +300,26 @@ class ProfileDiffTest {
 
     /** A `?` on a line over the tables, with none in them, still has its key. */
 
+    /** 1.0, 3.0 and 0.1 s: a mean of 1.37 s whose interval, ±3.6 s at three runs, reaches 0 - unknown, and so is a change from it. */
+    @Test
+    fun `a change from a figure not known is not known`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val before = dir.resolve("before").also { Files.createDirectories(it) }
+            val after = dir.resolve("after").also { Files.createDirectories(it) }
+            fun spans(folder: Path, vararg nanos: Long) = nanos.forEachIndexed { i, span ->
+                RunStore.save(profile(emptyList(), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+            }
+            spans(before, 1_000_000_000, 3_000_000_000, 100_000_000)
+            spans(after, 1_000_000_000, 1_050_000_000, 1_100_000_000)
+            assertTrue(Estimate(listOf(1.0, 3.0, 0.1)).unknown() && !Estimate(listOf(1.0, 1.05, 1.1)).unknown())
+            val line = ProfileDiff(Profile.load(before), Profile.load(after)).render().lines().first { it.startsWith("Wall time") }
+            assertTrue(Regex("""\?\s+\?$""").containsMatchIn(line), line)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
     private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
         RunStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
 

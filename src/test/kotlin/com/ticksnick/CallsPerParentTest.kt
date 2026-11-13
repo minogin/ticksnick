@@ -90,7 +90,7 @@ class CallsPerParentTest {
      */
     private fun ownRows(report: String): Map<List<String>, Pair<String, String?>> {
         val lines = report.lines()
-        val start = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val start = lines.indexOfFirst { it.startsWith("Operation") }
         if (start < 0) return emptyMap()
         val out = HashMap<List<String>, Pair<String, String?>>()
         val stack = ArrayList<String>()
@@ -141,7 +141,7 @@ class CallsPerParentTest {
      */
     private fun checkDiff(diff: String) {
         val lines = diff.lines().takeWhile { !it.startsWith("OWN THREAD-TIME") }
-        val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val head = lines.indexOfFirst { it.startsWith("Operation") }
         val executions = lines[head].indexOf("Executions") + "Executions".length
         val perParent = lines[head].indexOf("Per parent") + "Per parent".length
         fun cell(line: String, end: Int, width: Int) = line.padEnd(end).substring(end - width, end).trim()

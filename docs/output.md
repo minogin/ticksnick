@@ -125,7 +125,7 @@ the runs.
 ```
 NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted
                                    |                                        Load                                         |                    Long
-Coarse operation                   |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
+Operation                          |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
 -----------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
 runBatch                           |           3                          82.0s               4.20s     20.0%      27.3s |      27.4s          ?          ?      27.6s
   resolveRoot                      |      92,667     30,889      4.0      82.0s     100%      4.20s               3.53ms |      602us     7.50ms     61.6ms      434ms
@@ -165,7 +165,7 @@ children:
 
 ```
                                |                                         Load                                        |                    Long
-Coarse operation               |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
+Operation                      |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
 -------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
 batch                          |           1                          1.14s                                    1.14s |          ?          ?          ?      1.14s
   plan                         |          10         10               984ms      87%                          98.4ms |     98.3ms     98.6ms          ?     99.5ms
@@ -179,7 +179,7 @@ batch                          |           1                          1.14s     
     - rare (2 parents)         |          10          1                   ?        ?                               ?
 -------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
 Under multiple parents - each over all of them
-Coarse operation               |  Executions                         Wall v   % root                            Mean
+Operation                      |  Executions                         Wall v   % root                            Mean
   - visit                      |       1,100                          303ms      27%                           275us
   - rare                       |         510                         97.2ms       9%                           191us
 -------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
@@ -312,7 +312,7 @@ Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22
 
 NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
                                    |                                                            Load                                                             |                    Long
-Coarse operation                   |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
+Operation                          |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
 -----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
 runBatch                           |           3                           82.4s +-0.9%                        4.29s +-5.2%     20.0% +-0.0pp       27.5s +-0.9% |      27.5s          ?          ?      28.1s
   resolveRoot                      |      92,667     30,889      4.0       82.4s +-0.9%     100% +-0.0pp       4.29s +-5.2%                        3.55ms +-0.9% |      602us     7.54ms     61.3ms      449ms
@@ -371,7 +371,7 @@ runBatch        27.5s -> 19.4s    -8.45..-7.73s          -31..-28%        per ex
 
 NESTED WALL TIME - each row its whole span, matched by path; each side the mean of its runs, the change its 95% interval
                                              |                                                            Load                                                             |                    Long
-Coarse operation                             |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
+Operation                                    |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
 ---------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
       select                                 |     278,001                           42.5s +-1.1%      52% +-0.4pp       4.01s +-9.1%                         611us +-1.1% |     62.8us     1.28ms     11.7ms      348ms
                                              |     278,001                           33.1s +-2.9%      57% +-0.6pp       3.70s +-8.0%                         475us +-2.9% |     49.9us      995us     8.75ms      190ms
@@ -379,7 +379,7 @@ Coarse operation                             |  Executions Per parent Parallel  
 
 OWN THREAD-TIME - outside the operations inside, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
                            |                                                  Load                                                   |             Long             |               Spread
-Operation                  |           Thread-time         Thread-time%           Waiting         Calls         Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
+Operation                  |         Thread-time v         Thread-time%           Waiting         Calls         Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+---------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------
 onCentral (4 -> 0 runs)    |           118s +-1.6%        28.3% +-0.3pp                     569,233,860                 207ns +-1.6% |        ~16   45.5ms   11.0ms |     65.9s        1.78       4    12
 

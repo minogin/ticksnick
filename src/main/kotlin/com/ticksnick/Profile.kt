@@ -573,7 +573,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
     }
 
-    internal val wallText: TableText by lazy { TableText(wallTable, "Coarse operation", WALL_NAME_WIDTH) }
+    internal val wallText: TableText by lazy { TableText(wallTable, "Operation", WALL_NAME_WIDTH) }
     internal val ownText: TableText by lazy { TableText(ownTable, "Operation", OWN_NAME_WIDTH) }
 
     /** The widest table, for the rules around a report. */

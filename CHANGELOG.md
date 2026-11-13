@@ -34,12 +34,14 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 - Each table is named by the time it shows: `NESTED WALL TIME`, each row its whole span under its
   parent, was `COARSE OPERATIONS`; `OWN THREAD-TIME`, each operation outside the operations inside it,
-  was `COARSE AND FINE OPERATIONS`. Both hold coarse and fine operations.
+  was `COARSE AND FINE OPERATIONS`. Both hold coarse and fine operations, and the first column of both
+  is `Operation`; the wall table's was `Coarse operation`.
 
 ### The own table
 
 - `Thread-time` comes first and `Thread-time%` second, in a report and a diff, and a report is sorted by
-  `Thread-time`: a diff is read by how much time changed. In one run the two sort the same.
+  `Thread-time`: a diff is read by how much time changed. In one run the two sort the same. A diff
+  marks `Thread-time` with `v` too, its rows sorted by the change in it.
 
 ### The wall table
 

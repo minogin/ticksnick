@@ -731,7 +731,7 @@ class CoarseTest {
         val fine = LongArray(MAX_OPERATIONS + 1).also { it[0] = 3000 }
         val lines = report(listOf(query), labelled = 3000, tree = listOf(node(query, fine = fine)), allocations = true).render().lines()
 
-        val head = lines.first { it.startsWith("Coarse operation") }
+        val head = lines.first { it.startsWith("Operation") }
         assertTrue("Per execution" in head, head)
         val row = lines.first { it.trimStart().startsWith("- fine") }
         assertEquals(head.indexOf("Mean") + "Mean".length, row.trimEnd().length, "out of line: $row")
@@ -755,7 +755,7 @@ class CoarseTest {
         val cross = lines.drop(ownTable).first { "+" in it && it.startsWith("-") }.indexOf('+')
         assertEquals(fine[0].indexOf('|'), cross, "the bar and the rule's cross part: $text")
 
-        val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val head = lines.indexOfFirst { it.startsWith("Operation") }
         val executionsEnd = lines[head].indexOf("Executions") + "Executions".length
         val rows = lines.take(ownTable).filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" in it }
         assertEquals(2, rows.size, text)
@@ -875,7 +875,7 @@ class CoarseTest {
         val via = stat(count = 36, sumNanos = 1_200_000_000, hits = 0, running = 0, inclusive = 1200, runningInclusive = 1200, name = "via", id = 3)
         val tree = listOf(node(run, children = listOf(node(resolve, children = listOf(node(select), node(via))))))
         val lines = report(listOf(run, resolve, select, via), labelled = 4000, tree = tree).render().lines()
-        val header = lines.first { it.startsWith("Coarse operation") }
+        val header = lines.first { it.startsWith("Operation") }
         val perAt = header.indexOf("Per parent")
         val shareAt = header.indexOf("% parent")
         assertTrue(perAt > 0 && shareAt > 0, "the columns have no header: $header")
@@ -907,7 +907,7 @@ class CoarseTest {
         // of the roots' Wall, both roots here, 2 s and 1 s, so the 3 s of parse are all of it.
         val lines = text.lines()
         val heading = lines[lines.indexOf(SHARED_HEADING) + 1]
-        val table = lines.first { it.startsWith("Coarse operation") }
+        val table = lines.first { it.startsWith("Operation") }
         assertTrue(ROOT_SHARE in heading && "% parent" !in heading && "Per parent" !in heading && "Executions" in heading, heading)
         assertEquals(table.indexOf("% parent") + "% parent".length, heading.indexOf(ROOT_SHARE) + ROOT_SHARE.length, "out of line: $heading")
         val whole = lines.drop(lines.indexOf(SHARED_HEADING) + 2).first { it.trim().startsWith("parse ") }

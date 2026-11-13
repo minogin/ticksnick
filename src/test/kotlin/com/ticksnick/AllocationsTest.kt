@@ -178,7 +178,7 @@ class AllocationsTest {
         val off = Profiler.stop()
 
         val lines = a.render().lines()
-        val head = lines.first { it.startsWith("Coarse operation") }
+        val head = lines.first { it.startsWith("Operation") }
         val end = head.indexOf("Per execution") + "Per execution".length
         assertEquals(' ', head[head.indexOf("Per execution") - 1])
         assertTrue(lines[lines.indexOf(head) - 1].contains("Allocated"), "the group has no name")
@@ -292,7 +292,7 @@ class AllocationsTest {
         assertEquals(0L, p.node("alloc.outer").allocated)
         fun checked(text: String) {
             assertTrue("  Allocated: not shown - this JVM cannot count allocated bytes per thread; HotSpot can" in text, text)
-            assertFalse("Per execution" in text.lines().first { it.startsWith("Coarse operation") }, text)
+            assertFalse("Per execution" in text.lines().first { it.startsWith("Operation") }, text)
         }
         checked(p.render())
         val loaded = Run.load(p.save(Files.createTempDirectory("alloc-missing")))
@@ -322,7 +322,7 @@ class AllocationsTest {
         repeat(3) { both() }
         val lines = Profiler.stop().render().lines()
 
-        val head = lines.first { it.startsWith("Coarse operation") }
+        val head = lines.first { it.startsWith("Operation") }
         val end = head.indexOf("Per execution") + "Per execution".length
         val block = lines.indexOf(SHARED_HEADING)
         val row = lines.drop(block).first { it.startsWith("  alloc.inner") }
@@ -336,7 +336,7 @@ class AllocationsTest {
         repeat(30) { op(outer) { op(fine) { spin(2_000_000) } } }
         val lines = Profiler.stop().render().lines()
 
-        val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val head = lines.indexOfFirst { it.startsWith("Operation") }
         val row = lines.first { it.trimStart().startsWith("- alloc.fine") }
         assertEquals(lines[head].indexOf("Mean") + "Mean".length, row.trimEnd().length, "Mean out of line, or a cell in the column: $row")
     }
@@ -347,7 +347,7 @@ class AllocationsTest {
         nested()
         val lines = Profiler.stop().render().lines()
 
-        val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
+        val head = lines.indexOfFirst { it.startsWith("Operation") }
         val row = lines.drop(head).first { it.startsWith("alloc.outer ") }
         assertEquals(row.length, lines[head + 1].length, "the rule and its table")
     }
@@ -472,7 +472,7 @@ class AllocationsTest {
         val row = diffRow(diff, "alloc.outer")
         assertTrue("3.00 MB" in row[0] && "MB" !in row[1], row.toString())
         // Not asked for is not unknown: the side that did not count is blank there, not `?`.
-        val head = diff.lines().first { it.startsWith("Coarse operation") }
+        val head = diff.lines().first { it.startsWith("Operation") }
         val cells = row[1].padEnd(head.length).substring(head.indexOf("Total") - 5, head.indexOf("Per execution") + "Per execution".length)
         assertTrue(cells.isBlank(), "the side that did not count: ${row[1]}")
     }

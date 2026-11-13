@@ -222,7 +222,7 @@ class ProfileDiffTest {
 
     /** A report's lines by what each is, for comparing their order and not their figures. */
     private fun shape(report: String): List<String> {
-        val keys = listOf("Runs", "Wall time", "runBatch", "NESTED WALL TIME", "Coarse operation", "OWN THREAD-TIME", "Operation", "Sampled", "HOW TO READ THIS")
+        val keys = listOf("Runs", "Wall time", "runBatch", "NESTED WALL TIME", "OWN THREAD-TIME", "Operation", "Sampled", "HOW TO READ THIS")
         return report.lines().mapNotNull { line -> keys.firstOrNull { line.startsWith("$it ") || line == it } }
     }
 

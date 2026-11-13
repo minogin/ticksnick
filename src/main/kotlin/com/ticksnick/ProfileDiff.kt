@@ -70,8 +70,8 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         abs(time(r.after) - time(r.before))
     }
 
-    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, "Coarse operation", WALL_NAME_WIDTH, WALL)
-    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, null)
+    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, "Operation", WALL_NAME_WIDTH, WALL)
+    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, THREAD_TIME)
     private val width = maxOf(wallText.width, ownText.width)
 
     private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""

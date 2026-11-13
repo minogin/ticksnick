@@ -487,7 +487,7 @@ internal class OperationStat internal constructor(
 /** How many executions a run needs for the percentile [p] to mean something: p50 2, p90 10, p99 100. */
 internal fun executionsNeeded(p: Double): Long = if (p >= 1.0) 1L else Math.round(1.0 / (1.0 - p))
 
-/** Why a percentile reads [UNKNOWN], and what gives it: the key under the coarse table says it where one does. */
+/** Why a percentile reads [UNKNOWN], and what gives it: the key under the wall table says it where one does. */
 internal fun percentilesNeedText(): String =
     "p50, p90 and p99 need ${executionsNeeded(0.50)}, ${executionsNeeded(0.90)} and ${executionsNeeded(0.99)} executions in a run," +
             " and show $UNKNOWN with fewer: more executions give them"
@@ -511,8 +511,8 @@ internal fun spanPercentile(spans: Spans, count: Long, min: Long, max: Long, p: 
  * One node of the coarse tree: a coarse operation at one path of coarse operations, with the
  * figures of the executions that ran exactly there.
  *
- * The coarse table is drawn from these. A [CoarseStat] is the operation over every path, which is
- * what the floor check, the fine table's folding and the parallelism line want; a node is what the
+ * The wall table is drawn from these. A [CoarseStat] is the operation over every path, which is
+ * what the floor check, the own table's folding and the parallelism line want; a node is what the
  * tree wants, and the two are the same figures only for an operation with one caller. See
  * `CoarsePath` for where the figures come from.
  */
@@ -1288,7 +1288,7 @@ class Run internal constructor(
     }
 
     /**
-     * The coarse table, or nothing at all when no coarse label was placed.
+     * The wall table, or nothing at all when no coarse label was placed.
      *
      * Printed after the fine one and not instead of it, because the two answer different halves of
      * the same question and the report is worth less if a reader has to choose. Fine sampling says
@@ -1334,7 +1334,7 @@ class Run internal constructor(
         appendLine("wall time = active + paused. Paused is time every thread was stopped: ticks the sampler ran")
         appendLine("  a whole tick late, as far as the JVM's own count of its collections confirms them. A late")
         appendLine("  tick nobody confirmed stays in active time${sym.dash}the sampler may have been stopped alone. No")
-        appendLine("  sample is taken in a pause, so the fine table is ACTIVE time throughout: a pause does not")
+        appendLine("  sample is taken in a pause, so the own table is ACTIVE time throughout: a pause does not")
         appendLine("  move a share, and thread-time and time per call are scaled to the active tick. The coarse")
         appendLine("  table is WALL time, two timestamps per execution, so a span includes the pauses inside it")
         appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
@@ -1374,7 +1374,7 @@ class Run internal constructor(
             appendLine("    blank at 1. Read it beside Per parent: 4 with 2.0 is four started, two at a time")
             appendLine("  '- name  own' under a row: a fine label in its own time, outside its coarse children, with")
             appendLine("    its own Parallel when one execution ran it on several threads at a time")
-            appendLine("  the coarse table is a tree: an operation under the one it ran inside, and its figures are")
+            appendLine("  the wall table is a tree: an operation under the one it ran inside, and its figures are")
             appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
             appendLine("  'paused' is charged to every span a pause interrupted${sym.dash}not to the span that caused it")
             if (coarseTree.any { t -> t.flatten().any { it.slowest.isNotEmpty() } }) {
@@ -1399,7 +1399,7 @@ class Run internal constructor(
      * knows exact numbers for two of them - the measured span mean, and wall time as a union of
      * measured intervals - and using them would make a column whose rows are exact or inferred with
      * nothing saying which, and whose values answer different questions: an inclusive wall time per
-     * execution against a self thread-time per call. Those live in the coarse table above, which is
+     * execution against a self thread-time per call. Those live in the wall table above, which is
      * what it is for.
      */
     internal inner class OperationRow internal constructor(
@@ -1428,7 +1428,7 @@ class Run internal constructor(
         val longShown: Boolean
             get() = stuckShare != null && stuckInstances > 0 && stuckShare > machineFloor
 
-        /** The name as printed: a star marks a row whose full span is in the coarse table. */
+        /** The name as printed: a star marks a row whose full span is in the wall table. */
         val label: String get() = if (coarse) "$name *" else name
 
         /**
@@ -1503,7 +1503,7 @@ class Run internal constructor(
      * [warningsSection]).
      *
      * All in one place and before any table, not where each is computed: printed there, a warning
-     * about a fine operation would sit under the coarse table and read as one about a coarse one.
+     * about a fine operation would sit under the wall table and read as one about a coarse one.
      */
     internal fun warnings(): List<Warning> =
         // The kinds' order is the section's (see Kind); this is only what fires and with what.
@@ -1651,7 +1651,7 @@ class Run internal constructor(
         /** The fine floor at [DEFAULT_BODY_NANOS]. See [Run.fineFloorNanos]. */
         internal const val FLOOR_NANOS = FINE_FLOOR_BODIES * DEFAULT_BODY_NANOS
 
-        /** The fine table's row for samples inside no label. */
+        /** The own table's row for samples inside no label. */
         internal const val NO_OPERATION = "(no operation)"
 
         /**

@@ -90,7 +90,7 @@ class OwnTimeTest {
         }
         val p = Profiler.stop()
         val profile = Profile("p", listOf(java.nio.file.Path.of("0.tsr")), listOf(p))
-        val folded = assertNotNull(profile.coarseTable.rows.flatMap { it.children }.firstOrNull { it.foldedRows > 0 }, "nothing was folded: ${p.render()}")
+        val folded = assertNotNull(profile.wallTable.rows.flatMap { it.children }.firstOrNull { it.foldedRows > 0 }, "nothing was folded: ${p.render()}")
         assertTrue(EXECUTIONS !in folded.figures, "the folded row added up calls of different operations")
         assertTrue(WALL in folded.figures)
     }

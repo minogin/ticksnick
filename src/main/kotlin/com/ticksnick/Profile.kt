@@ -47,9 +47,9 @@ internal val SHARED_HEADING: String get() = "Under multiple parents${sym.dash}ea
 /** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
 internal const val FOLDED_ROWS = "and more"
 
-/** The name column's narrowest width, in the coarse and in the fine table. */
-internal const val COARSE_NAME_WIDTH = 30
-internal const val FINE_NAME_WIDTH = 26
+/** The name column's narrowest width, in the wall and in the own table. */
+internal const val WALL_NAME_WIDTH = 30
+internal const val OWN_NAME_WIDTH = 26
 
 /**
  * **Every warning of every report, as a `WARNINGS` section right under its first line**: before any
@@ -208,7 +208,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
 
     private fun wallOf(i: Int, n: CoarseNode): Double = walls[i][n] ?: n.spanSumNanos.toDouble()
 
-    /** [wall] of run [i] as a share of its roots' Wall, in percent: `% root` in the block under the coarse table. */
+    /** [wall] of run [i] as a share of its roots' Wall, in percent: `% root` in the block under the wall table. */
     private fun rootShare(i: Int, wall: Double): Double =
         runs[i].coarseTree.sumOf { wallOf(i, it) }.let { root -> if (root > 0) wall * 100 / root else Double.NaN }
 
@@ -308,9 +308,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         // The tree first: the overview - what ran inside what, how often, what part of its parent - and
         // the own-time table after it for the detail. The tree is what a reader reads; the table is
         // what they look up.
-        if (runs.any { r -> r.coarse.any { it.count > 0 || it.inclusiveHits > 0 } }) coarseSection()
+        if (runs.any { r -> r.coarse.any { it.count > 0 || it.inclusiveHits > 0 } }) wallSection()
         appendLine()
-        fineSection()
+        ownSection()
         // After the tables: how much evidence there is says nothing a reader acts on before the numbers,
         // and something after them, when a share looks too close to call. "mean (jittered)": the interval
         // is drawn +/-25% around the step so the sampler cannot lock onto a workload with a rhythm of its
@@ -360,7 +360,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 P90 to timed { it.percentileNanos(0.90) },
                 P99 to timed { it.percentileNanos(0.99) },
                 MAX to timed { it.spanMaxNanos.toDouble() },
-                COARSE_WAITING to overAll { i, n -> waiting(runs[i], n.inclusiveHits, n.runningInclusiveHits) },
+                WALL_WAITING to overAll { i, n -> waiting(runs[i], n.inclusiveHits, n.runningInclusiveHits) },
             ).filterKeys { (it != PARENT_SHARE || parents.any { p -> p != null }) && counted(it) },  // a root has no parent to be a share of
             nodes.size,
             children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 } + listOfNotNull(folded),
@@ -469,7 +469,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     P90 to of { _, c, _ -> c.percentileNanos(0.90) },
                     P99 to of { _, c, _ -> c.percentileNanos(0.99) },
                     MAX to of { _, c, _ -> c.spanMaxNanos.toDouble() },
-                    COARSE_WAITING to of { i, c, _ -> waiting(runs[i], c.inclusiveHits, c.runningInclusiveHits) },
+                    WALL_WAITING to of { i, c, _ -> waiting(runs[i], c.inclusiveHits, c.runningInclusiveHits) },
                 ).filterKeys(::counted),
                 with.size,
             )
@@ -502,8 +502,8 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
     }
 
-    /** **The coarse table**: one row per path, over the runs. */
-    internal val coarseTable: Table by lazy {
+    /** **The wall table**: one row per path, over the runs. */
+    internal val wallTable: Table by lazy {
         val own = ArrayList<Row>()
         val rows = childrenOf(runs.map { it.coarseTree }).map { coarseRow(it, runs.map { null }, own) }
         // An operation under more than one parent: each row is its part under that parent alone, so the
@@ -511,23 +511,23 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         // leads a single walk. Every row of it says how many parents it has, and its whole is a row of the
         // block under the table, sorted with the rest by Wall. With calls counted, every row the label
         // was called under counts, sampled or not, so the number of parents is exact.
-        val coarseRows = buildList {
+        val wallRows = buildList {
             fun walk(r: Row) {
                 if (!r.own) add(r)
                 r.children.forEach { walk(it) }
             }
             rows.forEach { walk(it) }
         }
-        val spread = (coarseRows.groupBy { it.name }.values + own.groupBy { it.name }.values).filter { it.size > 1 }
+        val spread = (wallRows.groupBy { it.name }.values + own.groupBy { it.name }.values).filter { it.size > 1 }
         for (under in spread) under.forEach { it.parents = under.size }
         val shared = (sharedCoarseRows() + sharedFineRows(own.groupBy { it.name }.filterValues { it.size > 1 }.keys))
             .sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 }
         val split = runs.any { r -> r.coarseTree.any { t -> t.flatten().any { r.ownRowsOf(it) == null && r.splitRowsOf(it).isNotEmpty() } } }
-        Table(COARSE_COLUMNS.filter { it.group != ALLOCATED.group || allocations }, rows, runs.size, WALL, shared, splitLeaves = split)
+        Table(WALL_COLUMNS.filter { it.group != ALLOCATED.group || allocations }, rows, runs.size, WALL, shared, splitLeaves = split)
     }
 
-    /** **The fine table**: fine and coarse operations together, each by its own time, heaviest first. */
-    internal val fineTable: Table by lazy {
+    /** **The own table**: fine and coarse operations together, each by its own time, heaviest first. */
+    internal val ownTable: Table by lazy {
         val rows = runs.map { r -> r.tableRows().associateBy { it.label } }
         val labels = rows.flatMap { it.keys }.distinct()
         fun inRuns(label: String) = rows.mapNotNull { it[label] }
@@ -550,7 +550,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 mapOf(
                     THREAD_SHARE to of { _, r -> r.shareOf() * 100 },
                     THREAD_TIME to of { p, r -> r.hits * p.stepNanos },
-                    FINE_WAITING to of { p, r -> if (p.stateSampled) r.waitingShare else Double.NaN },
+                    OWN_WAITING to of { p, r -> if (p.stateSampled) r.waitingShare else Double.NaN },
                     CALLS to of { _, r -> r.calls.toDouble() },
                     PER_CALL to of { _, r -> r.perCallNanos() },
                     LONG_CALLS to long { _, r -> r.stuckInstances.toDouble() },
@@ -561,28 +561,28 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     WORKERS to of { _, r -> r.workers },
                     POOL to of { _, r -> r.pool },
                     // Time outside every operation was not called and ran on no workers: only its time applies.
-                ).let { if (rows[present.first()][label]!!.name == Run.NO_OPERATION) it.filterKeys { c -> c == THREAD_SHARE || c == THREAD_TIME || c == FINE_WAITING } else it },
+                ).let { if (rows[present.first()][label]!!.name == Run.NO_OPERATION) it.filterKeys { c -> c == THREAD_SHARE || c == THREAD_TIME || c == OWN_WAITING } else it },
                 present.size,
                 coarse = rows[present.first()][label]!!.coarse,
             )
         }
         Table(
-            FINE_COLUMNS, table.sortedByDescending { it.figures[THREAD_TIME]!!.mean }, runs.size, THREAD_TIME,
+            OWN_COLUMNS, table.sortedByDescending { it.figures[THREAD_TIME]!!.mean }, runs.size, THREAD_TIME,
             contained = contained.sortedByDescending { l -> inRuns(l).sumOf { it.inclusiveHits } }.map { inRuns(it).first().name },
             folded = unseen.map { l -> inRuns(l).let { r -> Unsampled(r.first().name, r.first().coarse, r.maxOf { it.calls }) } },
         )
     }
 
-    internal val coarseText: TableText by lazy { TableText(coarseTable, "Coarse operation", COARSE_NAME_WIDTH) }
-    internal val fineText: TableText by lazy { TableText(fineTable, "Operation", FINE_NAME_WIDTH) }
+    internal val wallText: TableText by lazy { TableText(wallTable, "Coarse operation", WALL_NAME_WIDTH) }
+    internal val ownText: TableText by lazy { TableText(ownTable, "Operation", OWN_NAME_WIDTH) }
 
     /** The widest table, for the rules around a report. */
-    internal val pageWidth: Int get() = maxOf(coarseText.width, fineText.width)
+    internal val pageWidth: Int get() = maxOf(wallText.width, ownText.width)
 
     private val overRuns: String get() = if (runs.size > 1) "; each figure the mean of the runs, with its 95% interval" else ""
 
     /**
-     * The coarse table with its keys, each once and next to the rows that need it.
+     * The wall table with its keys, each once and next to the rows that need it.
      *
      * Wall time, not active: a span is two timestamps, and a request that sat through a 2.6 s
      * collection took 2.6 s longer. The pauses stay in - the caller waited for them - and the
@@ -593,43 +593,43 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * The table is the tree, with no separate flat ranking. Inclusive time is monotone up a path, so
      * the heaviest operation anywhere is at the end of the first branch - the ranking holds.
      */
-    internal fun StringBuilder.coarseSection() {
+    internal fun StringBuilder.wallSection() {
         val paused = runs.any { it.pause.confirmedPausedIn(it.samplingSpanNanos) > 0 }
         appendLine()
         appendLine(
             // Wall time, so each row says what part of its parent it took: `branch` 88% of the request,
             // and the rest the request's own merge. Summed durations would read 988% of the parent
             // once a fork runs ten at a time. See Run.wallsOf.
-            "COARSE OPERATIONS${sym.dash}wall time, inclusive, nested as it ran" +
+            "NESTED WALL TIME${sym.dash}each row its whole span, under its parent as it ran" +
                     (if (paused) "; a pause is charged to every operation it interrupted" else "") + overRuns
         )
-        with(coarseText) { rows() }
+        with(wallText) { rows() }
         // An operation with more than one caller is a row under each, and those rows are its figures
         // under that caller alone. Its percentiles over everything are a different question - "how long
         // does a parse take" - and they are answered here, once, only when the question exists: right
         // under the tree, before the keys, so the whole sits next to its parts.
-        if (coarseTable.shared.isNotEmpty()) {
+        if (wallTable.shared.isNotEmpty()) {
             appendLine(SHARED_HEADING)
-            with(coarseText) { shared() }
+            with(wallText) { shared() }
         }
         coarseKeys().forEach { appendLine(it) }
     }
 
-    /** What the coarse table's rows need explained, each once and next to them. */
+    /** What the wall table's rows need explained, each once and next to them. */
     internal fun coarseKeys(): List<String> = buildList {
         val all = buildList {
             fun walk(r: Row) {
                 add(r)
                 r.children.forEach { walk(it) }
             }
-            coarseTable.rows.forEach { walk(it) }
+            wallTable.rows.forEach { walk(it) }
         }
         val anyOwn = all.any { it.own }
-        if (coarseTable.splitLeaves && anyOwn) add(
+        if (wallTable.splitLeaves && anyOwn) add(
             "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once${sym.dash}they add up to 100%;" +
                     " a fine label with labels inside it shows only its own part"
         )
-        if (!coarseTable.splitLeaves && anyOwn) add(
+        if (!wallTable.splitLeaves && anyOwn) add(
             "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; Parallel on one is how many" +
                     " threads ran it at a time in one execution; a fine label with labels inside it shows only its own part"
         )
@@ -645,9 +645,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         if (all.any { it.parents > 1 }) add(
             "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is in the block above"
         )
-        if (coarseTable.shared.isNotEmpty()) add(
+        if (wallTable.shared.isNotEmpty()) add(
             "  $ROOT_SHARE in that block is each run's share of the Wall of " +
-                    (coarseTable.rows.map { it.name }.distinct().singleOrNull()?.let { "its root, $it" } ?: "its roots together") +
+                    (wallTable.rows.map { it.name }.distinct().singleOrNull()?.let { "its root, $it" } ?: "its roots together") +
                     if (runs.size > 1) ", ${sym.plusMinus} in percentage points" else ""
         )
         if (runs.size > 1) {
@@ -658,16 +658,16 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     }
 
     /**
-     * The fine table with what is under it. FINE and COARSE together, not bare OPERATIONS: a coarse
-     * operation appears in both tables with different numbers - `request` at 5.03% of its own work here
-     * and 99.6% including everything it contains above - and the heading says they are two questions.
+     * The own table with what is under it. Its heading names its time against the wall table's: a
+     * coarse operation appears in both tables with different numbers - `request` at 5.03% of its own work
+     * here and 99.6% including everything it contains above - and the headings say they are two questions.
      * It also says the clock the table is over: a thread-time is a sum over threads and `active` is the
      * span it was summed in, and on one thread the two figures match.
      */
-    internal fun StringBuilder.fineSection() {
-        val fine = fineTable
-        appendLine("COARSE AND FINE OPERATIONS${sym.dash}own time, out of ${duration(runs.map { it.activeNanos.toDouble() }.average())} active time$overRuns")
-        if (fine.rows.isNotEmpty()) with(fineText) { rows() }
+    internal fun StringBuilder.ownSection() {
+        val fine = ownTable
+        appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, out of ${duration(runs.map { it.activeNanos.toDouble() }.average())} active time$overRuns")
+        if (fine.rows.isNotEmpty()) with(ownText) { rows() }
         // A table with no rows is two rules around nothing. Say what happened instead: an empty
         // table is nearly always a run too short for the sampler to catch, and that is worth
         // naming rather than leaving the reader to infer from a blank.
@@ -687,9 +687,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         fineNotes().forEach { appendLine(it) }
     }
 
-    /** What is under the fine table. */
+    /** What is under the own table. */
     internal fun fineNotes(): List<String> = buildList {
-        val fine = fineTable
+        val fine = ownTable
         if (fine.contained.isNotEmpty()) add(
             "  " + fine.contained.joinToString { it + STAR } + ": coarse, with no own time${sym.dash}every sample inside " +
                     (if (fine.contained.size == 1) "it" else "them") + " was in an operation above"

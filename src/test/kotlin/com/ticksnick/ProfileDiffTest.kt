@@ -64,10 +64,10 @@ class ProfileDiffTest {
                 save(after, i, tree, listOf(stat("y", 20L + i, 100), stat("unused", 0, 0)))
             }
             val runs = Profile.load(before)
-            val rare = runs.fineTable.rows.first { it.name == "rare" }
+            val rare = runs.ownTable.rows.first { it.name == "rare" }
             assertEquals(3, rare.present, "a run that called it and never sampled it is one of its runs")
             assertEquals(5.0 / 3 * runs.runs[0].stepNanos, rare.figures.getValue(THREAD_TIME).mean, 1e-6)
-            assertTrue(Profile.load(after).fineTable.rows.none { it.name == "unused" }, "a label never called is in no run")
+            assertTrue(Profile.load(after).ownTable.rows.none { it.name == "unused" }, "a label never called is in no run")
 
             val text = ProfileDiff(runs, Profile.load(after)).render()
             val x = diffRow(text, "x")
@@ -222,7 +222,7 @@ class ProfileDiffTest {
 
     /** A report's lines by what each is, for comparing their order and not their figures. */
     private fun shape(report: String): List<String> {
-        val keys = listOf("Runs", "Wall time", "runBatch", "COARSE OPERATIONS", "Coarse operation", "COARSE AND FINE", "Operation", "Sampled", "HOW TO READ THIS")
+        val keys = listOf("Runs", "Wall time", "runBatch", "NESTED WALL TIME", "Coarse operation", "OWN THREAD-TIME", "Operation", "Sampled", "HOW TO READ THIS")
         return report.lines().mapNotNull { line -> keys.firstOrNull { line.startsWith("$it ") || line == it } }
     }
 

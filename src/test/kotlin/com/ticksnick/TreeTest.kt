@@ -249,7 +249,7 @@ class TreeTest {
         val node = assertNotNull(p.root("tree-paused"))
         assertTrue(node.pausedNanos > 0, "the span open through the collection carries no pause")
         assertTrue(node.pausedNanos <= p.pause.confirmedPausedIn(p.samplingSpanNanos), "a row carries more pause than the header")
-        val row = p.render().substringAfter("COARSE OPERATIONS").lines().first { it.startsWith("tree-paused ") }
+        val row = p.render().substringAfter("NESTED WALL TIME").lines().first { it.startsWith("tree-paused ") }
         val paused = row.split(Regex("[ ]+"))[3]
         assertTrue(paused != "-", "the Paused column is empty on the row: $row")
     }

@@ -370,7 +370,7 @@ class CoarseTest {
         assertTrue("NOT CPU" in text, "the traps went missing")
         assertTrue("Long is the calls that outlived a tick" in text, "the full legend was not printed")
         assertTrue("create work for everything else" in text, "the counterfactual argument was not printed")
-        assertTrue("the coarse table is a tree" in text, "the coarse half was not printed")
+        assertTrue("the wall table is a tree" in text, "the coarse half was not printed")
     }
 
     private fun stat(
@@ -748,16 +748,16 @@ class CoarseTest {
         val text = report(listOf(a, b), labelled = 2000, fineName = long).render()
         val lines = text.lines()
 
-        val fineTable = lines.indexOfFirst { it.startsWith("COARSE AND FINE") }
-        val fine = lines.drop(fineTable).filter { it.startsWith("Operation") || it.startsWith(long) }
+        val ownTable = lines.indexOfFirst { it.startsWith("OWN THREAD-TIME") }
+        val fine = lines.drop(ownTable).filter { it.startsWith("Operation") || it.startsWith(long) }
         assertEquals(2, fine.size, text)
         assertEquals(1, fine.map { it.indexOf('|') }.distinct().size, text)
-        val cross = lines.drop(fineTable).first { "+" in it && it.startsWith("-") }.indexOf('+')
+        val cross = lines.drop(ownTable).first { "+" in it && it.startsWith("-") }.indexOf('+')
         assertEquals(fine[0].indexOf('|'), cross, "the bar and the rule's cross part: $text")
 
         val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
         val executionsEnd = lines[head].indexOf("Executions") + "Executions".length
-        val rows = lines.take(fineTable).filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" in it }
+        val rows = lines.take(ownTable).filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" in it }
         assertEquals(2, rows.size, text)
         for (r in rows) assertTrue(r[executionsEnd - 1].isDigit() && r[executionsEnd] == ' ', "out of line: $r")
 
@@ -898,7 +898,7 @@ class CoarseTest {
             node(load, children = listOf(node(parse, count = 1, sumNanos = 1_000_000_000, inclusive = 1000))),
         )
         val text = report(listOf(load, query, parse), labelled = 3000, tree = tree).render()
-        val rows = text.substringAfter("COARSE OPERATIONS").substringBefore("COARSE AND FINE OPERATIONS").lines().filter { it.trim().startsWith("parse ") }
+        val rows = text.substringAfter("NESTED WALL TIME").substringBefore("OWN THREAD-TIME").lines().filter { it.trim().startsWith("parse ") }
         assertEquals(3, rows.size, "parse should be under each caller and once over both: $text")
         assertTrue(SHARED_HEADING in text, "the figure over both callers is missing: $text")
         assertTrue(rows.any { "2.00s" in it } && rows.any { "1.00s" in it }, "the per-caller figures are not per caller: $rows")

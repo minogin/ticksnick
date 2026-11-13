@@ -98,8 +98,8 @@ value for a name shows `?`, except `Allocated`, which a run leaves out when it d
 
 **Wall time** is the length of the session: **active** time plus **paused** time. Paused time is
 when every thread was stopped, mostly by GC: ticks where the sampler woke a whole tick late and
-the JVM confirms a collection. No samples are taken in a pause, so the fine table covers active time
-only. The coarse table is timed, so an execution's time includes any pause inside it.
+the JVM confirms a collection. No samples are taken in a pause, so the own table covers active time
+only. The wall table is timed, so an execution's time includes any pause inside it.
 
 **Cores** is how many cores were busy on average, and with what: the threads that entered a label,
 the rest of the process (GC, the sampler, the JIT) and its parts. Here four workers kept 2.85 cores
@@ -120,10 +120,10 @@ The CPU's clock is recorded through the run, as a share of its base frequency, o
 gives no base. The run list gives each run's mean; `WARNINGS` says when it moved during a run or across
 the runs.
 
-### Coarse operations
+### Nested wall time
 
 ```
-COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted
+NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted
                                    |                                        Load                                         |                    Long
 Coarse operation                   |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
 -----------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
@@ -138,7 +138,7 @@ runBatch                           |           3                          82.0s 
 The table is a tree: each operation sits under the one it ran inside, and its figures cover the
 executions on that path only. The same label on two paths is two rows.
 
-The columns come in groups, two of them the same words as in the fine table below. **Load** says what
+The columns come in groups, two of them the same words as in the own table below. **Load** says what
 the row cost, and **Long** says how long single executions ran; **Allocated** is a third, when the
 run counted it.
 
@@ -236,10 +236,10 @@ what it allocates up to there, and one still open at `stop` misses what came aft
 **`slowest:`** appears under an operation opened with a key (`op(X, key = { id }) { }`): its
 longest executions on that path, with their keys.
 
-### Coarse and fine operations
+### Own thread-time
 
 ```
-COARSE AND FINE OPERATIONS - own time, out of 104s active time
+OWN THREAD-TIME - outside the operations inside, out of 104s active time
                            |                                  Load                                   |             Long             |               Spread
 Operation                  | Thread-time v Thread-time%   Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+-------------------------------------------------------------------------+------------------------------+------------------------------------
@@ -268,7 +268,7 @@ above. `(no operation)` is time on profiled threads under no label.
   timing any.
 
 **Long** - calls of the label that lasted over a sampling tick: how many, the time they held, and the
-longest. A fine call is counted and not timed, so this is what stands in for the coarse table's
+longest. A fine call is counted and not timed, so this is what stands in for the wall table's
 percentiles, and a coarse row is blank there. A short operation with a few long calls is usually a rehash,
 a lock or a GC pause. Blank means they hold no more than preemption and pauses alone would explain; the
 footnote says how much that is.
@@ -289,7 +289,7 @@ footnote says how much that is.
 Sampled       414,466 samples - 103,684 ticks at 1.001ms mean (jittered) x 5 threads, one sample per thread per tick
 ```
 
-How many samples the fine table is made of: the ticks, the mean time between them, and the threads
+How many samples the own table is made of: the ticks, the mean time between them, and the threads
 read on each. A row's share of them carries an error of about `1/sqrt(samples)` from sampling alone: 96
 samples is 10%, 100,000 is 0.3%.
 
@@ -310,7 +310,7 @@ Wall time     117s +-0.4% = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 
 runBatch      27.5s +-0.9% per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
 
-COARSE OPERATIONS - wall time, inclusive, nested as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
+NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
                                    |                                                            Load                                                             |                    Long
 Coarse operation                   |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
 -----------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
@@ -369,7 +369,7 @@ Wall time        117s -> 91.6s    -27.1..-23.6s          -23..-20%
   Active         104s -> 79.2s    -26.1..-23.1s          -25..-22%
 runBatch        27.5s -> 19.4s    -8.45..-7.73s          -31..-28%        per execution
 
-COARSE OPERATIONS - wall time, inclusive, matched by path; each side the mean of its runs, the change its 95% interval
+NESTED WALL TIME - each row its whole span, matched by path; each side the mean of its runs, the change its 95% interval
                                              |                                                            Load                                                             |                    Long
 Coarse operation                             |  Executions Per parent Parallel             Wall v         % parent             Paused           Waiting               Mean |        p50        p90        p99        Max
 ---------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
@@ -377,7 +377,7 @@ Coarse operation                             |  Executions Per parent Parallel  
                                              |     278,001                           33.1s +-2.9%      57% +-0.6pp       3.70s +-8.0%                         475us +-2.9% |     49.9us      995us     8.75ms      190ms
                                              |           =          =                   -24..-20%     +4.7..+5.9pp         -17..+1.8%                 =          -24..-20% |       -21%       -22%       -25%       -45%
 
-COARSE AND FINE OPERATIONS - own thread-time, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
+OWN THREAD-TIME - outside the operations inside, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
                            |                                                  Load                                                   |             Long             |               Spread
 Operation                  |           Thread-time         Thread-time%           Waiting         Calls         Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+---------------------------------------------------------------------------------------------------------+------------------------------+------------------------------------

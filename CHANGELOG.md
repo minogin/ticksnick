@@ -16,7 +16,7 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   its time; `Long` within the noise is blank; a row on one side of a diff is blank on the other.
 - In a diff, `Per parent` 1 and `Paused` 0 print where the other side has a figure, and the header's
   `Paused` line is left out when neither side paused.
-- The key under the coarse table says what a percentile's `?` needs: p50, p90 and p99 need 2, 10 and
+- The key under the wall table says what a percentile's `?` needs: p50, p90 and p99 need 2, 10 and
   100 executions in a run.
 - A change in a diff has no `?` any more, and no note under the tables: its interval is the only word on
   how sure it is. `?` now only means that a figure is not known.
@@ -30,12 +30,18 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 - **`Waiting` replaces `Runnable / Waiting`**: the part of a row's time spent waiting, blank where
   nothing waited. Runnable was 100% less it.
 
-### The fine table
+### The two tables
+
+- Each table is named by the time it shows: `NESTED WALL TIME`, each row its whole span under its
+  parent, was `COARSE OPERATIONS`; `OWN THREAD-TIME`, each operation outside the operations inside it,
+  was `COARSE AND FINE OPERATIONS`. Both hold coarse and fine operations.
+
+### The own table
 
 - `Thread-time` comes first and `Thread-time%` second, in a report and a diff, and a report is sorted by
   `Thread-time`: a diff is read by how much time changed. In one run the two sort the same.
 
-### The coarse table
+### The wall table
 
 - `Under multiple parents` has a heading of its own, in the table's places, naming only the columns it
   shows, and a `% root` column where `% parent` stands: each operation's share of the root's Wall.

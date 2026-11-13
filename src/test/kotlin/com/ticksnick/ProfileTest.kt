@@ -95,7 +95,7 @@ class ProfileTest {
             val heading = lines.indexOf("WARNINGS")
             assertTrue(heading in 1..lines.indexOfFirst { it.startsWith("Wall time") }, "the warnings are not above the numbers:\n" + lines.joinToString("\n"))
             assertEquals("  Runs: 1 in 'naive', no interval - shares hold, durations need a second run", lines[heading + 1])
-            assertTrue(lines.any { "COARSE OPERATIONS - wall time" in it }, "not a profile report")
+            assertTrue(lines.any { "NESTED WALL TIME - each row" in it }, "not a profile report")
         } finally {
             dir.toFile().deleteRecursively()
         }

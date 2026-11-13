@@ -61,18 +61,18 @@ internal fun diffText(before: Profile, after: Profile): String =
  * so that the exception stands out.
  */
 internal class ProfileDiff(val before: Profile, val after: Profile) {
-    private val coarseRows = paired(before.coarseTable.rows, after.coarseTable.rows)
-    private val sharedRows = paired(before.coarseTable.shared, after.coarseTable.shared)
+    private val wallRows = paired(before.wallTable.rows, after.wallTable.rows)
+    private val sharedRows = paired(before.wallTable.shared, after.wallTable.shared)
 
     /** What moved most on top, whether it went up or down. */
-    private val fineRows = paired(before.fineTable.rows, after.fineTable.rows).sortedByDescending { r ->
+    private val ownRows = paired(before.ownTable.rows, after.ownTable.rows).sortedByDescending { r ->
         fun time(row: Row?) = row?.figures?.get(THREAD_TIME)?.mean?.takeIf { !it.isNaN() } ?: 0.0
         abs(time(r.after) - time(r.before))
     }
 
-    private val coarseText = DiffText(before.coarseTable, after.coarseTable, coarseRows, sharedRows, "Coarse operation", COARSE_NAME_WIDTH, WALL)
-    private val fineText = DiffText(before.fineTable, after.fineTable, fineRows, emptyList(), "Operation", FINE_NAME_WIDTH, null)
-    private val width = maxOf(coarseText.width, fineText.width)
+    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, "Coarse operation", WALL_NAME_WIDTH, WALL)
+    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, null)
+    private val width = maxOf(wallText.width, ownText.width)
 
     private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""
 
@@ -124,17 +124,17 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
             appendLine()
-            appendLine("COARSE OPERATIONS${sym.dash}wall time, inclusive, matched by path$overRuns")
-            with(coarseText) { rows() }
+            appendLine("NESTED WALL TIME${sym.dash}each row its whole span, matched by path$overRuns")
+            with(wallText) { rows() }
             if (sharedRows.isNotEmpty()) {
                 appendLine(SHARED_HEADING)
-                with(coarseText) { shared() }
+                with(wallText) { shared() }
             }
             perSide(before.coarseKeys(), after.coarseKeys())
         }
         appendLine()
-        appendLine("COARSE AND FINE OPERATIONS${sym.dash}own thread-time, matched by name, sorted by the change$overRuns")
-        with(fineText) { rows() }
+        appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, matched by name, sorted by the change$overRuns")
+        with(ownText) { rows() }
         perSide(before.fineNotes(), after.fineNotes())
         appendLine()
         bothSides("Sampled", before.sampledText(), after.sampledText())

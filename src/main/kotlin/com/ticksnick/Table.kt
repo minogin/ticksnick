@@ -3,7 +3,7 @@ package com.ticksnick
 import java.util.Locale
 import kotlin.math.abs
 
-/** What marks a fine table's row as a coarse operation's own work. */
+/** What marks an own table's row as a coarse operation's own work. */
 internal const val STAR = " *"
 
 /** The smallest change of a share a diff can print, in percentage points. */
@@ -23,7 +23,7 @@ internal const val UNKNOWN = "?"
 internal const val CERTAIN = 0.20
 
 /**
- * `% parent`'s name in the block under the coarse table: an operation there is over all its parents, so its share
+ * `% parent`'s name in the block under the wall table: an operation there is over all its parents, so its share
  * is of the root's Wall, which the tree's Wall is already a part of.
  */
 internal const val ROOT_SHARE = "% root"
@@ -63,7 +63,7 @@ internal val PARALLEL = Column("Parallel", "Load", Form.ONE_DECIMAL, interval = 
 internal val WALL = Column("Wall", "Load", Form.TIME, interval = true, width = 10)
 internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interval = true, width = 8)
 internal val PAUSED = Column("Paused", "Load", Form.TIME, interval = true, width = 10, zeroIsAbsent = true)
-internal val COARSE_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
+internal val WALL_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
 internal val MEAN = Column("Mean", "Load", Form.TIME, interval = true, width = 10)
 internal val ALLOCATED = Column("Total", "Allocated", Form.BYTES, interval = false, width = 10)
 internal val ALLOCATED_PER_EXECUTION = Column("Per execution", "Allocated", Form.BYTES, interval = false, width = 13)
@@ -72,14 +72,14 @@ internal val P90 = Column("p90", "Long", Form.TIME, interval = false, width = 10
 internal val P99 = Column("p99", "Long", Form.TIME, interval = false, width = 10)
 internal val MAX = Column("Max", "Long", Form.TIME, interval = false, width = 10, largest = true)
 
-internal val COARSE_COLUMNS = listOf(
-    EXECUTIONS, PER_PARENT, PARALLEL, WALL, PARENT_SHARE, PAUSED, COARSE_WAITING, MEAN, ALLOCATED, ALLOCATED_PER_EXECUTION,
+internal val WALL_COLUMNS = listOf(
+    EXECUTIONS, PER_PARENT, PARALLEL, WALL, PARENT_SHARE, PAUSED, WALL_WAITING, MEAN, ALLOCATED, ALLOCATED_PER_EXECUTION,
     P50, P90, P99, MAX,
 )
 
 internal val THREAD_SHARE = Column("Thread-time%", "Load", Form.SHARE, interval = true, width = 12)
 internal val THREAD_TIME = Column("Thread-time", "Load", Form.TIME, interval = true, width = 13)
-internal val FINE_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
+internal val OWN_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
 internal val CALLS = Column("Calls", "Load", Form.COUNT, interval = false, width = 13)
 internal val PER_CALL = Column("Thread-time per call", "Load", Form.TIME, interval = true, width = 20)
 // Blank, not unknown, where the long calls are within the noise: the ordinary case, and nothing to look at.
@@ -91,8 +91,8 @@ internal val CONCURRENCY = Column("Concurrency", "Spread", Form.TWO_DECIMALS, in
 internal val WORKERS = Column("Workers", "Spread", Form.WHOLE, interval = false, width = 7)
 internal val POOL = Column("Pool", "Spread", Form.WHOLE, interval = false, width = 5)
 
-internal val FINE_COLUMNS = listOf(
-    THREAD_TIME, THREAD_SHARE, FINE_WAITING, CALLS, PER_CALL, LONG_CALLS, LONG_TIME, LONGEST, WALL_TIME, CONCURRENCY, WORKERS, POOL,
+internal val OWN_COLUMNS = listOf(
+    THREAD_TIME, THREAD_SHARE, OWN_WAITING, CALLS, PER_CALL, LONG_CALLS, LONG_TIME, LONGEST, WALL_TIME, CONCURRENCY, WORKERS, POOL,
 )
 
 /** An operation the sampler never caught, with the most calls any run made of it. */
@@ -106,7 +106,7 @@ internal class Unsampled(val name: String, val coarse: Boolean, val calls: Long)
  *
  * @param present how many runs have the row.
  * @param own a fine label in a coarse row's own time.
- * @param coarse in the fine table, a coarse operation's own work: the rest of it is in the coarse table.
+ * @param coarse in the own table, a coarse operation's own work: the rest of it is in the wall table.
  * @param children the rows under it, heaviest first, coarse and [own] sorted together.
  * @param foldedRows how many of a row's own rows this one stands for, over 0 for the row of those not drawn.
  */
@@ -453,7 +453,7 @@ internal class DiffText(
     private val before: Table, private val after: Table, private val rows: List<DiffRow>, private val shared: List<DiffRow>,
     heading: String, minName: Int, sortedBy: Column?,
 ) {
-    private val columns = (before.columns + after.columns).distinct().sortedBy { c -> (COARSE_COLUMNS + FINE_COLUMNS).indexOf(c) }
+    private val columns = (before.columns + after.columns).distinct().sortedBy { c -> (WALL_COLUMNS + OWN_COLUMNS).indexOf(c) }
 
     /** As in a report, `->` where the sides differ: `onCentral (3 parents, 3 -> 0 runs)`. */
     private fun nameOf(r: DiffRow, depth: Int, shared: Boolean = false): String {

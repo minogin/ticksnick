@@ -107,7 +107,7 @@ internal enum class Kind(val text: (List<String>) -> String) {
         "${g[0]} of the fine labels' time${if (g[1].isEmpty()) "" else ", mostly ${g[1]},"} is under no coarse row${sym.dash}" +
                 "expected where no coarse label encloses it; for other threads, wrap their tasks with `propagating()`"
     }),
-    COARSE_NOT_IN_TREE({ g -> "${g[0]} ${if (", " in g[0]) "have" else "has"} no row in the coarse table${sym.dash}a TickSnick bug, please report it" }),
+    COARSE_NOT_IN_TREE({ g -> "${g[0]} ${if (", " in g[0]) "have" else "has"} no row in the wall table${sym.dash}a TickSnick bug, please report it" }),
     LONG_CALLS({ g ->
         "${g[0]}: ${g[1]} of its time is in calls over ${g[2]}, which its per-call time hides${sym.dash}register it coarse, ${g[3]}"
     }),

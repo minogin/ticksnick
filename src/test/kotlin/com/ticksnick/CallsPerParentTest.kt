@@ -88,7 +88,7 @@ class CallsPerParentTest {
      * The fine rows of the coarse tree in [report], by path: the `Executions` and `Per parent` cells.
      * A coarse row's path comes from its indent; a fine row is `- name` under the row above it.
      */
-    private fun fineRows(report: String): Map<List<String>, Pair<String, String?>> {
+    private fun ownRows(report: String): Map<List<String>, Pair<String, String?>> {
         val lines = report.lines()
         val start = lines.indexOfFirst { it.startsWith("Coarse operation") }
         if (start < 0) return emptyMap()
@@ -111,7 +111,7 @@ class CallsPerParentTest {
     }
 
     private fun check(name: String, plans: Int, report: String): List<String> {
-        val rows = fineRows(report)
+        val rows = ownRows(report)
         return expected(plans).mapNotNull { (path, want) ->
             val got = rows[path]
             when {
@@ -140,7 +140,7 @@ class CallsPerParentTest {
      * `Executions` before, after, its change, and `Per parent` the same.
      */
     private fun checkDiff(diff: String) {
-        val lines = diff.lines().takeWhile { !it.startsWith("COARSE AND FINE") }
+        val lines = diff.lines().takeWhile { !it.startsWith("OWN THREAD-TIME") }
         val head = lines.indexOfFirst { it.startsWith("Coarse operation") }
         val executions = lines[head].indexOf("Executions") + "Executions".length
         val perParent = lines[head].indexOf("Per parent") + "Per parent".length

@@ -212,17 +212,14 @@ internal fun intervalRange(low: String, high: String, unit: String): String = "$
 /**
  * **A change's interval as text: the one function** for every change range a diff writes, in its tables and its
  * header. Its direction once, before the numbers, and the end nearer zero first, so the first number is the least
- * it moved: `↓8.2..62%`, `↑175..300%`, in ASCII `-(8.2..62)%`, `+(175..300)%`. An arrow means a certain direction:
- * a range from [low] to [high] that reaches or crosses zero has none, so it keeps its signs, low end first,
- * `-13..+18%`. [magnitude] writes one end without a sign, in [unit]; an end it writes as zero takes no sign.
+ * it moved: `↓8.2..62%`, `↑175..300%`, in ASCII `-(8.2..62)%`, `+(175..300)%`. The arrow is the known direction,
+ * so the range from [low] to [high] is on one side of zero: one that reaches or crosses it is unknown, `?`, by
+ * [sureness], and never gets here. [magnitude] writes one end without a sign, in [unit].
  */
 internal fun changeRange(low: Double, high: Double, unit: String, magnitude: (Double) -> String): String {
-    fun signed(x: Double) = magnitude(kotlin.math.abs(x)).let { if (it.trimEnd('0', '.').isEmpty()) it else (if (x < 0) "-" else "+") + it }
-    return when {
-        high < 0 -> sym.down + magnitude(-high) + ".." + magnitude(-low) + sym.directedClose + unit
-        low > 0 -> sym.up + magnitude(low) + ".." + magnitude(high) + sym.directedClose + unit
-        else -> signed(low) + ".." + signed(high) + unit
-    }
+    require(high < 0 || low > 0) { "a change range reaching or crossing zero is unknown: $low..$high" }
+    return if (high < 0) sym.down + magnitude(-high) + ".." + magnitude(-low) + sym.directedClose + unit
+    else sym.up + magnitude(low) + ".." + magnitude(high) + sym.directedClose + unit
 }
 
 /** A change in percent or points as [changeRange] writes it, `↓18..30%`, `↑4.7..5.9pp`: tenths under 10, by [intervalEnd]. */

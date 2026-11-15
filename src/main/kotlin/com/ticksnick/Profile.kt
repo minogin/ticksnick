@@ -133,7 +133,7 @@ internal fun durationWithInterval(e: Estimate): String = when (if (e.n < 2) Sure
     Sure.PLAIN -> duration(e.mean)
     Sure.CERTAIN -> durationCertain(e.mean, e.half)
     Sure.UNKNOWN -> UNKNOWN
-    Sure.RANGE -> durationRange(maxOf(0.0, e.mean - e.half), e.mean + e.half)
+    Sure.LOOSE -> durationRange(maxOf(0.0, e.mean - e.half), e.mean + e.half)
 }
 
 /**

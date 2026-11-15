@@ -178,29 +178,28 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
     }
 }
 
-/** How a figure with an interval is written, by how sure it is. See [sureness]. */
+/** How sure a figure or a change is, which decides how it is written. See [sureness]. */
 internal enum class Sure {
     /** No interval: one run, or runs that agree exactly. The figure alone. */
     PLAIN,
-    /** The interval at most [CERTAIN] of the figure: `6.34s ±5.0%`, a share `63% ±9.2pp`. */
+    /** The interval at most [CERTAIN] of the figure: `6.34s ±5.0%`, a share `63% ±9.2pp`. A change: its range. */
     CERTAIN,
-    /** Wider: the interval's own ends, `374..558ms`. A change in a diff is always this. */
-    RANGE,
+    /** Loose, wider: the interval's own ends, `374..558ms`; a change's range, `↓8.2..62%`. */
+    LOOSE,
     /** As wide as the figure or more, so it would reach 0: [UNKNOWN], measured too little to say. */
     UNKNOWN,
 }
 
 /**
- * **How sure a figure is: the one rule** for every figure with an interval, in a report and in a diff. [mean] and
- * [half], the 95% interval's half-width, in the figure's unit. A [change] can be negative and its interval may cross
- * zero, which is its normal "either way": it is always a range, never `±` and never unknown.
+ * **How sure a figure or a change is: the one rule** for every one with an interval, in a report and in a diff.
+ * [mean] and [half], the 95% interval's half-width, in its unit, sign aside. For a change, unknown is exactly an
+ * interval that reaches or crosses zero: its direction is not known, and it prints `?`.
  */
-internal fun sureness(mean: Double, half: Double, change: Boolean = false): Sure = when {
+internal fun sureness(mean: Double, half: Double): Sure = when {
     half.isNaN() || half == 0.0 -> Sure.PLAIN
-    change -> Sure.RANGE
     mean != 0.0 && half / abs(mean) <= CERTAIN -> Sure.CERTAIN
     half >= abs(mean) -> Sure.UNKNOWN
-    else -> Sure.RANGE
+    else -> Sure.LOOSE
 }
 
 /** Whether this figure, in its unit times [scale], is [Sure.UNKNOWN] by [sureness]: and so is any change from or to it. */
@@ -233,7 +232,7 @@ internal fun ruledText(c: Column, f: Estimate?, plain: String): Pair<String, Str
         Sure.PLAIN -> (if (share) shareText(c, mean) else plain) to ""
         Sure.CERTAIN -> if (share) shareText(c, mean) to pointsText(half) else plain to relativeText(half / abs(mean) * 100)
         Sure.UNKNOWN -> UNKNOWN to ""
-        Sure.RANGE -> {
+        Sure.LOOSE -> {
             val lo = maxOf(0.0, mean - half)
             val hi = if (share) minOf(100.0, mean + half) else mean + half
             (if (share) shareRange(c, lo, hi) else if (c.form == Form.TIME) durationRange(lo, hi) else plain) to ""
@@ -560,10 +559,13 @@ internal class DiffText(
         if (half.isNaN()) return layout.cell(c, value, "")
         val v = if (share) (a - b) * scale else relativeChange(b, a) * 100
         val unit = if (share) "pp" else "%"
-        // A change is always a range, as changeRange writes it, stopping at -100% (sureness: change).
-        if (sureness(v, half, change = true) == Sure.PLAIN) return layout.cell(c, value, "")
-        val lo = if (share) v - half else maxOf(-100.0, v - half)
-        return layout.cell(c, percentChangeRange(lo, v + half, unit), "")
+        // By sureness, on the real ends before the -100% cut: a range, certain or loose, as changeRange writes it, or `?`
+        // where it reaches or crosses zero.
+        return when (sureness(v, half)) {
+            Sure.PLAIN -> layout.cell(c, value, "")
+            Sure.UNKNOWN -> layout.cell(c, UNKNOWN, "")
+            Sure.CERTAIN, Sure.LOOSE -> layout.cell(c, percentChangeRange(if (share) v - half else maxOf(-100.0, v - half), v + half, unit), "")
+        }
     }
 
 }

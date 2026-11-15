@@ -25,16 +25,19 @@ class ProfileTest {
 
     /**
      * The one rule: `±` up to 20% of the figure, the interval's ends past it, `?` from 100%, the figure alone with no
-     * interval; a change always a range. Three runs each, worked by hand: 422, 486, 490ms is 466 ±94.8ms.
+     * interval; a change by the same lines. Three runs each, worked by hand: 422, 486, 490ms is 466 ±94.8ms.
      */
     @Test
     fun `a figure is written by how sure it is`() {
         assertEquals(Sure.CERTAIN, sureness(6.34, 0.32))
-        assertEquals(Sure.RANGE, sureness(466.0, 94.8))
+        assertEquals(Sure.LOOSE, sureness(466.0, 94.8))
         assertEquals(Sure.UNKNOWN, sureness(173.0, 617.0))
         assertEquals(Sure.PLAIN, sureness(6.08, Double.NaN))
-        assertEquals(Sure.RANGE, sureness(-24.0, 6.0, change = true), "a change is always a range")
-        assertEquals(Sure.RANGE, sureness(2.4, 15.0, change = true), "and crossing zero is not unknown")
+        assertEquals(Sure.CERTAIN, sureness(-24.0, 3.0), "a change by the same lines, sign aside")
+        assertEquals(Sure.LOOSE, sureness(-35.0, 27.0))
+        assertEquals(Sure.UNKNOWN, sureness(2.4, 15.0), "a change crossing zero is unknown")
+        assertEquals(Sure.UNKNOWN, sureness(-0.35, 0.35), "and so is one reaching it")
+        assertEquals(Sure.LOOSE, sureness(-0.36, 0.34), "one side of zero, however near: its direction is known")
 
         assertEquals("6.34s +-5.0%", durationWithInterval(Estimate(listOf(6.20e9, 6.37e9, 6.45e9))))
         assertEquals("370..560ms", durationWithInterval(Estimate(listOf(422e6, 486e6, 490e6))))
@@ -42,14 +45,15 @@ class ProfileTest {
         assertEquals("6.08s", durationWithInterval(Estimate(listOf(6.08e9))), "one run: the figure alone")
     }
 
-    /** A change's direction once, the end nearer zero first; no direction where the range reaches or crosses zero. */
+    /** A change's direction once, the end nearer zero first; a range reaching or crossing zero is `?` and never written. */
     @Test
     fun `a change range is written by its direction`() {
         assertEquals("-(8.2..62)%", percentChangeRange(-62.0, -8.2, "%"), "a decrease: the least it moved first")
         assertEquals("+(180..300)%", percentChangeRange(175.0, 300.0, "%"))
         assertEquals("+(4.7..5.9)pp", percentChangeRange(4.7, 5.9, "pp"))
-        assertEquals("-13..+18%", percentChangeRange(-13.0, 18.0, "%"), "across zero: no direction, its signs")
-        assertEquals("-0.7..0.0pp", percentChangeRange(-0.7, 0.0, "pp"), "reaching zero: no direction, and 0 has no sign")
+        assertEquals("-(0.0..0.7)pp", percentChangeRange(-0.7, -0.02, "pp"), "near zero, one side: the arrow keeps the sign")
+        assertFailsWith<IllegalArgumentException>("across zero is unknown") { percentChangeRange(-13.0, 18.0, "%") }
+        assertFailsWith<IllegalArgumentException>("and so is reaching it") { percentChangeRange(-0.7, 0.0, "pp") }
         assertEquals("-(3.7..5.7)s", durationChangeRange(-5.65e9, -3.65e9), "time: both ends in the larger one's unit")
         assertEquals("-(0.95..1.2)ms", durationChangeRange(-1.20e6, -0.95e6))
         assertEquals("-(0.15..2.4)s", durationChangeRange(-2.36e9, -0.152e9), "two significant digits each end")
@@ -60,7 +64,7 @@ class ProfileTest {
         withSymbols(unicode = true) {
             assertEquals("↓8.2..62%", percentChangeRange(-62.0, -8.2, "%"))
             assertEquals("↑180..300%", percentChangeRange(175.0, 300.0, "%"))
-            assertEquals("-13..+18%", percentChangeRange(-13.0, 18.0, "%"))
+            assertEquals("↓0.0..0.7pp", percentChangeRange(-0.7, -0.02, "pp"))
             assertEquals("↓3.7..5.7s", durationChangeRange(-5.65e9, -3.65e9))
         }
     }

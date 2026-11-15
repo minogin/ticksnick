@@ -380,7 +380,7 @@ Operation                                    |  Executions Per parent Parallel  
 ---------------------------------------------+-----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------
       select                                 |     278,001                           42.5s +-1.1%      52% +-0.4pp       4.01s +-9.1%                         611us +-1.1% |     62.8us     1.28ms     11.7ms      348ms
                                              |     278,001                           33.1s +-2.9%      57% +-0.6pp       3.70s +-8.0%                         475us +-2.9% |     49.9us      995us     8.75ms      190ms
-                                             |           =          =                  -(20..24)%    +(4.7..5.9)pp         -17..+1.8%                 =         -(20..24)% |       -21%       -22%       -25%       -45%
+                                             |           =          =                  -(20..24)%    +(4.7..5.9)pp                  ?                 =         -(20..24)% |       -21%       -22%       -25%       -45%
 
 OWN THREAD-TIME - outside the operations inside, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
                            |                                                  Load                                                   |             Long             |               Spread
@@ -394,7 +394,7 @@ dependencies               |          23.2s +-2.6%        5.58% +-0.1pp         
                            |            +(80..91)%        +(8.7..9.2)pp                 =             =                   +(80..91)% |       +33%     +62%     +33% |      +52%        +22%       =     =
 merge                      |          59.0s +-2.1%        14.2% +-0.2pp                     199,138,728                 296ns +-2.1% |         ~8   27.7ms   9.01ms |     43.6s        1.35       4    12
                            |          59.7s +-3.3%        20.1% +-0.5pp                     199,138,728                 300ns +-3.3% |         ~4   9.51ms   7.00ms |     38.3s        1.56       4    12
-                           |           -2.1..+4.3%        +(5.5..6.4)pp                 =             =                  -2.1..+4.3% |       -56%     -66%     -22% |      -12%        +15%       =     =
+                           |                     ?        +(5.5..6.4)pp                 =             =                            ? |       -56%     -66%     -22% |      -12%        +15%       =     =
 ```
 
 A diff has everything a report has, with the same names and forms. A row is three lines: before, after,
@@ -402,13 +402,16 @@ and the change, so a diff is as wide as a report and every number sits above the
 `Cores`, `Sampling` and `Sampled` are a line per side, `slowest:` is before's list and then after's,
 and a note under a table that only one side has names it.
 
-- **The change is always a range**, the ends of its 95% interval, its direction written once before it
+- **The change is a range**, the ends of its 95% interval, its direction written once before it
   and the end nearer zero first, so the first number is the least it moved: `-(20..24)%` is between 20
   and 24% less, `+(4.7..5.9)pp` for what is itself a percentage, `=` for no change. With `--unicode` they
-  read `↓20..24%` and `↑4.7..5.9pp`. A decrease stops at 100%.
-- **A direction means a certain one.** The range is all that is said about how sure a change is: one
-  that reaches or crosses zero has no direction and keeps its signs, `-2.1..+4.3%`: it could go either
-  way, and more runs would narrow it. A change from or to a figure that is `?` is `?` too.
+  read `↓20..24%` and `↑4.7..5.9pp`. A decrease stops at 100%. A change is judged by the same lines as a
+  figure, against the change itself, and certain or loose it is written as its range.
+- **A direction means a known one.** The range is all that is said about how sure a change is. One
+  whose interval reaches or crosses zero, as `merge`'s time above, could go either way: its direction is
+  not known, so it is `?`, as a figure whose interval reaches 0 is, and more runs would narrow it. A
+  range on one side of zero keeps its arrow however near zero it ends: `-(0.0..0.7)pp` went down, by
+  0.7pp at most. A change from or to a figure that is `?` is `?` too.
 - **Calls and Executions are the check.** `=` means both sides did the same work, so a change in
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was

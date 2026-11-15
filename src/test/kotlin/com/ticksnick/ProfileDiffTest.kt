@@ -100,7 +100,10 @@ class ProfileDiffTest {
             // A change is always a range, the interval's ends, in time and in percent.
             assertTrue("11.0s -> 8.00s" in header && Regex("""-\([0-9.]+\.\.[0-9.]+\)%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
-            assertTrue("?" !in diffRow(text, "same")[2] && "could be noise" !in text, text)
+            // `same` moved by a nanosecond either way: its change crosses zero, so its direction is not known, `?`, and
+            // no range with both signs is written.
+            val same = diffRow(text, "same")[2]
+            assertTrue("?" in same && !Regex("""[-+][0-9.]+\.\.[-+]""").containsMatchIn(same) && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)
             assertTrue("no interval, so any" !in text, "runs on each side have their intervals: $text")
             assertTrue(text.lines().first { it.startsWith("NESTED WALL TIME") }.endsWith("the change its 95% interval"), text)
@@ -336,6 +339,34 @@ class ProfileDiffTest {
             assertTrue(Estimate(listOf(1.0, 3.0, 0.1)).unknown() && !Estimate(listOf(1.0, 1.05, 1.1)).unknown())
             val line = ProfileDiff(Profile.load(before), Profile.load(after)).render().lines().first { it.startsWith("Wall time") }
             assertTrue(Regex("""\?\s+\?$""").containsMatchIn(line), line)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * A change is judged by the same lines as a figure: crossing zero it is unknown, `?`, in time and in percent;
+     * certain it is still its range. 1.0, 1.1, 1.2 s against 1.06, 1.16, 1.11 s moves 0.01 s, ±0.27 s; 10.0, 10.1,
+     * 10.2 s against 8.0, 8.1, 8.2 s moves 2 s, ±0.23 s, 11% of it.
+     */
+    @Test
+    fun `a change crossing zero is not known, and a certain one is still a range`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            fun spans(folder: Path, vararg nanos: Long) = nanos.forEachIndexed { i, span ->
+                Files.createDirectories(folder)
+                RunStore.save(profile(emptyList(), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+            }
+            fun wallLine(b: Path, a: Path) = ProfileDiff(Profile.load(b), Profile.load(a)).render().lines().first { it.startsWith("Wall time") }
+            spans(dir.resolve("b1"), 1_000_000_000, 1_100_000_000, 1_200_000_000)
+            spans(dir.resolve("a1"), 1_060_000_000, 1_160_000_000, 1_110_000_000)
+            val across = wallLine(dir.resolve("b1"), dir.resolve("a1"))
+            assertTrue(Regex("""1\.10s -> 1\.11s\s+\?\s+\?$""").containsMatchIn(across), across)
+            spans(dir.resolve("b2"), 10_000_000_000, 10_100_000_000, 10_200_000_000)
+            spans(dir.resolve("a2"), 8_000_000_000, 8_100_000_000, 8_200_000_000)
+            val certain = wallLine(dir.resolve("b2"), dir.resolve("a2"))
+            assertEquals(Sure.CERTAIN, Change(Estimate(listOf(10.0, 10.1, 10.2)), Estimate(listOf(8.0, 8.1, 8.2))).let { sureness(it.delta, it.half) })
+            assertTrue(Regex("""-\(1\.8\.\.2\.2\)s\s+-\(18\.\.22\)%$""").containsMatchIn(certain), certain)
         } finally {
             dir.toFile().deleteRecursively()
         }

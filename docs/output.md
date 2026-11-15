@@ -24,7 +24,7 @@ graph. It runs on four threads in three batches of about 27 s each. Its coarse l
 Runs          1 run of 'naive', one JVM: no interval
 
 WARNINGS
-  Runs: 1 in 'naive', no interval - shares hold, durations need a second run
+  Runs: 1 in 'naive', no interval - run at least 3 times
 
 Tags          warmups: 2; batches: 3; roots: org.apache.*
 Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; CPU: Intel64 Family 6 Model 197 Stepping 2, GenuineIntel; Processors: 14; Heap: 18.0 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
@@ -48,8 +48,9 @@ A second line, further in, gives the cause.
 
 The common ones:
 
-- `Runs: 1 in 'naive', no interval` - one JVM cannot say how much the next one will differ. Save
-  more runs into the same folder.
+- `Runs: 1 in 'naive', no interval` - one JVM cannot say how much the next one will differ. Save at
+  least 3 runs into the same folder: two give an interval too wide to say much. A line right over each
+  table says the same.
 - `CPU clock: ran at 140%..230% during the run` (or `across the runs`) - the CPU's frequency changed, so
   durations drift with it. Shares are not affected. Turbo off holds it still.
 - ``The labels, mostly `visit`, may add up to P to the work inside them and W to the wall time`` - every
@@ -124,6 +125,7 @@ the runs.
 
 ```
 NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted
+1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell
                                    |                                        Load                                         |                    Long
 Operation                          |  Executions Per parent Parallel     Wall v % parent     Paused   Waiting       Mean |        p50        p90        p99        Max
 -----------------------------------+-------------------------------------------------------------------------------------+--------------------------------------------
@@ -240,6 +242,7 @@ longest executions on that path, with their keys.
 
 ```
 OWN THREAD-TIME - outside the operations inside, out of 104s active time
+1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell
                            |                                  Load                                   |             Long             |               Spread
 Operation                  | Thread-time v Thread-time%   Waiting         Calls Thread-time per call | Long calls     Time  Longest | Wall-time Concurrency Workers  Pool
 ---------------------------+-------------------------------------------------------------------------+------------------------------+------------------------------------
@@ -332,12 +335,14 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
   slower.
 - **What says how much has an interval:** Wall, % parent, Paused, Waiting, Mean, Thread-time%,
   Thread-time and Thread-time per call. How it is written depends on how wide it is against the figure:
-  - **up to 20%:** the figure and its interval, `42.5s +-1.1%`, the interval a percent of the figure; a
-    percentage takes points, `52% +-0.4pp`;
-  - **over 20%:** the interval's two ends, `370..560ms`; a percentage's stop at 100%;
-  - **as wide as the figure or more**, so that it would reach 0: `?`, measured too little to say.
+  - **up to 20%, certain:** the figure and its interval, `42.5s +-1.1%`, the interval a percent of the
+    figure; a percentage takes points, `52% +-0.4pp`;
+  - **over 20%, loose:** the interval's two ends, `370..560ms`; a percentage's stop at 100%;
+  - **as wide as the figure or more, unknown**, so that it would reach 0: `?`, measured too little to say.
 
-  One run has no interval: the figure alone, `52%`.
+  One run has no interval: the figure alone, `52%`. It prints as a certain one would, so a line right
+  over each table says it may not be: `1 run: no interval, so any figure below may be loose or unknown -
+  run at least 3 times to tell`.
 - **No `+-` on what says how it ran:** a percentile is the mean of the runs' percentiles, Max is the
   largest of the runs, and the Long and Spread columns have none.
 - **Counted figures** print plainly when the runs agree, and `~` their mean when not: Executions, Per
@@ -408,7 +413,10 @@ and a note under a table that only one side has names it.
   time is a change in the code. Two different counts mean different work.
 - **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was
   removed.
-- **One run on a side** gives the change with no interval, and a warning says so.
+- **One run on a side** gives the change with no interval. A warning says so, and a line right over
+  each table names the side: `1 run before: no interval, so any change below may be loose or unknown -
+  run at least 3 times on each side to tell` (`1 run after`, `1 run on each side`). The tables' headings
+  then claim no interval.
 - **`CPU clock`** under the header is each side's mean. When the two differ, a warning says by how
   much: times are then not comparable, while shares still are.
 

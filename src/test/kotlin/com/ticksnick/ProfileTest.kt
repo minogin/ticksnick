@@ -89,6 +89,7 @@ class ProfileTest {
             // Over 20% of the figure with three runs: the interval's own ends.
             assertTrue(Regex("""runBatch +[0-9.]+\.\.[0-9.]+s per execution""").containsMatchIn(text), "the batch, quotable: $text")
             assertTrue("WARNINGS" !in text, "nothing to warn about: $text")
+            assertTrue("no interval, so any" !in text, "three runs have their intervals: $text")
         } finally {
             dir.toFile().deleteRecursively()
         }
@@ -110,15 +111,20 @@ class ProfileTest {
     }
 
     @Test
-    fun `one run renders as a profile, warned that its times have no interval`() {
+    fun `one run renders as a profile, warned that its figures have no interval`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             profile(listOf(node("runBatch", listOf(1_000L, 2_000L)))).save(dir.resolve("naive"))
             val lines = TickSnick.load(dir.resolve("naive")).render().lines()
             val heading = lines.indexOf("WARNINGS")
             assertTrue(heading in 1..lines.indexOfFirst { it.startsWith("Wall time") }, "the warnings are not above the numbers:\n" + lines.joinToString("\n"))
-            assertEquals("  Runs: 1 in 'naive', no interval - shares hold, durations need a second run", lines[heading + 1])
+            assertEquals("  Runs: 1 in 'naive', no interval - run at least 3 times", lines[heading + 1])
             assertTrue(lines.any { "NESTED WALL TIME - each row" in it }, "not a profile report")
+            // A figure of one run prints plain, as a certain one does: right over each table, a line says it is not.
+            for (table in listOf("NESTED WALL TIME", "OWN THREAD-TIME")) assertEquals(
+                "1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell",
+                lines[lines.indexOfFirst { it.startsWith(table) } + 1], "right under $table:\n" + lines.joinToString("\n"),
+            )
         } finally {
             dir.toFile().deleteRecursively()
         }

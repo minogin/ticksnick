@@ -74,7 +74,9 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, THREAD_TIME)
     private val width = maxOf(wallText.width, ownText.width)
 
-    private val overRuns = if (before.runs.size > 1 || after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""
+    // Only with both sides over runs: a side of one run leaves the change no interval, and oneRunLine says so instead.
+    private val overRuns = if (before.runs.size > 1 && after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""
+    private val oneRun = oneRunLine(before.runs.size, after.runs.size)
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
     private fun Profile.active() = Estimate(runs.map { it.activeNanos.toDouble() })
@@ -125,6 +127,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
             appendLine()
             appendLine("NESTED WALL TIME${sym.dash}each row its whole span, matched by path$overRuns")
+            oneRun?.let { appendLine(it) }
             with(wallText) { rows() }
             if (sharedRows.isNotEmpty()) {
                 appendLine(SHARED_HEADING)
@@ -134,6 +137,7 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         }
         appendLine()
         appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, matched by name, sorted by the change$overRuns")
+        oneRun?.let { appendLine(it) }
         with(ownText) { rows() }
         perSide(before.fineNotes(), after.fineNotes())
         appendLine()

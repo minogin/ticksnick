@@ -29,6 +29,12 @@ internal const val RUN_EXECUTIONS_LISTED = 10
  */
 internal const val RUNS_CLOCK_SPREAD = 0.10
 
+/**
+ * The fewest runs a report asks for: two give an interval of 12.7 times their spread over the root of two,
+ * which leaves nearly every figure unknown; three give 4.30 over the root of three.
+ */
+internal const val RUNS_TO_ASK = 3
+
 /** How many warnings the `WARNINGS` section prints before it counts the rest instead of listing them. */
 internal const val MAX_WARNINGS = 10
 
@@ -131,13 +137,32 @@ internal fun durationWithInterval(e: Estimate): String = when (if (e.n < 2) Sure
 }
 
 /**
+ * The line right under a table's heading when a side has one run, null otherwise. A figure of one run
+ * has no interval and prints plain, as a certain one does; this says it is not known to be. In a report
+ * [after] is null; in a diff the line names the side, and every change of a side with one run has no
+ * interval either.
+ */
+internal fun oneRunLine(before: Int, after: Int? = null): String? {
+    val side = when {
+        after == null -> if (before == 1) "" else return null
+        before == 1 && after == 1 -> " on each side"
+        before == 1 -> " before"
+        after == 1 -> " after"
+        else -> return null
+    }
+    val what = if (after == null) "figure" else "change"
+    val where = if (after == null) "" else " on each side"
+    return "1 run$side: no interval, so any $what below may be loose or unknown${sym.dash}run at least $RUNS_TO_ASK times$where to tell"
+}
+
+/**
  * **How a program behaves: same code, same workload, same setup.** Every run in a folder (see
  * [RunStore.saveNew]), each figure their mean with a 95% interval from how much the runs differ.
  *
  * One run is one JVM, and one JVM cannot say how far its own numbers would move in the next one:
  * the clock, the heat, the heap layout, the JIT's choices. That is what a number for a report needs,
  * and the same program can move by 20% from one JVM to the next. A profile of one run renders with a
- * warning saying its times have no interval.
+ * warning, and a line over each table, saying its figures have no interval.
  *
  * Coarse rows are matched by path and fine rows by name, as in [ProfileDiff]. A row missing from
  * some runs says in how many it was, and its figures are over those.
@@ -603,6 +628,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             "NESTED WALL TIME${sym.dash}each row its whole span, under its parent as it ran" +
                     (if (paused) "; a pause is charged to every operation it interrupted" else "") + overRuns
         )
+        oneRunLine(runs.size)?.let { appendLine(it) }
         with(wallText) { rows() }
         // An operation with more than one caller is a row under each, and those rows are its figures
         // under that caller alone. Its percentiles over everything are a different question - "how long
@@ -667,7 +693,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     internal fun StringBuilder.ownSection() {
         val fine = ownTable
         appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, out of ${duration(runs.map { it.activeNanos.toDouble() }.average())} active time$overRuns")
-        if (fine.rows.isNotEmpty()) with(ownText) { rows() }
+        if (fine.rows.isNotEmpty()) {
+            oneRunLine(runs.size)?.let { appendLine(it) }
+            with(ownText) { rows() }
+        }
         // A table with no rows is two rules around nothing. Say what happened instead: an empty
         // table is nearly always a run too short for the sampler to catch, and that is worth
         // naming rather than leaving the reader to infer from a blank.

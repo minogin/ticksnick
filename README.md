@@ -203,8 +203,8 @@ Reports are ASCII. `render(unicode = true)` and `diff(before, after, unicode = t
 output through a pipe (Gradle, a script) is written in the platform's charset unless the JVM has
 `-Dstdout.encoding=UTF-8`.
 
-A single run renders as a report of its own. It warns that its times have no interval. Its shares of
-the parent are still reliable.
+A single run renders as a report of its own. It warns that its figures have no interval: one run cannot say
+how sure any of them is. Save at least 3 runs to tell.
 
 ## What it costs
 

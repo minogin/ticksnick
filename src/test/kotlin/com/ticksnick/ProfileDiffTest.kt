@@ -102,6 +102,8 @@ class ProfileDiffTest {
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             assertTrue("?" !in diffRow(text, "same")[2] && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)
+            assertTrue("no interval, so any" !in text, "runs on each side have their intervals: $text")
+            assertTrue(text.lines().first { it.startsWith("NESTED WALL TIME") }.endsWith("the change its 95% interval"), text)
         } finally {
             dir.toFile().deleteRecursively()
         }
@@ -121,9 +123,28 @@ class ProfileDiffTest {
             val header = text.lines().first { it.startsWith("runBatch ") }
             assertTrue("-25%" in header && "?" !in header && "+-" !in header.substringAfter("-25%"), header)
             assertTrue("NaN" !in text, text)
+            // Right over each table, the side named; and no heading claims an interval the change does not have.
+            for (table in listOf("NESTED WALL TIME", "OWN THREAD-TIME")) {
+                val at = lines.indexOfFirst { it.startsWith(table) }
+                assertEquals(
+                    "1 run before: no interval, so any change below may be loose or unknown - run at least 3 times on each side to tell",
+                    lines[at + 1], "right under $table: $text",
+                )
+                assertTrue("95% interval" !in lines[at], lines[at])
+            }
         } finally {
             dir.toFile().deleteRecursively()
         }
+    }
+
+    @Test
+    fun `the one-run line names the side, and is absent with runs on each side`() {
+        assertEquals("1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell", oneRunLine(1))
+        assertEquals(null, oneRunLine(2))
+        assertTrue(oneRunLine(1, 3)!!.startsWith("1 run before: no interval, so any change below"))
+        assertTrue(oneRunLine(3, 1)!!.startsWith("1 run after: "))
+        assertTrue(oneRunLine(1, 1)!!.startsWith("1 run on each side: "))
+        assertEquals(null, oneRunLine(2, 3))
     }
 
     /** A long name sizes its table in a diff of one run, a diff of several and the report over runs. */

@@ -41,6 +41,11 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   parent, was `COARSE OPERATIONS`; `OWN THREAD-TIME`, each operation outside the operations inside it,
   was `COARSE AND FINE OPERATIONS`. Both hold coarse and fine operations, and the first column of both
   is `Operation`; the wall table's was `Coarse operation`.
+- **One run is said right over each table**, since its figures print plain, as certain ones do: `1 run:
+  no interval, so any figure below may be loose or unknown - run at least 3 times to tell`. A diff names
+  the side, `1 run before`, `1 run after` or `1 run on each side`, and its headings no longer claim an
+  interval then. The `Runs: 1` warning asks for 3 runs too; it said `shares hold, durations need a second
+  run`.
 
 ### The own table
 

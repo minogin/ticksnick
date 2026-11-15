@@ -98,7 +98,7 @@ class ProfileDiffTest {
             val header = text.lines().first { it.startsWith("runBatch ") }
             // The interval is all that is said about how sure the change is: no mark beside it.
             // A change is always a range, the interval's ends, in time and in percent.
-            assertTrue("11.0s -> 8.00s" in header && Regex("""-[0-9.]+\.\.-?[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
+            assertTrue("11.0s -> 8.00s" in header && Regex("""-\([0-9.]+\.\.[0-9.]+\)%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             assertTrue("?" !in diffRow(text, "same")[2] && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)
@@ -176,7 +176,7 @@ class ProfileDiffTest {
                 "diff 3:1" to { u -> TickSnick.diff(three, otherOne, u) },
                 "diff 3:3" to { u -> TickSnick.diff(three, other, u) },
             )
-            val unicodeSymbols = UNICODE_SYMBOLS.run { plusMinus + micro + arrow + dash + ellipsis + times }.filter { it.code > 127 }.toSet()
+            val unicodeSymbols = UNICODE_SYMBOLS.run { plusMinus + micro + arrow + dash + ellipsis + times + down + up }.filter { it.code > 127 }.toSet()
             var sawPlusMinus = false
             for ((what, render) in shapes) {
                 val ascii = render(false)

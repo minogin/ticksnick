@@ -204,14 +204,30 @@ internal fun rangeText(low: String, high: String): String = if (low == high) low
 
 /**
  * **An interval as a range**: one figure with its margin, so its two ends in one unit, said once at the right,
- * `1.26..1.73s`, `59..67%`, `-30..-18%`. Unlike [rangeText], whose ends are figures of their own, each with its unit.
+ * `1.26..1.73s`, `59..67%`. Unlike [rangeText], whose ends are figures of their own, each with its unit. A change's
+ * interval is [changeRange].
  */
 internal fun intervalRange(low: String, high: String, unit: String): String = "$low..$high$unit"
 
-/** An end of a change's range, signed: `-30`, `+4.7`; a 0 is `0.0`, not `-0.0`. */
-internal fun signedEnd(x: Double): String =
-    (if (kotlin.math.abs(x) < 9.95) String.format(Locale.ROOT, "%+.1f", x) else String.format(Locale.ROOT, "%+.0f", x))
-        .let { if (it.drop(1).trimEnd('0', '.').isEmpty()) it.drop(1) else it }
+/**
+ * **A change's interval as text: the one function** for every change range a diff writes, in its tables and its
+ * header. Its direction once, before the numbers, and the end nearer zero first, so the first number is the least
+ * it moved: `↓8.2..62%`, `↑175..300%`, in ASCII `-(8.2..62)%`, `+(175..300)%`. An arrow means a certain direction:
+ * a range from [low] to [high] that reaches or crosses zero has none, so it keeps its signs, low end first,
+ * `-13..+18%`. [magnitude] writes one end without a sign, in [unit]; an end it writes as zero takes no sign.
+ */
+internal fun changeRange(low: Double, high: Double, unit: String, magnitude: (Double) -> String): String {
+    fun signed(x: Double) = magnitude(kotlin.math.abs(x)).let { if (it.trimEnd('0', '.').isEmpty()) it else (if (x < 0) "-" else "+") + it }
+    return when {
+        high < 0 -> sym.down + magnitude(-high) + ".." + magnitude(-low) + sym.directedClose + unit
+        low > 0 -> sym.up + magnitude(low) + ".." + magnitude(high) + sym.directedClose + unit
+        else -> signed(low) + ".." + signed(high) + unit
+    }
+}
+
+/** A change in percent or points as [changeRange] writes it, `↓18..30%`, `↑4.7..5.9pp`: one decimal under 10, whole above. */
+internal fun percentChangeRange(low: Double, high: Double, unit: String): String =
+    changeRange(low, high, unit) { if (it < 9.95) String.format(Locale.ROOT, "%.1f", it) else String.format(Locale.ROOT, "%.0f", it) }
 
 
 /**
@@ -355,11 +371,17 @@ internal fun durationCertain(value: Double, half: Double): String = duration(val
 internal fun relativeText(pct: Double): String =
     if (pct < 9.95) String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.1f%%", pct) else String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.0f%%", pct)
 
-/** `4.39..458ms`, `-5.65..-3.65s`: two durations in the larger one's unit. */
-internal fun durationRange(lo: Double, hi: Double, signed: Boolean = false): String {
+/** `4.39..458ms`: two durations in the larger one's unit. */
+internal fun durationRange(lo: Double, hi: Double): String {
     val unit = durationUnitOf(maxOf(kotlin.math.abs(lo), kotlin.math.abs(hi)))
-    fun one(v: Double) = (if (v < 0) "-" else if (signed && v > 0) "+" else "") + significant(kotlin.math.abs(v) / unit.scale)
+    fun one(v: Double) = (if (v < 0) "-" else "") + significant(kotlin.math.abs(v) / unit.scale)
     return intervalRange(one(lo), one(hi), unit.text)
+}
+
+/** A change in time as [changeRange] writes it, both ends in the larger one's unit: `↓3.65..5.65s`. */
+internal fun durationChangeRange(low: Double, high: Double): String {
+    val unit = durationUnitOf(maxOf(kotlin.math.abs(low), kotlin.math.abs(high)))
+    return changeRange(low, high, unit.text) { significant(it / unit.scale) }
 }
 
 /** Three significant digits, below 1 as well as above it: `0.444`, `0.00128`, `9.15`, `117`. */

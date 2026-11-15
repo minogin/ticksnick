@@ -88,12 +88,12 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         if (b.unknown() || a.unknown())
             return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), UNKNOWN, UNKNOWN, suffix).trimEnd())
         val sign = if (c.delta < 0) "-" else "+"
-        // A change is always a range, the interval's own ends, in time and in percent: `-5.65..-3.65s  -42..-27%`.
+        // A change is always a range, in time and in percent, as changeRange writes it: `↓3.65..5.65s  ↓27..42%`.
         val ranged = sureness(c.delta, c.half, change = true) == Sure.RANGE
-        val absolute = if (ranged) durationRange(c.delta - c.half, c.delta + c.half, signed = true) else sign + duration(abs(c.delta))
+        val absolute = if (ranged) durationChangeRange(c.delta - c.half, c.delta + c.half) else sign + duration(abs(c.delta))
         val r = c.relative * 100
         val h = c.relativeHalf * 100
-        val relative = if (sureness(r, h, change = true) == Sure.RANGE) intervalRange(signedEnd(maxOf(-100.0, r - h)), signedEnd(r + h), "%") else signedPercent(c.relative)
+        val relative = if (sureness(r, h, change = true) == Sure.RANGE) percentChangeRange(maxOf(-100.0, r - h), r + h, "%") else signedPercent(c.relative)
         return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
     }
 

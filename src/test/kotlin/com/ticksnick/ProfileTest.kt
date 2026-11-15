@@ -42,6 +42,24 @@ class ProfileTest {
         assertEquals("6.08s", durationWithInterval(Estimate(listOf(6.08e9))), "one run: the figure alone")
     }
 
+    /** A change's direction once, the end nearer zero first; no direction where the range reaches or crosses zero. */
+    @Test
+    fun `a change range is written by its direction`() {
+        assertEquals("-(8.2..62)%", percentChangeRange(-62.0, -8.2, "%"), "a decrease: the least it moved first")
+        assertEquals("+(175..300)%", percentChangeRange(175.0, 300.0, "%"))
+        assertEquals("+(4.7..5.9)pp", percentChangeRange(4.7, 5.9, "pp"))
+        assertEquals("-13..+18%", percentChangeRange(-13.0, 18.0, "%"), "across zero: no direction, its signs")
+        assertEquals("-0.7..0.0pp", percentChangeRange(-0.7, 0.0, "pp"), "reaching zero: no direction, and 0 has no sign")
+        assertEquals("-(3.65..5.65)s", durationChangeRange(-5.65e9, -3.65e9), "time: both ends in the larger one's unit")
+        assertEquals("-(0.950..1.20)ms", durationChangeRange(-1.20e6, -0.95e6))
+        withSymbols(unicode = true) {
+            assertEquals("↓8.2..62%", percentChangeRange(-62.0, -8.2, "%"))
+            assertEquals("↑175..300%", percentChangeRange(175.0, 300.0, "%"))
+            assertEquals("-13..+18%", percentChangeRange(-13.0, 18.0, "%"))
+            assertEquals("↓3.65..5.65s", durationChangeRange(-5.65e9, -3.65e9))
+        }
+    }
+
     @Test
     fun `a folder of runs renders with intervals, its batches listed, and a row some runs lack`() {
         val dir = Files.createTempDirectory("ticksnick")

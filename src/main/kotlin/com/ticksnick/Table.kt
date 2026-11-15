@@ -559,10 +559,10 @@ internal class DiffText(
         if (half.isNaN()) return layout.cell(c, value, "")
         val v = if (share) (a - b) * scale else relativeChange(b, a) * 100
         val unit = if (share) "pp" else "%"
-        // A change is always a range, the interval's own ends, stopping at -100% (sureness: change).
+        // A change is always a range, as changeRange writes it, stopping at -100% (sureness: change).
         if (sureness(v, half, change = true) == Sure.PLAIN) return layout.cell(c, value, "")
         val lo = if (share) v - half else maxOf(-100.0, v - half)
-        return layout.cell(c, intervalRange(signedEnd(lo), signedEnd(v + half), unit), "")
+        return layout.cell(c, percentChangeRange(lo, v + half, unit), "")
     }
 
 }

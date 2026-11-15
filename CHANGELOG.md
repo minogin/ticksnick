@@ -25,10 +25,13 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   Wider, the interval's two ends: `371..561ms`, a share's stopping at 100%. As wide as the figure or more,
   so that it would reach 0: `?`. The forms `35 +-3s` and `63 +-9.2%` are gone.
 - **A change in a diff is always a range**, the ends of its 95% interval, its direction written once
-  before it and the end nearer zero first: `-(18..30)%`, `+(4.7..5.9)pp`, `-(3.65..5.65)s` in the header,
+  before it and the end nearer zero first: `-(18..30)%`, `+(4.7..5.9)pp`, `-(3.7..5.7)s` in the header,
   and in Unicode `↓18..30%`, `↑4.7..5.9pp`. A direction means a certain one: a range that reaches or
   crosses zero keeps its signs, `-13..+18%`. A decrease stops at 100%. A change from or to a figure that
   is `?` is `?` too.
+- **An interval's ends have at most two significant digits each**, a figure's range and a change's:
+  `0.15..2.4s`, `7.3..11%`, `↑180..300%`; never more places than the column writes (a change's tenths,
+  `-0.7..0.0pp`). A certain figure keeps three digits on its one value, `6.34s +-5.0%`.
 - **`Waiting` replaces `Runnable / Waiting`**: the part of a row's time spent waiting, blank where
   nothing waited. Runnable was 100% less it.
 

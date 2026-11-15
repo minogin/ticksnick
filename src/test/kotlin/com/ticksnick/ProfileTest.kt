@@ -37,7 +37,7 @@ class ProfileTest {
         assertEquals(Sure.RANGE, sureness(2.4, 15.0, change = true), "and crossing zero is not unknown")
 
         assertEquals("6.34s +-5.0%", durationWithInterval(Estimate(listOf(6.20e9, 6.37e9, 6.45e9))))
-        assertEquals("371..561ms", durationWithInterval(Estimate(listOf(422e6, 486e6, 490e6))))
+        assertEquals("370..560ms", durationWithInterval(Estimate(listOf(422e6, 486e6, 490e6))))
         assertEquals("?", durationWithInterval(Estimate(listOf(56.1e6, 4.39e6, 458e6))), "the interval reaches 0")
         assertEquals("6.08s", durationWithInterval(Estimate(listOf(6.08e9))), "one run: the figure alone")
     }
@@ -46,17 +46,22 @@ class ProfileTest {
     @Test
     fun `a change range is written by its direction`() {
         assertEquals("-(8.2..62)%", percentChangeRange(-62.0, -8.2, "%"), "a decrease: the least it moved first")
-        assertEquals("+(175..300)%", percentChangeRange(175.0, 300.0, "%"))
+        assertEquals("+(180..300)%", percentChangeRange(175.0, 300.0, "%"))
         assertEquals("+(4.7..5.9)pp", percentChangeRange(4.7, 5.9, "pp"))
         assertEquals("-13..+18%", percentChangeRange(-13.0, 18.0, "%"), "across zero: no direction, its signs")
         assertEquals("-0.7..0.0pp", percentChangeRange(-0.7, 0.0, "pp"), "reaching zero: no direction, and 0 has no sign")
-        assertEquals("-(3.65..5.65)s", durationChangeRange(-5.65e9, -3.65e9), "time: both ends in the larger one's unit")
-        assertEquals("-(0.950..1.20)ms", durationChangeRange(-1.20e6, -0.95e6))
+        assertEquals("-(3.7..5.7)s", durationChangeRange(-5.65e9, -3.65e9), "time: both ends in the larger one's unit")
+        assertEquals("-(0.95..1.2)ms", durationChangeRange(-1.20e6, -0.95e6))
+        assertEquals("-(0.15..2.4)s", durationChangeRange(-2.36e9, -0.152e9), "two significant digits each end")
+        assertEquals("0.15..2.4s", durationRange(0.152e9, 2.36e9))
+        assertEquals("0.95..1.0s", durationRange(0.95e9, 0.996e9), "the unit taken after rounding: 996ms is 1.0s")
+        assertEquals("10", intervalEnd(9.96), "the decade taken after rounding")
+        assertEquals("0.7", intervalEnd(0.7, 1), "never more places than the column writes")
         withSymbols(unicode = true) {
             assertEquals("↓8.2..62%", percentChangeRange(-62.0, -8.2, "%"))
-            assertEquals("↑175..300%", percentChangeRange(175.0, 300.0, "%"))
+            assertEquals("↑180..300%", percentChangeRange(175.0, 300.0, "%"))
             assertEquals("-13..+18%", percentChangeRange(-13.0, 18.0, "%"))
-            assertEquals("↓3.65..5.65s", durationChangeRange(-5.65e9, -3.65e9))
+            assertEquals("↓3.7..5.7s", durationChangeRange(-5.65e9, -3.65e9))
         }
     }
 
@@ -79,7 +84,7 @@ class ProfileTest {
             assertTrue("6.22s  5.96s  5.90s" in text, "the first run's batches, in order: $text")
             val row = text.lines().first { it.startsWith("runBatch") }
             // The runs' mean batches are 6.03, 6.50 and 7.16 s: 6.56 s, ±1.41 s with three runs, 21%: a range.
-            assertTrue("5.15..7.97s" in row, row)
+            assertTrue("5.2..8.0s" in row, row)
             assertTrue(text.lines().any { it.trim().startsWith("rare (1 of 3 runs)") }, text)
             // Over 20% of the figure with three runs: the interval's own ends.
             assertTrue(Regex("""runBatch +[0-9.]+\.\.[0-9.]+s per execution""").containsMatchIn(text), "the batch, quotable: $text")

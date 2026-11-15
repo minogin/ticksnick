@@ -213,10 +213,11 @@ private fun shareText(c: Column, v: Double): String = if (c.form == Form.PARENT_
 private fun pointsText(p: Double): String =
     if (p < 9.95) String.format(Locale.ROOT, "${sym.plusMinus}%.1fpp", p) else String.format(Locale.ROOT, "${sym.plusMinus}%.0fpp", p)
 
-/** `59..67%`, `0.84..1.13%`: whole percents from 10% up, three digits below, where whole ones would round a range away. */
-private fun shareRange(c: Column, lo: Double, hi: Double): String =
-    if (c.form == Form.PARENT_SHARE && hi >= 10) intervalRange(String.format(Locale.ROOT, "%.0f", lo), String.format(Locale.ROOT, "%.0f", hi), "%")
-    else intervalRange(threeDigits(lo), threeDigits(hi), "%")
+/** `59..67%`, `0.84..1.1%`: by [intervalEnd]; a share of the parent in whole percents from 10% up, as its one value is. */
+private fun shareRange(c: Column, lo: Double, hi: Double): String {
+    val places = if (c.form == Form.PARENT_SHARE && hi >= 10) 0 else Int.MAX_VALUE
+    return intervalRange(intervalEnd(lo, places), intervalEnd(hi, places), "%")
+}
 
 /**
  * **A figure and its interval as a cell writes them**, value text and interval text, by [sureness]. [plain] is the

@@ -334,7 +334,7 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
   Thread-time and Thread-time per call. How it is written depends on how wide it is against the figure:
   - **up to 20%:** the figure and its interval, `42.5s +-1.1%`, the interval a percent of the figure; a
     percentage takes points, `52% +-0.4pp`;
-  - **over 20%:** the interval's two ends, `371..561ms`; a percentage's stop at 100%;
+  - **over 20%:** the interval's two ends, `370..560ms`; a percentage's stop at 100%;
   - **as wide as the figure or more**, so that it would reach 0: `?`, measured too little to say.
 
   One run has no interval: the figure alone, `52%`.
@@ -365,9 +365,9 @@ A warning about either profile is repeated here, and that includes a profile who
 
 ```
 Diff          naive (4 runs) -> centralEdges (4 runs)
-Wall time        117s -> 91.6s    -(23.6..27.1)s         -(20..23)%
-  Active         104s -> 79.2s    -(23.1..26.1)s         -(22..25)%
-runBatch        27.5s -> 19.4s    -(7.73..8.45)s         -(28..31)%       per execution
+Wall time        117s -> 91.6s    -(24..27)s             -(20..23)%
+  Active         104s -> 79.2s    -(23..26)s             -(22..25)%
+runBatch        27.5s -> 19.4s    -(7.7..8.5)s           -(28..31)%       per execution
 
 NESTED WALL TIME - each row its whole span, matched by path; each side the mean of its runs, the change its 95% interval
                                              |                                                            Load                                                             |                    Long

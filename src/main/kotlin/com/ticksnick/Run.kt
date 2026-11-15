@@ -225,9 +225,25 @@ internal fun changeRange(low: Double, high: Double, unit: String, magnitude: (Do
     }
 }
 
-/** A change in percent or points as [changeRange] writes it, `↓18..30%`, `↑4.7..5.9pp`: one decimal under 10, whole above. */
+/** A change in percent or points as [changeRange] writes it, `↓18..30%`, `↑4.7..5.9pp`: tenths under 10, by [intervalEnd]. */
 internal fun percentChangeRange(low: Double, high: Double, unit: String): String =
-    changeRange(low, high, unit) { if (it < 9.95) String.format(Locale.ROOT, "%.1f", it) else String.format(Locale.ROOT, "%.0f", it) }
+    changeRange(low, high, unit) { intervalEnd(it, if (it < 9.95) 1 else 0) }
+
+/**
+ * **An interval's end: at most two significant digits**, a figure's range and a change's alike: `0.15`, `2.4`,
+ * `7.3`, `250`, `180`. A range is written only for what is more than 20% unsure, so a third digit claims a
+ * precision it does not have. No more than [maxDecimals] places either, where the column writes fewer (a change's
+ * tenths, a share of the parent's whole percents). Rounded once, half up; the decade is taken after rounding, so
+ * 9.96 is `10`. [v] is not negative.
+ */
+internal fun intervalEnd(v: Double, maxDecimals: Int = Int.MAX_VALUE): String {
+    // The double's shortest decimal, as String.format rounds it everywhere else: 3.65 is 3.7, not 3.6.
+    val exact = java.math.BigDecimal.valueOf(v)
+    if (v == 0.0) return exact.setScale(minOf(maxDecimals, 1)).toPlainString()
+    val two = exact.round(java.math.MathContext(2, java.math.RoundingMode.HALF_UP))
+    val exponent = two.precision() - two.scale() - 1
+    return exact.setScale(minOf(maxDecimals, 1 - exponent), java.math.RoundingMode.HALF_UP).toPlainString()
+}
 
 
 /**
@@ -371,24 +387,24 @@ internal fun durationCertain(value: Double, half: Double): String = duration(val
 internal fun relativeText(pct: Double): String =
     if (pct < 9.95) String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.1f%%", pct) else String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.0f%%", pct)
 
-/** `4.39..458ms`: two durations in the larger one's unit. */
+/** `4.4..460ms`: an interval of durations, both ends in the larger one's unit, each by [intervalEnd]. */
 internal fun durationRange(lo: Double, hi: Double): String {
-    val unit = durationUnitOf(maxOf(kotlin.math.abs(lo), kotlin.math.abs(hi)))
-    fun one(v: Double) = (if (v < 0) "-" else "") + significant(kotlin.math.abs(v) / unit.scale)
+    val unit = intervalUnitOf(maxOf(kotlin.math.abs(lo), kotlin.math.abs(hi)))
+    fun one(v: Double) = (if (v < 0) "-" else "") + intervalEnd(kotlin.math.abs(v) / unit.scale)
     return intervalRange(one(lo), one(hi), unit.text)
 }
 
-/** A change in time as [changeRange] writes it, both ends in the larger one's unit: `↓3.65..5.65s`. */
+/** A change in time as [changeRange] writes it, both ends in the larger one's unit: `↓3.7..5.7s`. */
 internal fun durationChangeRange(low: Double, high: Double): String {
-    val unit = durationUnitOf(maxOf(kotlin.math.abs(low), kotlin.math.abs(high)))
-    return changeRange(low, high, unit.text) { significant(it / unit.scale) }
+    val unit = intervalUnitOf(maxOf(kotlin.math.abs(low), kotlin.math.abs(high)))
+    return changeRange(low, high, unit.text) { intervalEnd(it / unit.scale) }
 }
 
-/** Three significant digits, below 1 as well as above it: `0.444`, `0.00128`, `9.15`, `117`. */
-private fun significant(v: Double): String = when {
-    v == 0.0 -> "0"
-    v >= 1.0 -> threeSignificantString(v)
-    else -> String.format(Locale.ROOT, "%." + (2 - kotlin.math.floor(kotlin.math.log10(v)).toInt()) + "f", v)
+/** The unit an interval's larger end of [nanos] is written in: chosen again after two-digit rounding, so 996ms is `1.0s`. */
+private fun intervalUnitOf(nanos: Double): DurationUnit {
+    val unit = durationUnitOf(nanos)
+    val i = DURATION_UNITS.indexOf(unit)
+    return if (i + 1 < DURATION_UNITS.size && intervalEnd(nanos / unit.scale).toDouble() >= 1000.0) DURATION_UNITS[i + 1] else unit
 }
 
 /** One rung: the value it takes over at, what to divide by, and what to call it. */

@@ -2,7 +2,7 @@
 
 Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
-## Unreleased
+## 0.7.0 - 2026-11-17
 
 ### Two views: brief by default
 

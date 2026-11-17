@@ -4,39 +4,79 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
 ## Unreleased
 
+### Two views: brief by default
+
+- **A report and a diff are brief by default.** The tables show the basis: each operation's time
+  (`Wall`, `Thread-time`), its share (`% parent`, `Thread-time%`), how many times it ran (`Executions`,
+  `Per parent`, `Calls`) and the price of one (`Mean`, `Thread-time per call`). Right under each table's
+  heading, the line `Lenses not shown: Parallelism, Waiting, Memory, Latency - open one with --lens; the
+  full view, every lens and every interval, is --view full` names what it leaves out.
+- **A certain figure is written without its interval** in the brief view (`6.34s`), a loose one as its
+  range, an unknown one `?`, on the header lines too (`runBatch 6.34s per execution`).
+- **A brief diff is one line a row:** Time and Share as `before -> after` and the change, the sides aligned
+  on the arrow, Work and Cost the change only; a change that moved as one value when it is certain or
+  small, `-94%`, `↓-94%` in Unicode; a row on one side only with no arrow.
+- **Under each brief table, first, the key to its forms**, a diff's with a second to its changes; none with
+  one run. No `slowest:` lists unless Latency is open, and only the notes on what is shown.
+- **Lenses open one by one:** `render(lenses = setOf(Lens.LATENCY))`, the same on `TickSnick.diff`, and
+  the CLI's `--lens latency`, once for each. An open lens's columns follow the basis; in a brief diff they
+  read `before -> after` and the change, as Time and Share. The line under each table's heading then names
+  only the lenses still closed, or says `All lenses shown`.
+- **Kotlin code compiled against 0.6.0 must be recompiled:** `render` and `TickSnick.diff` take new
+  parameters, `view` and `lenses`, and a Kotlin call with defaults goes through a method whose shape changed.
+  Java callers are unaffected.
+- **`render(view = View.FULL)`, `TickSnick.diff(before, after, view = View.FULL)` and the CLI's `--view
+  full`** give every lens and every interval, a diff three lines a row; its tables say `This is the full
+  view, every lens and every interval`, and how to go back.
+- **Every figure has an interval**, the lenses' too: the percentiles, `Max`, `Parallel`, `Wall-time`,
+  `Concurrency`, `Workers`, `Pool`, `Long calls`, `Long time`, `Longest`, and the counts. `Max` and
+  `Longest` are the mean of the runs' largest, no longer the largest of all runs. A count the runs differ
+  in has its interval instead of a `~` and its mean.
+- **Every `|` between groups is drawn**, an empty cell's too, and the columns of a group are three spaces
+  apart. Each column is as wide as its widest cell, in both views.
+- **A number that is not 0 but rounds to 0** at its places is written below its last place, with its sign:
+  `+-<0.1%`, `-<0.1pp`, `<1`, never `0.0` or `-0.0`.
+- **The change key says why a change is unknown:** `? is unknown: the change is within its sides' run-to-run
+  noise, and more runs would tell`.
+
 ### How a figure is written
 
-- A cell holds a figure, `?` or nothing. `?` is a figure that could not be measured, or was measured
-  too little to say: a percentile with too few executions, a label never sampled where it was called,
-  `Allocated` on a virtual thread, a run without a tag's value (a run that did not count `Allocated`
-  reads `not counted`). It was `-`, which reads as zero in many
-  tables. A blank cell has nothing to look at: the column's usual value or a column that does not
-  apply to the row.
+- A cell holds a figure, `?` or nothing. `?` is a figure that could not be measured, or was measured too
+  little to say: a percentile with too few executions, a label never sampled where it was called, `Allocated`
+  on a virtual thread, a run without a tag's value (a run that did not count `Allocated` reads `not counted`),
+  an unknown CPU clock, an execution missing from the run list. It was `-`, which reads as zero in many
+  tables. A blank cell has nothing to look at: the column's usual value or a column that does not apply to the
+  row.
 - `Paused` 0 is blank, not `-`; `unlabelled` has no `Executions` (was `own`); `(no operation)` shows only
-  its time; `Long` within the noise is blank; a row on one side of a diff is blank on the other.
+  its time; `Long calls` within the noise is blank; a row on one side of a diff is blank on the other.
 - In a diff, `Per parent` 1 and `Paused` 0 print where the other side has a figure, and the header's
   `Paused` line is left out when neither side paused.
-- The key under the wall table says what a percentile's `?` needs: p50, p90 and p99 need 2, 10 and
-  100 executions in a run.
-- A change in a diff has no note under the tables any more: its interval is the only word on how sure it
-  is.
-- **A figure is written by how sure it is**, the same in a report and a diff. Up to 20% of the figure,
-  the figure and its interval relative to it: `6.34s +-5.0%`, a percentage in points, `63% +-9.2pp`.
-  Wider, the interval's two ends: `371..561ms`, a share's stopping at 100%. As wide as the figure or more,
-  so that it would reach 0: `?`. The forms `35 +-3s` and `63 +-9.2%` are gone.
-- **A change in a diff is a range**, the ends of its 95% interval, its direction written once
-  before it and the end nearer zero first: `-(18..30)%`, `+(4.7..5.9)pp`, `-(3.7..5.7)s` in the header,
-  and in Unicode `↓18..30%`, `↑4.7..5.9pp`. A decrease stops at 100%.
-- **A change is judged by the same lines as a figure**, against the change itself. One whose interval
-  reaches or crosses zero has no known direction: it is `?`, in the tables and the header alike, as a
-  figure whose interval reaches 0 is. Certain or loose, it is written as its range, and a range on one
-  side of zero keeps its arrow however near zero it ends, `-(0.0..0.7)pp`. A change from or to a figure
-  that is `?` is `?` too.
+- A note under the wall table, with the Latency lens open, says what a percentile's `?` needs: p50, p90
+  and p99 need 2, 10 and 100 executions in a run.
+- **A figure is written by how sure it is**, the same in a report and a diff, everywhere: the tables, the
+  header lines and the headings. Up to 20% of the figure, the figure and its interval relative to it:
+  `6.34s +-5.0%`, a percentage in points, `63% +-9.2pp`. Wider, the interval's two ends: `370..560ms`, a
+  share's stopping at 100%. As wide as the figure or more, so that it would reach 0: `?`. A diff's header
+  lines printed each side as its plain mean, now by this rule too (`117s +-0.4% -> 91.6s +-1.8%`), and the
+  own table's heading its active time. The forms `35 +-3s` and `63 +-9.2%` are gone.
+- **A change in a diff is judged on its own interval**, in the tables and the header alike. Its
+  direction is certain when at most 20% of its interval lies across zero; it is small when its whole
+  interval stays within 5% of before (a share's points against the share before). With a certain
+  direction it moved; with none it did not move, `=`, when small, and is `?` when not. A change from or to
+  a figure that is `?` is `?` too. A share that moved by less than a diff prints is no longer `=` by that
+  alone.
+- **A change that moved is written by its real values**, the end nearer zero first: `-18..-30%`,
+  `4.7..5.9pp`, `-3.7..-5.7s` in the header, and across zero `1.3..-35%`. A range takes no `+`; one value
+  carries its sign, `+1.0pp`. In Unicode an arrow comes first, `↓-18..-30%`, `↑4.7..5.9pp`. A decrease
+  stops at -100%.
 - **An interval's ends have at most two significant digits each**, a figure's range and a change's:
-  `0.15..2.4s`, `7.3..11%`, `↑180..300%`; never more places than the column writes (a change's tenths,
-  `-(0.0..0.7)pp`). A certain figure keeps three digits on its one value, `6.34s +-5.0%`.
+  `0.15..2.4s`, `7.3..11%`, `180..300%`; never more places than the column writes (a change's tenths,
+  `-0.3..-0.7pp`). A certain figure keeps three digits on its one value, `6.34s +-5.0%`.
 - **`Waiting` replaces `Runnable / Waiting`**: the part of a row's time spent waiting, blank where
-  nothing waited. Runnable was 100% less it.
+  nothing waited. Runnable was 100% less it. `HOW TO READ THIS` says that waiting is a part of the
+  thread-time beside it, not added to it.
+- The warning on runs that shared a JVM says `every interval is too narrow`; it said `the +- is too
+  narrow`.
 
 ### The two tables
 
@@ -44,11 +84,20 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   parent, was `COARSE OPERATIONS`; `OWN THREAD-TIME`, each operation outside the operations inside it,
   was `COARSE AND FINE OPERATIONS`. Both hold coarse and fine operations, and the first column of both
   is `Operation`; the wall table's was `Coarse operation`.
+- **The columns go by what they answer.** Each group is named over its columns, and the groups come in
+  one order in both tables and both views: Time (`Wall`, `Thread-time`), Share (`% parent`,
+  `Thread-time%`), Work (`Executions`, `Per parent`, `Calls`), Cost (`Mean`, `Thread-time per call`),
+  then Parallelism (`Parallel`; `Wall-time`, `Concurrency`, `Workers`, `Pool`), Waiting, Memory
+  (`Paused`, `Allocated`, `Per execution`) and Latency (the percentiles and `Max`; `Long calls`, `Long
+  time`, `Longest`). They were `Load`, `Allocated`, `Long` and `Spread`. Allocated's `Total` is
+  `Allocated`, the own table's `Time` under `Long` is `Long time`, and the note under the own table
+  starts `Long calls:`.
 - **One run is said right over each table**, since its figures print plain, as certain ones do: `1 run:
   no interval, so any figure below may be loose or unknown - run at least 3 times to tell`. A diff names
   the side, `1 run before`, `1 run after` or `1 run on each side`, and its headings no longer claim an
   interval then. The `Runs: 1` warning asks for 3 runs too; it said `shares hold, durations need a second
-  run`.
+  run`. Two runs get a line too, `2 runs: the interval is too wide to say much - run at least 3 times to
+  tell`, unless the other side of a diff has one run, whose line is then the only one.
 
 ### The own table
 

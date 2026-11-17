@@ -25,7 +25,7 @@ class ProfileTest {
 
     /**
      * The one rule: `±` up to 20% of the figure, the interval's ends past it, `?` from 100%, the figure alone with no
-     * interval; a change by the same lines. Three runs each, worked by hand: 422, 486, 490ms is 466 ±94.8ms.
+     * interval; the brief view leaves out a certain one's `±`. Three runs each, worked by hand: 422, 486, 490ms is 466 ±94.8ms.
      */
     @Test
     fun `a figure is written by how sure it is`() {
@@ -33,39 +33,100 @@ class ProfileTest {
         assertEquals(Sure.LOOSE, sureness(466.0, 94.8))
         assertEquals(Sure.UNKNOWN, sureness(173.0, 617.0))
         assertEquals(Sure.PLAIN, sureness(6.08, Double.NaN))
-        assertEquals(Sure.CERTAIN, sureness(-24.0, 3.0), "a change by the same lines, sign aside")
-        assertEquals(Sure.LOOSE, sureness(-35.0, 27.0))
-        assertEquals(Sure.UNKNOWN, sureness(2.4, 15.0), "a change crossing zero is unknown")
-        assertEquals(Sure.UNKNOWN, sureness(-0.35, 0.35), "and so is one reaching it")
-        assertEquals(Sure.LOOSE, sureness(-0.36, 0.34), "one side of zero, however near: its direction is known")
 
         assertEquals("6.34s +-5.0%", durationWithInterval(Estimate(listOf(6.20e9, 6.37e9, 6.45e9))))
+        assertEquals("6.34s", durationWithInterval(Estimate(listOf(6.20e9, 6.37e9, 6.45e9)), View.BRIEF), "brief: a certain one alone")
         assertEquals("370..560ms", durationWithInterval(Estimate(listOf(422e6, 486e6, 490e6))))
+        assertEquals("370..560ms", durationWithInterval(Estimate(listOf(422e6, 486e6, 490e6)), View.BRIEF), "never a loose one")
         assertEquals("?", durationWithInterval(Estimate(listOf(56.1e6, 4.39e6, 458e6))), "the interval reaches 0")
         assertEquals("6.08s", durationWithInterval(Estimate(listOf(6.08e9))), "one run: the figure alone")
     }
 
-    /** A change's direction once, the end nearer zero first; a range reaching or crossing zero is `?` and never written. */
+    /** Every kind of change, row by row: direction, size and certainty, and what each view writes. */
     @Test
-    fun `a change range is written by its direction`() {
-        assertEquals("-(8.2..62)%", percentChangeRange(-62.0, -8.2, "%"), "a decrease: the least it moved first")
-        assertEquals("+(180..300)%", percentChangeRange(175.0, 300.0, "%"))
-        assertEquals("+(4.7..5.9)pp", percentChangeRange(4.7, 5.9, "pp"))
-        assertEquals("-(0.0..0.7)pp", percentChangeRange(-0.7, -0.02, "pp"), "near zero, one side: the arrow keeps the sign")
-        assertFailsWith<IllegalArgumentException>("across zero is unknown") { percentChangeRange(-13.0, 18.0, "%") }
-        assertFailsWith<IllegalArgumentException>("and so is reaching it") { percentChangeRange(-0.7, 0.0, "pp") }
-        assertEquals("-(3.7..5.7)s", durationChangeRange(-5.65e9, -3.65e9), "time: both ends in the larger one's unit")
-        assertEquals("-(0.95..1.2)ms", durationChangeRange(-1.20e6, -0.95e6))
-        assertEquals("-(0.15..2.4)s", durationChangeRange(-2.36e9, -0.152e9), "two significant digits each end")
+    fun `a change is judged on its own interval`() {
+        /** [v] ± [half] against [before], as the tables write a percentage or points change in [view]. */
+        fun write(v: Double, half: Double, before: Double, unit: String, view: View) =
+            Judged(v, half, before).text(view, { percentChangeValue(v, unit) }, { percentChangeRange(maxOf(-100.0, v - half), v + half, unit) })
+        // Direction certain, small, certain: up a little, by 1pp.
+        assertEquals(Verdict.MOVED, Judged(1.0, 0.14, 50.0).verdict)
+        assertEquals("0.9..1.1pp", write(1.0, 0.14, 50.0, "pp", View.FULL), "a change keeps its tenths")
+        assertEquals("+1.0pp", write(1.0, 0.14, 50.0, "pp", View.BRIEF))
+        // Direction certain, small, loose: brief writes it one value too, its size being under 5% of before.
+        assertTrue(Judged(1.0, 0.7, 50.0).small && !Judged(1.0, 0.7, 50.0).certain)
+        assertEquals("0.3..1.7pp", write(1.0, 0.7, 50.0, "pp", View.FULL))
+        assertEquals("+1.0pp", write(1.0, 0.7, 50.0, "pp", View.BRIEF))
+        // Direction certain, large, certain.
+        assertEquals("-35..-45%", write(-40.0, 5.0, 100.0, "%", View.FULL))
+        assertEquals("-40%", write(-40.0, 5.0, 100.0, "%", View.BRIEF))
+        // Direction certain, large, loose: a range in both views.
+        assertEquals("-8.2..-62%", write(-35.1, 26.9, 100.0, "%", View.FULL))
+        assertEquals("-8.2..-62%", write(-35.1, 26.9, 100.0, "%", View.BRIEF))
+        // Direction loose: small did not move, large is not known.
+        assertEquals(Verdict.STILL, Judged(0.0, 0.8, 50.0).verdict)
+        assertEquals("=", write(0.0, 0.8, 50.0, "pp", View.BRIEF))
+        assertEquals("=", write(0.0, 0.8, 50.0, "pp", View.FULL))
+        assertEquals("?", write(2.5, 15.5, 100.0, "%", View.FULL), "-13..+18%")
+        assertEquals("?", write(0.0, 0.8, 5.0, "pp", View.FULL), "the same points against a small share are not small")
+        // Zero is not a sharp line: a little across it keeps the direction, and the end on the far side its sign.
+        assertEquals("-0.1..1.5pp", write(0.7, 0.8, 50.0, "pp", View.FULL))
+        assertEquals("+0.7pp", write(0.7, 0.8, 50.0, "pp", View.BRIEF))
+        assertEquals("5.0..-40pp", write(-17.5, 22.5, 60.0, "pp", View.FULL), "down, across zero: from the end nearer it")
+        // The line is 20% of the interval across zero.
+        assertEquals(Verdict.MOVED, Judged(30.0, 50.0, 100.0).verdict, "-20..80")
+        assertEquals(Verdict.UNKNOWN, Judged(29.0, 50.0, 100.0).verdict, "-21..79")
+        // A change from a share of 0 is never small; a decrease is written stopping at -100%.
+        assertEquals(Verdict.UNKNOWN, Judged(0.0, 0.01, 0.0).verdict)
+        assertEquals("-81..-100%", write(-100.0, 19.0, 100.0, "%", View.FULL))
+        withSymbols(unicode = true) {
+            assertEquals("↑0.9..1.1pp", write(1.0, 0.14, 50.0, "pp", View.FULL))
+            assertEquals("↑1.0pp", write(1.0, 0.14, 50.0, "pp", View.BRIEF), "the arrow shows the rise: no +")
+            assertEquals("↓-40%", write(-40.0, 5.0, 100.0, "%", View.BRIEF), "every number its real value")
+            assertEquals("↓-8.2..-62%", write(-35.1, 26.9, 100.0, "%", View.BRIEF))
+            assertEquals("↑-0.1..1.5pp", write(0.7, 0.8, 50.0, "pp", View.FULL))
+            assertEquals("↓5.0..-40pp", write(-17.5, 22.5, 60.0, "pp", View.FULL))
+            assertEquals("=", write(0.0, 0.8, 50.0, "pp", View.BRIEF))
+        }
+    }
+
+    /** Every number its real value, the end nearer zero first: a range shows its direction by its order, so no `+`. */
+    @Test
+    fun `a change range is written by its real values`() {
+        assertEquals("-8.2..-62%", percentChangeRange(-62.0, -8.2, "%"), "a decrease: the least it moved first")
+        assertEquals("180..300%", percentChangeRange(175.0, 300.0, "%"))
+        assertEquals("4.7..5.9pp", percentChangeRange(4.7, 5.9, "pp"))
+        assertEquals("-<0.1..-0.7pp", percentChangeRange(-0.7, -0.02, "pp"), "near zero: below the last place, with its sign")
+        assertEquals("<0.1..-<0.1pp", percentChangeRange(-0.04, 0.004, "pp"), "each end on its own")
+        // A number that is not 0 but rounds to 0 at its places is below one unit of the last: never a measured 0.
+        assertEquals("<0.1", fixed(0.04, 1))
+        assertEquals("-<0.01", fixed(-0.004, 2))
+        assertEquals("<1", fixed(0.3, 0, grouped = true))
+        assertEquals("+<0.1", fixed(0.04, 1, signed = true))
+        assertEquals("0.0", fixed(0.0, 1), "a real 0 is 0")
+        assertEquals("0.0", fixed(-0.0, 1), "and -0.0 has no sign to show")
+        assertEquals("<1 B", bytes(0.3), "bytes under one, not 0 B")
+        assertEquals("16 B", bytes(16.0))
+        assertEquals("0.1", fixed(0.05, 1), "half rounds up, as before")
+        assertEquals("5,262", fixed(5262.0, 0, grouped = true))
+        assertEquals("+-<0.1%", relativeText(0.03))
+        assertEquals("-<0.1pp", percentChangeValue(-0.04, "pp"))
+        assertEquals("-3.7..-5.7s", durationChangeRange(-5.65e9, -3.65e9), "time: both ends in the larger one's unit")
+        assertEquals("-0.95..-1.2ms", durationChangeRange(-1.20e6, -0.95e6))
+        assertEquals("-0.15..-2.4s", durationChangeRange(-2.36e9, -0.152e9), "two significant digits each end")
+        assertEquals("-1.97s", durationChangeValue(-1.97e9))
+        assertEquals("+5.0pp", percentChangeValue(5.0, "pp"))
         assertEquals("0.15..2.4s", durationRange(0.152e9, 2.36e9))
         assertEquals("0.95..1.0s", durationRange(0.95e9, 0.996e9), "the unit taken after rounding: 996ms is 1.0s")
+        assertEquals("1.2..2.4 MB", bytesRange(1.2 * 1024 * 1024, 2.4 * 1024 * 1024), "bytes: both ends in the larger one's unit")
+        assertEquals("0.49..2.0 KB", bytesRange(500.0, 2000.0))
         assertEquals("10", intervalEnd(9.96), "the decade taken after rounding")
         assertEquals("0.7", intervalEnd(0.7, 1), "never more places than the column writes")
         withSymbols(unicode = true) {
-            assertEquals("↓8.2..62%", percentChangeRange(-62.0, -8.2, "%"))
+            assertEquals("↓-8.2..-62%", percentChangeRange(-62.0, -8.2, "%"))
             assertEquals("↑180..300%", percentChangeRange(175.0, 300.0, "%"))
-            assertEquals("↓0.0..0.7pp", percentChangeRange(-0.7, -0.02, "pp"))
-            assertEquals("↓3.7..5.7s", durationChangeRange(-5.65e9, -3.65e9))
+            assertEquals("↓-<0.1..-0.7pp", percentChangeRange(-0.7, -0.02, "pp"))
+            assertEquals("↓-3.7..-5.7s", durationChangeRange(-5.65e9, -3.65e9))
+            assertEquals("↓-1.97s", durationChangeValue(-1.97e9))
         }
     }
 

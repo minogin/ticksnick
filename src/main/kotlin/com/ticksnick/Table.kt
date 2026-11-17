@@ -6,11 +6,11 @@ import kotlin.math.abs
 /** What marks an own table's row as a coarse operation's own work. */
 internal const val STAR = " *"
 
-/** The smallest change of a share a diff can print, in percentage points. */
-internal const val MIN_SHARE_CHANGE = 0.05
-
-/** The width of a `+-` beside a figure, its separating space included: the widest is a change's, `+-4.7pp`. */
-internal const val INTERVAL_COLUMN = 8
+/**
+ * Between two columns of a group: as wide as the bar between two groups, so that a figure never reads as the next
+ * column's - `-18%   10.8ms`, not `-18% 10.8ms`.
+ */
+internal const val GAP = "   "
 
 /**
  * A figure TickSnick could not measure, or measured too little of to say: never 0, which is a measured
@@ -19,14 +19,41 @@ internal const val INTERVAL_COLUMN = 8
  */
 internal const val UNKNOWN = "?"
 
-/** The share of its figure an interval may be with the figure still written `±`: past it, a range. */
+/**
+ * The share of its figure an interval may be with the figure still written `±`: past it, a range. The same 20% judges a
+ * change ([Judged]): its direction, by how much of its interval lies across zero, and how precisely it is known.
+ */
 internal const val CERTAIN = 0.20
+
+/**
+ * How far from before a change's whole interval may reach and the change still be small ([Judged]): small, it is known
+ * whatever its direction - with none, it did not move. A change of up to 3% is not worth acting on, and one that may
+ * reach 8% cannot be called no change.
+ */
+internal const val SMALL_CHANGE = 0.05
 
 /**
  * `% parent`'s name in the block under the wall table: an operation there is over all its parents, so its share
  * is of the root's Wall, which the tree's Wall is already a part of.
  */
 internal const val ROOT_SHARE = "% root"
+
+/** What the full view is, said in every table's notice, whichever view it is in ([lensesLine]). */
+internal const val FULL_VIEW = "the full view, every lens and every interval"
+
+/**
+ * **The measures that answer one question, and lead to one kind of work**: what a column's measure is used
+ * for, not where it is drawn. The basis groups, with no [lens], are in every view; the others are lenses, which
+ * the brief view shows when opened and names when not ([lensesLine]).
+ */
+internal enum class MeasureGroup(val title: String, val lens: Lens? = null) {
+    TIME("Time"), SHARE("Share"), WORK("Work"), COST("Cost"),
+    PARALLELISM("Parallelism", Lens.PARALLELISM), WAITING("Waiting", Lens.WAITING), MEMORY("Memory", Lens.MEMORY),
+    LATENCY("Latency", Lens.LATENCY);
+
+    /** In every view, with no opt-out: Time, Share, Work and Cost. */
+    val basis: Boolean get() = lens == null
+}
 
 /** How a column's figures read. Text only: a [Row] holds raw values, so that another writer can take them. */
 internal enum class Form(val percentage: Boolean = false) {
@@ -35,64 +62,88 @@ internal enum class Form(val percentage: Boolean = false) {
 
 /**
  * **One column of a table, for every report and every diff.** A figure added here is in all of them,
- * so nothing has to remember to add it twice.
+ * so nothing has to remember to add it twice. Every figure is the mean of the runs that have it, with its 95%
+ * interval over them, written by [sureness]: a count too, which runs may differ in as in any figure, and `Max`,
+ * the mean of the runs' largest - the largest of all runs would grow with how many there are.
  *
- * @param interval whether the figure gets a `+-` over the runs: yes for what says how much, no for
- * what says how it ran, and no for what is counted. Required, so that a new column has to answer.
- * @param width the column's narrowest width in text, the figures being right-aligned in it.
  * @param absent what a figure no run could give prints: [UNKNOWN], or blank where that means the column's
  * default, as `Parallel` under its threshold. A row the column does not apply to has no figure at all,
  * and prints blank.
  * @param zeroIsAbsent a 0 is the column's default, and prints blank.
- * @param largest over the runs the figure is their largest, not their mean.
+ * @param measures the group its measure belongs to, by use: the band over the heads names it, a table keeps a
+ * group's columns together, and the brief view shows the basis and the lenses opened.
  */
 internal class Column(
     val name: String,
-    val group: String,
     val form: Form,
-    val interval: Boolean,
-    val width: Int,
     val absent: String = UNKNOWN,
     val zeroIsAbsent: Boolean = false,
-    val largest: Boolean = false,
+    val measures: MeasureGroup,
 )
 
-internal val EXECUTIONS = Column("Executions", "Load", Form.COUNT, interval = false, width = 11)
-internal val PER_PARENT = Column("Per parent", "Load", Form.PER_PARENT, interval = false, width = 10, absent = "")
-internal val PARALLEL = Column("Parallel", "Load", Form.ONE_DECIMAL, interval = false, width = 8, absent = "")
-internal val WALL = Column("Wall", "Load", Form.TIME, interval = true, width = 10)
-internal val PARENT_SHARE = Column("% parent", "Load", Form.PARENT_SHARE, interval = true, width = 8)
-internal val PAUSED = Column("Paused", "Load", Form.TIME, interval = true, width = 10, zeroIsAbsent = true)
-internal val WALL_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
-internal val MEAN = Column("Mean", "Load", Form.TIME, interval = true, width = 10)
-internal val ALLOCATED = Column("Total", "Allocated", Form.BYTES, interval = false, width = 10)
-internal val ALLOCATED_PER_EXECUTION = Column("Per execution", "Allocated", Form.BYTES, interval = false, width = 13)
-internal val P50 = Column("p50", "Long", Form.TIME, interval = false, width = 10)
-internal val P90 = Column("p90", "Long", Form.TIME, interval = false, width = 10)
-internal val P99 = Column("p99", "Long", Form.TIME, interval = false, width = 10)
-internal val MAX = Column("Max", "Long", Form.TIME, interval = false, width = 10, largest = true)
+internal val EXECUTIONS = Column("Executions", Form.COUNT, measures = MeasureGroup.WORK)
+internal val PER_PARENT = Column("Per parent", Form.PER_PARENT, absent = "", measures = MeasureGroup.WORK)
+internal val PARALLEL = Column("Parallel", Form.ONE_DECIMAL, absent = "", measures = MeasureGroup.PARALLELISM)
+internal val WALL = Column("Wall", Form.TIME, measures = MeasureGroup.TIME)
+internal val PARENT_SHARE = Column("% parent", Form.PARENT_SHARE, measures = MeasureGroup.SHARE)
+internal val PAUSED = Column("Paused", Form.TIME, zeroIsAbsent = true, measures = MeasureGroup.MEMORY)
+internal val WALL_WAITING = Column("Waiting", Form.WAITING, zeroIsAbsent = true, measures = MeasureGroup.WAITING)
+internal val MEAN = Column("Mean", Form.TIME, measures = MeasureGroup.COST)
+internal val ALLOCATED = Column("Allocated", Form.BYTES, measures = MeasureGroup.MEMORY)
+internal val ALLOCATED_PER_EXECUTION = Column("Per execution", Form.BYTES, measures = MeasureGroup.MEMORY)
+internal val P50 = Column("p50", Form.TIME, measures = MeasureGroup.LATENCY)
+internal val P90 = Column("p90", Form.TIME, measures = MeasureGroup.LATENCY)
+internal val P99 = Column("p99", Form.TIME, measures = MeasureGroup.LATENCY)
+internal val MAX = Column("Max", Form.TIME, measures = MeasureGroup.LATENCY)
 
+/**
+ * The wall table's columns, a group's together and the groups in [MeasureGroup]'s order: Time, Share, Work, Cost,
+ * then the lenses Parallelism, Waiting, Memory, Latency.
+ */
 internal val WALL_COLUMNS = listOf(
-    EXECUTIONS, PER_PARENT, PARALLEL, WALL, PARENT_SHARE, PAUSED, WALL_WAITING, MEAN, ALLOCATED, ALLOCATED_PER_EXECUTION,
+    WALL, PARENT_SHARE, EXECUTIONS, PER_PARENT, MEAN, PARALLEL, WALL_WAITING, PAUSED, ALLOCATED, ALLOCATED_PER_EXECUTION,
     P50, P90, P99, MAX,
 )
 
-internal val THREAD_SHARE = Column("Thread-time%", "Load", Form.SHARE, interval = true, width = 12)
-internal val THREAD_TIME = Column("Thread-time", "Load", Form.TIME, interval = true, width = 13)
-internal val OWN_WAITING = Column("Waiting", "Load", Form.WAITING, interval = true, width = 9, zeroIsAbsent = true)
-internal val CALLS = Column("Calls", "Load", Form.COUNT, interval = false, width = 13)
-internal val PER_CALL = Column("Thread-time per call", "Load", Form.TIME, interval = true, width = 20)
-// Blank, not unknown, where the long calls are within the noise: the ordinary case, and nothing to look at.
-internal val LONG_CALLS = Column("Long calls", "Long", Form.COUNT, interval = false, width = 10, absent = "")
-internal val LONG_TIME = Column("Time", "Long", Form.TIME, interval = false, width = 8, absent = "")
-internal val LONGEST = Column("Longest", "Long", Form.TIME, interval = false, width = 8, largest = true, absent = "")
-internal val WALL_TIME = Column("Wall-time", "Spread", Form.TIME, interval = false, width = 9)
-internal val CONCURRENCY = Column("Concurrency", "Spread", Form.TWO_DECIMALS, interval = false, width = 11)
-internal val WORKERS = Column("Workers", "Spread", Form.WHOLE, interval = false, width = 7)
-internal val POOL = Column("Pool", "Spread", Form.WHOLE, interval = false, width = 5)
+/** The columns only a run that counted its allocations has. */
+internal val ALLOCATION_COLUMNS = setOf(ALLOCATED, ALLOCATED_PER_EXECUTION)
 
+internal val THREAD_SHARE = Column("Thread-time%", Form.SHARE, measures = MeasureGroup.SHARE)
+internal val THREAD_TIME = Column("Thread-time", Form.TIME, measures = MeasureGroup.TIME)
+internal val OWN_WAITING = Column("Waiting", Form.WAITING, zeroIsAbsent = true, measures = MeasureGroup.WAITING)
+internal val CALLS = Column("Calls", Form.COUNT, measures = MeasureGroup.WORK)
+internal val PER_CALL = Column("Thread-time per call", Form.TIME, measures = MeasureGroup.COST)
+// Blank, not unknown, where the long calls are within the noise: the ordinary case, and nothing to look at.
+internal val LONG_CALLS = Column("Long calls", Form.COUNT, absent = "", measures = MeasureGroup.LATENCY)
+internal val LONG_TIME = Column("Long time", Form.TIME, absent = "", measures = MeasureGroup.LATENCY)
+internal val LONGEST = Column("Longest", Form.TIME, absent = "", measures = MeasureGroup.LATENCY)
+internal val WALL_TIME = Column("Wall-time", Form.TIME, measures = MeasureGroup.PARALLELISM)
+internal val CONCURRENCY = Column("Concurrency", Form.TWO_DECIMALS, measures = MeasureGroup.PARALLELISM)
+internal val WORKERS = Column("Workers", Form.WHOLE, measures = MeasureGroup.PARALLELISM)
+internal val POOL = Column("Pool", Form.WHOLE, measures = MeasureGroup.PARALLELISM)
+
+/** Whether [this] view shows [lens]: the full one every lens, the brief one those in [lenses]. */
+internal fun View.shows(lens: Lens, lenses: Set<Lens>): Boolean = this == View.FULL || lens in lenses
+
+/** The columns [view] shows of [columns]: all of them in the full view; the basis and the [lenses] opened in the brief one. */
+internal fun shownIn(view: View, columns: List<Column>, lenses: Set<Lens> = emptySet()): List<Column> =
+    columns.filter { it.measures.lens.let { lens -> lens == null || view.shows(lens, lenses) } }
+
+/**
+ * **A table's notice of what its view leaves out**, right after its heading and the run lines, and in every view what
+ * the full view is: in the brief one each lens of [columns], the table's full columns, not among [lenses], by name,
+ * and how to open one; in the full one, how to go back. The CLI's flags; the API's names are the same.
+ */
+internal fun lensesLine(view: View, columns: List<Column>, lenses: Set<Lens> = emptySet()): String {
+    if (view == View.FULL) return "This is $FULL_VIEW; the brief view, the basis with lenses opened by --lens, is --view brief"
+    val closed = MeasureGroup.entries.filter { g -> g.lens != null && g.lens !in lenses && columns.any { it.measures == g } }
+    if (closed.isEmpty()) return "All lenses shown; $FULL_VIEW, is --view full"
+    return "Lenses not shown: ${closed.joinToString { it.title }}${sym.dash}open one with --lens; $FULL_VIEW, is --view full"
+}
+
+/** The own table's columns, in the same order of groups as [WALL_COLUMNS]. */
 internal val OWN_COLUMNS = listOf(
-    THREAD_TIME, THREAD_SHARE, OWN_WAITING, CALLS, PER_CALL, LONG_CALLS, LONG_TIME, LONGEST, WALL_TIME, CONCURRENCY, WORKERS, POOL,
+    THREAD_TIME, THREAD_SHARE, CALLS, PER_CALL, WALL_TIME, CONCURRENCY, WORKERS, POOL, OWN_WAITING, LONG_CALLS, LONG_TIME, LONGEST,
 )
 
 /** An operation the sampler never caught, with the most calls any run made of it. */
@@ -149,7 +200,7 @@ internal class Table(
     val folded: List<Unsampled> = emptyList(),
 )
 
-/** Whether every run has the same figure: a counted one prints plainly then, and `~` the mean when not. */
+/** Whether every run has the same figure: a whole number prints as one then, and the mean in tenths when not. */
 private fun Estimate.agreed(): Boolean = values.distinct().size == 1
 
 /**
@@ -162,15 +213,14 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
     if (f == null) return ""
     if (f.n == 0) return c.absent
     if (c.zeroIsAbsent && f.mean == 0.0) return ""
-    val v = if (c.largest) f.values.max() else f.mean
+    val v = f.mean
     return when (c.form) {
-        Form.COUNT -> if (f.agreed()) String.format(Locale.ROOT, "%,d", v.toLong()) else String.format(Locale.ROOT, "~%,.0f", v)
-        Form.PER_PARENT -> if (!f.agreed()) "~" + perParentText(v) else perParentText(v).let { if (it == "1" && !own) "" else it }
-        Form.WHOLE -> if (f.agreed()) v.toLong().toString() else String.format(Locale.ROOT, "~%.1f", v)
-        Form.ONE_DECIMAL -> String.format(Locale.ROOT, "%.1f", v)
-        Form.TWO_DECIMALS -> String.format(Locale.ROOT, "%.2f", v)
+        Form.COUNT -> fixed(v, 0, grouped = true)
+        Form.PER_PARENT -> perParentText(v).let { if (it == "1" && !own) "" else it }
+        Form.WHOLE -> if (f.agreed()) v.toLong().toString() else fixed(v, 1)
+        Form.ONE_DECIMAL -> fixed(v, 1)
+        Form.TWO_DECIMALS -> fixed(v, 2)
         Form.TIME -> duration(v)
-        // Counted, but runs of the same work never create quite the same bytes: their mean, plainly.
         Form.BYTES -> bytes(v)
         Form.PARENT_SHARE -> parentShareText(v)
         Form.SHARE -> percent(v)
@@ -178,28 +228,68 @@ internal fun figureText(c: Column, f: Estimate?, own: Boolean): String {
     }
 }
 
-/** How sure a figure or a change is, which decides how it is written. See [sureness]. */
+/** How sure a figure is, which decides how it is written. See [sureness]; a change is judged by [Judged]. */
 internal enum class Sure {
     /** No interval: one run, or runs that agree exactly. The figure alone. */
     PLAIN,
-    /** The interval at most [CERTAIN] of the figure: `6.34s ±5.0%`, a share `63% ±9.2pp`. A change: its range. */
+    /** The interval at most [CERTAIN] of the figure: `6.34s ±5.0%`, a share `63% ±9.2pp`. */
     CERTAIN,
-    /** Loose, wider: the interval's own ends, `374..558ms`; a change's range, `↓8.2..62%`. */
+    /** Loose, wider: the interval's own ends, `374..558ms`. */
     LOOSE,
     /** As wide as the figure or more, so it would reach 0: [UNKNOWN], measured too little to say. */
     UNKNOWN,
 }
 
 /**
- * **How sure a figure or a change is: the one rule** for every one with an interval, in a report and in a diff.
- * [mean] and [half], the 95% interval's half-width, in its unit, sign aside. For a change, unknown is exactly an
- * interval that reaches or crosses zero: its direction is not known, and it prints `?`.
+ * **How sure a figure is: the one rule** for every figure with an interval, in a report and in a diff. [mean] and
+ * [half], the 95% interval's half-width, in its unit, sign aside.
  */
 internal fun sureness(mean: Double, half: Double): Sure = when {
     half.isNaN() || half == 0.0 -> Sure.PLAIN
     mean != 0.0 && half / abs(mean) <= CERTAIN -> Sure.CERTAIN
     half >= abs(mean) -> Sure.UNKNOWN
     else -> Sure.LOOSE
+}
+
+/** What a change with an interval says ([Judged]): it moved, it did not move (`=`), or it is not known (`?`). */
+internal enum class Verdict { MOVED, STILL, UNKNOWN }
+
+/**
+ * **A change judged on its own interval: the one rule** for every change with an interval a diff writes, in its tables
+ * and its header (docs/output.md, "The diff"). [middle] is the change, [half] its 95% interval's half-width,
+ * [before] the figure it is against - all in one unit, and on the real interval, before any cut at -100%:
+ * - its **direction** is certain when at most [CERTAIN] of its interval lies on the other side of zero, so zero is not
+ *   a sharp line: `0.1..1.7pp` and `-0.1..1.5pp` are the same measurement, both up;
+ * - it is **small** when its whole interval stays within [SMALL_CHANGE] of [before]; a [before] of 0 is never small;
+ * - it is **certain** when [half] is at most [CERTAIN] of [middle]: how precisely it is known how much it moved.
+ *
+ * With a certain direction it moved; without one it did not move when small, and is not known when not.
+ */
+internal class Judged(val middle: Double, val half: Double, before: Double) {
+    val low: Double = middle - half
+    val high: Double = middle + half
+    val direction: Boolean = !(low < 0 && high > 0) || minOf(-low, high) / (high - low) <= CERTAIN
+    val small: Boolean = before > 0 && maxOf(abs(low), abs(high)) <= SMALL_CHANGE * before
+    val certain: Boolean = half <= CERTAIN * abs(middle)
+    val verdict: Verdict = when {
+        direction -> Verdict.MOVED
+        small -> Verdict.STILL
+        else -> Verdict.UNKNOWN
+    }
+
+    /** Whether the brief view writes a change that moved as one value, its middle: certain, or small. */
+    val oneValue: Boolean get() = certain || small
+
+    /**
+     * **This change as [view] writes it**: `?` not known, `=` did not move; one that moved as a range ([range]), or in
+     * the brief view, when certain or small, as one value ([value]): how much exactly does not change a decision about
+     * something under [SMALL_CHANGE] of before.
+     */
+    fun text(view: View, value: () -> String, range: () -> String): String = when (verdict) {
+        Verdict.UNKNOWN -> UNKNOWN
+        Verdict.STILL -> "="
+        Verdict.MOVED -> if (view == View.BRIEF && oneValue) value() else range()
+    }
 }
 
 /** Whether this figure, in its unit times [scale], is [Sure.UNKNOWN] by [sureness]: and so is any change from or to it. */
@@ -210,7 +300,7 @@ private fun shareText(c: Column, v: Double): String = if (c.form == Form.PARENT_
 
 /** `+-9.2pp`, `+-12pp`. */
 private fun pointsText(p: Double): String =
-    if (p < 9.95) String.format(Locale.ROOT, "${sym.plusMinus}%.1fpp", p) else String.format(Locale.ROOT, "${sym.plusMinus}%.0fpp", p)
+    sym.plusMinus + fixed(p, if (p < 9.95) 1 else 0) + "pp"
 
 /** `59..67%`, `0.84..1.1%`: by [intervalEnd]; a share of the parent in whole percents from 10% up, as its one value is. */
 private fun shareRange(c: Column, lo: Double, hi: Double): String {
@@ -223,7 +313,7 @@ private fun shareRange(c: Column, lo: Double, hi: Double): String {
  * figure alone as [figureText] gives it; a share's range stops at 100%, and no range goes below 0.
  */
 internal fun ruledText(c: Column, f: Estimate?, plain: String): Pair<String, String> {
-    if (f == null || f.n < 2 || !c.interval || plain.isEmpty() || plain == UNKNOWN) return plain to ""
+    if (f == null || f.n < 2 || plain.isEmpty() || plain == UNKNOWN) return plain to ""
     val scale = if (c.form == Form.WAITING) 100.0 else 1.0
     val mean = f.mean * scale
     val half = f.half * scale
@@ -235,42 +325,80 @@ internal fun ruledText(c: Column, f: Estimate?, plain: String): Pair<String, Str
         Sure.LOOSE -> {
             val lo = maxOf(0.0, mean - half)
             val hi = if (share) minOf(100.0, mean + half) else mean + half
-            (if (share) shareRange(c, lo, hi) else if (c.form == Form.TIME) durationRange(lo, hi) else plain) to ""
+            (if (share) shareRange(c, lo, hi) else figureRange(c.form, lo, hi)) to ""
         }
     }
 }
 
-/** A share of the parent as the tables print it, in percent. */
-internal fun parentShareText(share: Double): String = if (share < 0.5) "<1%" else String.format(Locale.ROOT, "%.0f%%", share)
-
 /**
- * Where a table's columns fall in text, shared by a report and a diff so that they read the same. Each
- * figure right-aligned at its width, its `+-` left-aligned beside it, the name column sized to the
- * longest name: a name is what the reader searches the code for, so it is never cut.
- *
- * @param intervals whether there is room for a `+-` beside the columns that have one.
+ * A loose figure's range in its column's form, by [intervalEnd]: `1.3..6.7ms`, `1.2..2.4 MB`, `2.3..4.1`; a count
+ * from a thousand up grouped as its one value is, `5,100..5,400`; never more places than the column writes - none
+ * for a count, `1..5`, one for a mean of whole numbers, as their figure is written.
  */
+private fun figureRange(form: Form, lo: Double, hi: Double): String {
+    fun end(v: Double, places: Int = Int.MAX_VALUE): String {
+        val text = intervalEnd(v, places)
+        return if (v >= 1000 && '.' !in text) String.format(Locale.ROOT, "%,d", text.toLong()) else text
+    }
+    return when (form) {
+        Form.TIME -> durationRange(lo, hi)
+        Form.BYTES -> bytesRange(lo, hi)
+        Form.ONE_DECIMAL -> intervalRange(end(lo, 1), end(hi, 1), "")
+        Form.TWO_DECIMALS -> intervalRange(end(lo, 2), end(hi, 2), "")
+        Form.COUNT -> intervalRange(end(lo, 0), end(hi, 0), "")
+        Form.WHOLE -> intervalRange(end(lo, 1), end(hi, 1), "")
+        else -> intervalRange(end(lo), end(hi), "")
+    }
+}
+
+/** A share of the parent as the tables print it, in percent. */
+internal fun parentShareText(share: Double): String = fixed(share, 0) + "%"
+
 private fun StringBuilder.slowestLines(indent: String, label: String, slowest: List<SlowExecution>) {
     slowest.forEachIndexed { i, slow ->
         appendLine(indent + "  " + (if (i == 0) label else " ".repeat(label.length)) + String.format(Locale.ROOT, "%9s  %s", duration(slow.nanos.toDouble()), slow.key))
     }
 }
 
+/** One figure and its `+-` as a cell, `6.34s ±5.0%`, `422..490ms`: right-aligned to its column's one edge by [Layout.line]. */
+private fun cell(value: String, interval: String): String = if (interval.isEmpty()) value else "$value $interval"
+
 /** The text of [c] on [r], a row's own rows having no `own` to say. */
 private fun cellText(c: Column, r: Row?, own: Boolean): String =
     if (r != null && r.foldedRows > 0 && r.figures[c].let { it == null || it.n == 0 }) "" else figureText(c, r?.figures?.get(c), own)
 
+/**
+ * Where a table's columns fall in text, shared by a report and a diff so that they read the same. Each cell
+ * right-aligned in its column, its figure and interval together, the name column sized to the longest name: a name
+ * is what the reader searches the code for, so it is never cut.
+ *
+ * @param fit each column's widest text, heading included: a column is as wide as what it holds, in either view, so a
+ * column whose figures have no interval takes no room for one.
+ */
 private class Layout(
-    private val columns: List<Column>, private val intervals: Boolean, private val heading: String, minName: Int, names: List<String>,
-    private val sortedBy: Column?,
+    private val columns: List<Column>, private val heading: String, minName: Int, names: List<String>,
+    private val sortedBy: Column?, fit: Map<Column, Int> = emptyMap(),
 ) {
-    private val widths: IntArray = intArrayOf(maxOf(heading.length, minName, names.maxOfOrNull { it.length } ?: 0)) +
-            columns.map { it.width + if (hasInterval(it)) INTERVAL_COLUMN else 0 }.toIntArray()
+    /**
+     * The name column, then each column as wide as its widest cell or heading. A group narrower than its name in the band
+     * widens its first column to fit it: `Parallelism` over the one `Parallel`.
+     */
+    private val widths: IntArray = (intArrayOf(maxOf(heading.length, minName, names.maxOfOrNull { it.length } ?: 0)) +
+            columns.map { fit[it] ?: it.name.length }.toIntArray()).also { w ->
+        for (at in groups().values) {
+            val span = at.sumOf { w[it + 1] } + (at.size - 1) * GAP.length
+            val title = columns[at.first()].measures.title
+            if (span < title.length) w[at.first() + 1] += title.length - span
+        }
+    }
+
+    /** Each group's columns, by their index in [columns]: next to each other, as the column lists keep them. */
+    private fun groups(): Map<MeasureGroup, List<Int>> = columns.indices.groupBy { columns[it].measures }
 
     /** The columns a bar follows: the name, and the last of each group. */
     private val breaks: Set<Int> = buildSet {
         add(0)
-        for (i in 1 until columns.size) if (columns[i].group != columns[i - 1].group) add(i)
+        for (i in 1 until columns.size) if (columns[i].measures != columns[i - 1].measures) add(i)
     }
 
     private val starts = IntArray(widths.size)
@@ -280,44 +408,33 @@ private class Layout(
         var pos = 0
         for (i in widths.indices) {
             starts[i] = pos
-            pos += widths[i] + 1
-            if (i in breaks && i < widths.size - 1) {
-                bars += pos
-                pos += 2
-            }
+            pos += widths[i]
+            if (i == widths.size - 1) break
+            if (i in breaks) {
+                bars += pos + 1
+                pos += 3
+            } else pos += GAP.length
         }
     }
-
-    private fun hasInterval(c: Column) = intervals && c.interval
 
     /** The full width of the table. */
     val width: Int = starts.last() + widths.last()
 
-    private val headings: List<String> = listOf(heading) + columns.map { cell(it, if (it === sortedBy) it.name + " v" else it.name, "") }
+    private val headings: List<String> = listOf(heading) + columns.map { if (it === sortedBy) it.name + " v" else it.name }
 
     /**
-     * One figure and its `+-`, sized for its column. A percentage with an interval leaves its unit to
-     * the interval, `57 +-0.3%`, so it is said once; without one it keeps it, `57%`.
+     * One line of the table, every bar drawn, an empty cell's too, so a row reads in the same columns as the heading;
+     * nothing after the last bar but the last group's figures.
      */
-    fun cell(c: Column, value: String, interval: String): String {
-        // Every form right-aligned to the column's one edge: `6.34s ±5.0%`, `422..490ms`, a heading.
-        return if (hasInterval(c)) (if (interval.isEmpty()) value else "$value $interval").padStart(c.width + INTERVAL_COLUMN) else value
-    }
-
-    /** One line of the table, with nothing after its last figure: no bar closes an empty group. */
-    fun line(cells: List<String>): String {
-        var out = buildString {
-            for (i in cells.indices) {
-                if (i == 0) append(cells[0].padEnd(widths[0]))
-                else {
-                    append(if (i - 1 in breaks) " | " else " ")
-                    append(cells[i].padStart(widths[i]))
-                }
+    fun line(cells: List<String>): String = buildString {
+        for (i in cells.indices) {
+            if (i == 0) append(cells[0].padEnd(widths[0]))
+            else {
+                append(if (i - 1 in breaks) " | " else GAP)
+                append(cells[i].padStart(widths[i]))
             }
-        }.trimEnd()
-        while (out.endsWith("|")) out = out.dropLast(1).trimEnd()
-        return out
-    }
+        }
+    }.trimEnd()
 
     /** The rule under a heading: dashes, with a cross where each bar comes down. */
     fun rule(): String {
@@ -328,16 +445,16 @@ private class Layout(
 
     /**
      * The band of group names over a table's column heads, centred and unruled because the bars below
-     * them already say where each group starts and stops. The groups are the reading order.
+     * them already say where each group starts and stops: the measure groups, Time to Latency, the reading order.
      */
     private fun band(): String {
         val out = CharArray(width) { ' ' }
-        for ((group, at) in columns.indices.groupBy { columns[it].group }) {
+        for ((group, at) in groups()) {
+            val title = group.title
             val from = starts[at.first() + 1]
             val span = starts[at.last() + 1] + widths[at.last() + 1] - from
-            if (group.isEmpty() || span < group.length) continue
-            val pad = (span - group.length) / 2
-            for (i in group.indices) out[from + pad + i] = group[i]
+            val pad = (span - title.length) / 2
+            for (i in title.indices) out[from + pad + i] = title[i]
         }
         for (b in bars) out[b] = '|'
         return String(out).trimEnd()
@@ -356,7 +473,7 @@ private class Layout(
      */
     fun sharedHeading(shown: Set<Column>): String = line(listOf(heading) + columns.map { c ->
         val name = if (c === PARENT_SHARE) ROOT_SHARE else c.name
-        cell(c, if (c in shown) name + if (c === sortedBy) " v" else "" else "", "")
+        if (c in shown) name + if (c === sortedBy) " v" else "" else ""
     })
 }
 
@@ -364,8 +481,21 @@ private class Layout(
  * **A table as text**, for a report.
  *
  * @param minName the name column's narrowest width.
+ * @param view the full view, every column with every interval; or the brief one, the basis columns and the [lenses]
+ * opened, a certain figure without its interval, and the `slowest:` list only with Latency open.
  */
-internal class TableText(private val table: Table, heading: String, minName: Int) {
+internal class TableText(
+    private val table: Table, heading: String, minName: Int, private val view: View = View.FULL, private val lenses: Set<Lens> = emptySet(),
+) {
+    private val brief = view == View.BRIEF
+
+    /** The columns the view shows. */
+    private val columns = shownIn(view, table.columns, lenses)
+
+    /** [c]'s figure on [r] and its interval: none in the brief view on a certain figure, which is usable alone. */
+    private fun ruled(c: Column, r: Row): Pair<String, String> =
+        ruledText(c, r.figures[c], cellText(c, r, r.own)).let { if (brief) it.first to "" else it }
+
     /**
      * The name as drawn in the first column, indent and mark included, and every fact about the row in
      * one parenthesis: `onCentral (3 parents, 2 of 3 runs)`. In the block of [Table.shared] the
@@ -391,7 +521,22 @@ internal class TableText(private val table: Table, heading: String, minName: Int
         table.shared.forEach { add(nameOf(it, 1, shared = true)) }
     }
 
-    private val layout = Layout(table.columns, table.runs >= 2, heading, minName, names, table.sortedBy)
+    /** The columns sized to their widest figure, with its interval in the full view, or heading. */
+    private val fit: Map<Column, Int> = run {
+        val all = buildList {
+            fun walk(r: Row) {
+                add(r)
+                r.children.forEach { walk(it) }
+            }
+            table.rows.forEach { walk(it) }
+            addAll(table.shared)
+        }
+        columns.associateWith { c ->
+            maxOf(c.name.length + if (c === table.sortedBy) 2 else 0, all.maxOfOrNull { r -> ruled(c, r).let { (v, i) -> cell(v, i).length } } ?: 0)
+        }
+    }
+
+    private val layout = Layout(columns, heading, minName, names, table.sortedBy, fit)
 
     /** The full width of the table. */
     val width: Int get() = layout.width
@@ -406,16 +551,16 @@ internal class TableText(private val table: Table, heading: String, minName: Int
     /** [r], what is attached to it, and the rows under it. */
     private fun StringBuilder.row(r: Row, depth: Int) {
         appendLine(layout.line(cells(nameOf(r, depth), r)))
-        slowestLines("  ".repeat(depth), "slowest: ", r.slowest)
+        if (view.shows(Lens.LATENCY, lenses)) slowestLines("  ".repeat(depth), "slowest: ", r.slowest)
         r.children.forEach { row(it, depth + 1) }
     }
 
     private fun cells(name: String, r: Row): List<String> =
-        listOf(name) + table.columns.map { c -> ruledText(c, r.figures[c], cellText(c, r, r.own)).let { (v, i) -> layout.cell(c, v, i) } }
+        listOf(name) + columns.map { c -> ruled(c, r).let { (v, i) -> cell(v, i) } }
 
     /** The rows under more than one caller, after the rule, under a heading of their own. */
     fun StringBuilder.shared() {
-        appendLine(layout.sharedHeading(table.columns.filter { c -> table.shared.any { cellText(c, it, it.own).isNotEmpty() } }.toSet()))
+        appendLine(layout.sharedHeading(columns.filter { c -> table.shared.any { cellText(c, it, it.own).isNotEmpty() } }.toSet()))
         for (r in table.shared) appendLine(layout.line(cells(nameOf(r, 1, shared = true), r)))
         appendLine(layout.rule())
     }
@@ -445,15 +590,26 @@ internal fun paired(before: List<Row>, after: List<Row>): List<DiffRow> {
 }
 
 /**
- * **Two tables as text**, for a diff: the report's columns, names and forms, each row three lines, so a
- * diff is as wide as a report and every number sits above the one it compares with. Before, after, and
- * the change: a percentage, `pp` for what is itself a percentage, `=` for no change.
+ * **Two tables as text**, for a diff: the report's columns, names and forms. In the full view each row is
+ * three lines, so a diff is as wide as a report and every number sits above the one it compares with.
+ * Before, after, and the change: a percentage, `pp` for what is itself a percentage, `=` for no change.
+ *
+ * In the brief view a row is one line, of the basis columns and the [lenses] opened: Time and Share, and an open
+ * lens's, as `before -> after` and the change, the sides aligned on the arrow; Work and Cost the change only. A
+ * certain figure is written without its interval, and a change that moved as one value when it is certain or
+ * small ([Judged.text]).
  */
 internal class DiffText(
     private val before: Table, private val after: Table, private val rows: List<DiffRow>, private val shared: List<DiffRow>,
-    heading: String, minName: Int, sortedBy: Column?,
+    heading: String, minName: Int, private val sortedBy: Column?, private val view: View = View.FULL,
+    private val lenses: Set<Lens> = emptySet(),
 ) {
-    private val columns = (before.columns + after.columns).distinct().sortedBy { c -> (WALL_COLUMNS + OWN_COLUMNS).indexOf(c) }
+    private val brief = view == View.BRIEF
+
+    /** Every column either side has, in the report's order: what the full view shows. */
+    val allColumns: List<Column> = (before.columns + after.columns).distinct().sortedBy { c -> (WALL_COLUMNS + OWN_COLUMNS).indexOf(c) }
+
+    private val columns = shownIn(view, allColumns, lenses)
 
     /** As in a report, `->` where the sides differ: `onCentral (3 parents, 3 -> 0 runs)`. */
     private fun nameOf(r: DiffRow, depth: Int, shared: Boolean = false): String {
@@ -476,8 +632,56 @@ internal class DiffText(
         return indent + r.name + (if (r.coarse) STAR else "") + if (facts.isEmpty()) "" else " (${facts.joinToString()})"
     }
 
+    /** Every row the table draws, the tree's and the block's under it. */
+    private val allRows: List<DiffRow> = buildList {
+        fun walk(r: DiffRow) {
+            add(r)
+            r.children.forEach { walk(it) }
+        }
+        rows.forEach { walk(it) }
+        addAll(shared)
+    }
+
+    /**
+     * In the brief view, a column written `before -> after` and the change: Time and Share, and an open lens's, whose
+     * measures are levels - `Workers 2 -> 4`, where `+2` alone would not say from where. Work and Cost the change only.
+     */
+    private fun twoSided(c: Column) = brief && c.measures != MeasureGroup.WORK && c.measures != MeasureGroup.COST
+
+    /** The brief view's widest before, after and change of each column, so the sides line up on the arrow. */
+    private val beforeWidth = HashMap<Column, Int>()
+    private val afterWidth = HashMap<Column, Int>()
+    private val changeWidth = HashMap<Column, Int>()
+
+    /** Between the sides of a brief cell: the arrow, or as many spaces where neither side has anything. */
+    private val arrow: String get() = " ${sym.arrow} "
+
+    /** A side's cell in the full view: as [sideText] gives it, with its interval by [ruledText]. */
+    private fun fullSide(c: Column, row: Row?, other: Row?, own: Boolean): String {
+        val text = sideText(c, row, other, own)
+        return if (text != cellText(c, row, own)) text else ruledText(c, row?.figures?.get(c), text).let { (v, i) -> cell(v, i) }
+    }
+
+    /** The columns sized to their widest cell or heading: in the full view a side with its interval, or the change. */
+    private val fit: Map<Column, Int> = if (!brief) columns.associateWith { c ->
+        maxOf(
+            c.name.length + if (c === sortedBy) 2 else 0,
+            allRows.maxOfOrNull { r -> maxOf(fullSide(c, r.before, r.after, r.own).length, fullSide(c, r.after, r.before, r.own).length, changeText(c, r).length) } ?: 0,
+        )
+    } else {
+        for (c in columns) {
+            beforeWidth[c] = allRows.maxOfOrNull { briefSide(c, it.before, it.after, it.own).length } ?: 0
+            afterWidth[c] = allRows.maxOfOrNull { briefSide(c, it.after, it.before, it.own).length } ?: 0
+            changeWidth[c] = allRows.maxOfOrNull { changeText(c, it).length } ?: 0
+        }
+        columns.associateWith { c ->
+            val cell = if (twoSided(c)) beforeWidth[c]!! + arrow.length + afterWidth[c]!! + 2 + changeWidth[c]!! else changeWidth[c]!!
+            maxOf(c.name.length + if (c === sortedBy) 2 else 0, cell)
+        }
+    }
+
     private val layout = Layout(
-        columns, before.runs >= 2 || after.runs >= 2, heading, minName,
+        columns, heading, minName,
         buildList {
             fun walk(r: DiffRow, depth: Int) {
                 add(nameOf(r, depth))
@@ -486,7 +690,7 @@ internal class DiffText(
             rows.forEach { walk(it, 0) }
             shared.forEach { add(nameOf(it, 1, shared = true)) }
         },
-        sortedBy,
+        sortedBy, fit,
     )
 
     /** The full width of the table. */
@@ -503,6 +707,26 @@ internal class DiffText(
         appendLine(layout.sharedHeading(columns.filter { c -> shared.any { r -> listOf(r.before, r.after).any { cellText(c, it, r.own).isNotEmpty() } } }.toSet()))
         for (r in shared) row(r, 1, shared = true)
         appendLine(layout.rule())
+    }
+
+    /** A side's figure in the brief view: as [sideText] gives it, and by [ruledText] without a certain figure's interval. */
+    private fun briefSide(c: Column, row: Row?, other: Row?, own: Boolean): String {
+        val text = sideText(c, row, other, own)
+        return if (text != cellText(c, row, own)) text else ruledText(c, row?.figures?.get(c), text).first
+    }
+
+    /**
+     * A brief cell: Time, Share and an open lens's `before -> after  change`, aligned on the arrow; Work and Cost the
+     * change alone. A row on one side only has no arrow - its name says `1 -> 0 runs` - but its side in its place, and
+     * nor has a side left blank, its column's default; a side that is `?` keeps it.
+     */
+    private fun briefCell(c: Column, r: DiffRow): String {
+        val change = changeText(c, r)
+        if (!twoSided(c)) return change
+        val b = briefSide(c, r.before, r.after, r.own)
+        val a = briefSide(c, r.after, r.before, r.own)
+        val between = if (r.before == null || r.after == null || b.isEmpty() || a.isEmpty()) " ".repeat(arrow.length) else arrow
+        return b.padStart(beforeWidth[c]!!) + between + a.padEnd(afterWidth[c]!!) + "  " + change.padStart(changeWidth[c]!!)
     }
 
     /**
@@ -522,50 +746,59 @@ internal class DiffText(
         }
     }
 
-    /** Before, after, the change, what is attached to the row on each side, and the rows under it. */
+    /**
+     * Before, after, the change, what is attached to the row on each side, and the rows under it. In the brief view
+     * one line, and the slowest executions attached only with Latency open.
+     */
     private fun StringBuilder.row(r: DiffRow, depth: Int, shared: Boolean = false) {
-        fun side(name: String, row: Row?, other: Row?) = layout.line(
-            listOf(name) + columns.map { c ->
-                val text = sideText(c, row, other, r.own)
-                val (v, i) = if (text != cellText(c, row, r.own)) text to "" else ruledText(c, row?.figures?.get(c), text)
-                layout.cell(c, v, i)
+        if (brief) {
+            appendLine(layout.line(listOf(nameOf(r, depth, shared)) + columns.map { c -> briefCell(c, r) }))
+            if (view.shows(Lens.LATENCY, lenses)) {
+                slowestLines("  ".repeat(depth), "slowest before: ", r.before?.slowest.orEmpty())
+                slowestLines("  ".repeat(depth), "slowest after:  ", r.after?.slowest.orEmpty())
             }
-        )
+            r.children.forEach { row(it, depth + 1) }
+            return
+        }
+        fun side(name: String, row: Row?, other: Row?) = layout.line(listOf(name) + columns.map { c -> fullSide(c, row, other, r.own) })
         appendLine(side(nameOf(r, depth, shared), r.before, r.after))
         appendLine(side("", r.after, r.before))
-        appendLine(layout.line(listOf("") + columns.map { c -> changeCell(c, r) }))
+        appendLine(layout.line(listOf("") + columns.map { c -> changeText(c, r) }))
         val indent = "  ".repeat(depth)
         slowestLines(indent, "slowest before: ", r.before?.slowest.orEmpty())
         slowestLines(indent, "slowest after:  ", r.after?.slowest.orEmpty())
         r.children.forEach { row(it, depth + 1) }
     }
 
-    private fun changeCell(c: Column, r: DiffRow): String {
-        val change = r.change(c) ?: return layout.cell(c, "", "")
-        val b = if (c.largest) change.before.values.max() else change.before.mean
-        val a = if (c.largest) change.after.values.max() else change.after.mean
+    /**
+     * [c]'s change on [r] as text: blank with nothing to compare, `=` before equal to after, `?` from or to an unknown
+     * figure, one signed value with no interval; else as [Judged] says, against before: a percentage of it, or for a
+     * share its points against the share before.
+     */
+    private fun changeText(c: Column, r: DiffRow): String {
+        // A side that is `?` - no run could give it - leaves the change unknown too; with no figure on a side, nothing.
+        val change = r.change(c) ?: return if (r.before != null && r.after != null &&
+            (cellText(c, r.before, r.own) == UNKNOWN || cellText(c, r.after, r.own) == UNKNOWN)) UNKNOWN else ""
+        val b = change.before.mean
+        val a = change.after.mean
         val share = c.form == Form.PARENT_SHARE || c.form == Form.SHARE || c.form == Form.WAITING
         val scale = if (c.form == Form.WAITING) 100.0 else 1.0
         // Not knowing a side is not knowing the change: a - b of an unknown a is unknown.
-        if (c.interval && (change.before.unknown(scale) || change.after.unknown(scale))) return layout.cell(c, UNKNOWN, "")
-        if (a == b || (!c.interval && figureText(c, change.before, r.own) == figureText(c, change.after, r.own))) return layout.cell(c, "=", "")
-        // A share that moved by less than it prints is no change, and `+0.0 pp` is not a sign to read.
-        if (share && abs((a - b) * scale) < MIN_SHARE_CHANGE) return layout.cell(c, "=", "")
+        if (change.before.unknown(scale) || change.after.unknown(scale)) return UNKNOWN
+        if (a == b) return "="
         // From 0 no fraction describes the change: blank, as for a row with nothing to compare.
-        if (!share && relativeChange(b, a).isNaN()) return layout.cell(c, "", "")
-        val value = if (share) String.format(Locale.ROOT, "%+.1fpp", (a - b) * scale) else signedPercent(relativeChange(b, a))
-        if (!c.interval) return value
+        if (!share && relativeChange(b, a).isNaN()) return ""
+        val value = if (share) unjudgedChange((a - b) * scale, "pp") else signedPercent(relativeChange(b, a))
         val half = if (share) change.half * scale else change.relativeHalf * 100
-        if (half.isNaN()) return layout.cell(c, value, "")
+        if (half.isNaN()) return value
         val v = if (share) (a - b) * scale else relativeChange(b, a) * 100
         val unit = if (share) "pp" else "%"
-        // By sureness, on the real ends before the -100% cut: a range, certain or loose, as changeRange writes it, or `?`
-        // where it reaches or crosses zero.
-        return when (sureness(v, half)) {
-            Sure.PLAIN -> layout.cell(c, value, "")
-            Sure.UNKNOWN -> layout.cell(c, UNKNOWN, "")
-            Sure.CERTAIN, Sure.LOOSE -> layout.cell(c, percentChangeRange(if (share) v - half else maxOf(-100.0, v - half), v + half, unit), "")
-        }
+        // Judged on the real interval; a decrease is written stopping at -100%, a share's points never are. Runs that
+        // agree on each side give an interval of 0: known exactly, one value in either view.
+        return Judged(v, half, if (share) b * scale else 100.0).text(
+            view, { percentChangeValue(v, unit) },
+            { if (half == 0.0) percentChangeValue(v, unit) else percentChangeRange(if (share) v - half else maxOf(-100.0, v - half), v + half, unit) },
+        )
     }
 
 }

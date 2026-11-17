@@ -94,14 +94,20 @@ class CallsPerParentTest {
         if (start < 0) return emptyMap()
         val out = HashMap<List<String>, Pair<String, String?>>()
         val stack = ArrayList<String>()
+        // The two cells by where their headings end, the figures being right-aligned under them.
+        val executions = lines[start].indexOf("Executions") + "Executions".length
+        val perParent = lines[start].indexOf("Per parent") + "Per parent".length
+        // A column is as wide as its widest cell: a cell is the word ending where its heading ends, blank if none does.
+        fun cell(line: String, end: Int) = line.padEnd(end).let { if (it[end - 1] == ' ') "" else it.substring(0, end).substringAfterLast(' ') }
         for (line in lines.drop(start + 2)) {
             if (line.isBlank() || line.startsWith("-")) break
             val indent = line.length - line.trimStart().length
             // The parenthesis on a name, `(2 parents)`, is about the row, not one of its cells.
-            val cells = line.replace(Regex(" [(][^)]*[)]"), "").replace("|", " ").trim().split(Regex(" +"))
+            val cells = line.substringBefore("|").replace(Regex(" [(][^)]*[)]"), "").trim().split(Regex(" +"))
             if (cells[0] == "-") {
                 if (cells[1] == "and") continue
-                out[stack.take(indent / 2) + cells[1]] = cells[2] to cells.getOrNull(3)?.takeIf { it.matches(Regex("[0-9,.]+")) }
+                out[stack.take(indent / 2) + cells[1]] =
+                    cell(line, executions) to cell(line, perParent).takeIf { it.matches(Regex("[0-9,.]+")) }
             } else {
                 while (stack.size > indent / 2) stack.removeAt(stack.size - 1)
                 stack.add(cells[0])
@@ -129,7 +135,7 @@ class CallsPerParentTest {
         val after = Files.createTempDirectory("calls-after")
         repeat(2) { run(plans = 4).save(before) }
         repeat(2) { run(plans = 2).save(after) }
-        val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
+        val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after), view = View.FULL)
         println(diff)
 
         checkDiff(diff)
@@ -144,7 +150,8 @@ class CallsPerParentTest {
         val head = lines.indexOfFirst { it.startsWith("Operation") }
         val executions = lines[head].indexOf("Executions") + "Executions".length
         val perParent = lines[head].indexOf("Per parent") + "Per parent".length
-        fun cell(line: String, end: Int, width: Int) = line.padEnd(end).substring(end - width, end).trim()
+        // A column is as wide as its widest cell: a cell is the word ending where its heading ends, blank if none does.
+        fun cell(line: String, end: Int) = line.padEnd(end).let { if (it[end - 1] == ' ') "" else it.substring(0, end).substringAfterLast(' ') }
         val rows = HashMap<Pair<String, String>, List<String>>()
         var coarse = ""
         for (i in head + 2 until lines.size step 3) {
@@ -152,7 +159,7 @@ class CallsPerParentTest {
             val name = lines[i].substringBefore("|").trim().replace(Regex(" [(][^)]*[)]"), "")
             if (!name.startsWith("- ")) coarse = name
             rows[coarse to name.removePrefix("- ")] =
-                (i..i + 2).map { cell(lines[it], executions, 11) } + (i..i + 2).map { cell(lines[it], perParent, 10) }
+                (i..i + 2).map { cell(lines[it], executions) } + (i..i + 2).map { cell(lines[it], perParent) }
         }
         val wanted = mapOf(
             ("plan" to "plan") to listOf("4", "2", "-50%", "4", "2", "-50%"), ("cleanup" to "cleanup") to listOf("4", "2", "-50%", "4", "2", "-50%"),

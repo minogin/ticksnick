@@ -56,8 +56,8 @@ internal class ClockTrace internal constructor(
     /** A clock reading in the report's unit: `205%` of base, or `2,730 MHz`. */
     fun format(v: Double): String = when {
         v.isNaN() -> UNKNOWN
-        ofBase -> String.format(Locale.ROOT, "%.0f%%", v)
-        else -> String.format(Locale.ROOT, "%,.0f MHz", v)
+        ofBase -> fixed(v, 0) + "%"
+        else -> fixed(v, 0, grouped = true) + " MHz"
     }
 
     /**

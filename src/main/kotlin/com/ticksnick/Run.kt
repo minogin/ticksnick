@@ -108,12 +108,34 @@ internal fun bytes(v: Double): String {
     }
     fun digits(of: Double) = if (u == 0 || of >= 100) 0 else if (of >= 10) 1 else 2
     // Rounded before it is printed, so that 9.999 reads 10.0 and 1,023.9 KB reads 1.00 MB.
+    val raw = x
     x = BigDecimal(x).setScale(digits(x), RoundingMode.HALF_UP).toDouble()
     if (x >= 1024 && u < units.size - 1) {
         x = 1.0
         u++
     }
-    return String.format(Locale.ROOT, "%.${digits(x)}f %s", x, units[u])
+    // Under one byte and not 0 - a mean over executions - is below the last place, `<1 B`, as [fixed] writes it.
+    return fixed(if (x == 0.0) raw else x, digits(x)) + " " + units[u]
+}
+
+/**
+ * A loose figure of bytes as a range, `1.2..2.4 MB`: both ends in the larger one's unit, each by [intervalEnd], the
+ * unit said once at the right, as [durationRange] writes one of time.
+ */
+internal fun bytesRange(lo: Double, hi: Double): String {
+    val units = listOf("B", "KB", "MB", "GB", "TB")
+    var u = 0
+    var scale = 1.0
+    while (hi / scale >= 1024 && u < units.size - 1) {
+        scale *= 1024
+        u++
+    }
+    // Two digits can round the larger end up to 1,024 of its unit: then the next unit.
+    if (intervalEnd(hi / scale).toDouble() >= 1024 && u < units.size - 1) {
+        scale *= 1024
+        u++
+    }
+    return intervalRange(intervalEnd(lo / scale), intervalEnd(hi / scale), " " + units[u])
 }
 
 /** The warning of a comparison where only one side counted allocated bytes. */
@@ -161,8 +183,8 @@ internal fun perParentText(count: Long, parentCount: Long): String =
 internal fun perParentText(perParent: Double): String = when {
     perParent == kotlin.math.floor(perParent) -> String.format(Locale.ROOT, "%,d", perParent.toLong())
     perParent < 1 -> java.math.BigDecimal(perParent).round(java.math.MathContext(3)).toPlainString()
-    perParent < 100 -> String.format(Locale.ROOT, "%.1f", perParent)
-    else -> String.format(Locale.ROOT, "%,.0f", perParent)
+    perParent < 100 -> fixed(perParent, 1)
+    else -> fixed(perParent, 0, grouped = true)
 }
 
 /** Whether a label is on something too small for the instrument to describe. See [Run.tooSmall]. */
@@ -210,21 +232,45 @@ internal fun rangeText(low: String, high: String): String = if (low == high) low
 internal fun intervalRange(low: String, high: String, unit: String): String = "$low..$high$unit"
 
 /**
- * **A change's interval as text: the one function** for every change range a diff writes, in its tables and its
- * header. Its direction once, before the numbers, and the end nearer zero first, so the first number is the least
- * it moved: `↓8.2..62%`, `↑175..300%`, in ASCII `-(8.2..62)%`, `+(175..300)%`. The arrow is the known direction,
- * so the range from [low] to [high] is on one side of zero: one that reaches or crosses it is unknown, `?`, by
- * [sureness], and never gets here. [magnitude] writes one end without a sign, in [unit].
+ * **A change as a range: the one function** for every change range a diff writes, in its tables and its header
+ * (docs/output.md, "The diff"). Every number is its real value, and the range runs from the end nearer
+ * zero, the least it moved first, so it shows its direction by its order and takes no `+`: `-8.2..-62%`,
+ * `180..300%`, `-0.1..1.5pp`, `5..-40pp`. In Unicode an arrow comes first, `↓-8.2..-62%`, `↑-0.1..1.5pp`: it repeats
+ * what the numbers say, for reading a column at a glance. Only a change that moved is written so ([Judged]): [low]
+ * and [high] are its interval's ends, its direction its middle's, and [end] writes one end's size, unsigned, in [unit].
  */
-internal fun changeRange(low: Double, high: Double, unit: String, magnitude: (Double) -> String): String {
-    require(high < 0 || low > 0) { "a change range reaching or crossing zero is unknown: $low..$high" }
-    return if (high < 0) sym.down + magnitude(-high) + ".." + magnitude(-low) + sym.directedClose + unit
-    else sym.up + magnitude(low) + ".." + magnitude(high) + sym.directedClose + unit
+internal fun changeRange(low: Double, high: Double, unit: String, end: (Double) -> String): String {
+    val (near, far) = if (abs(low) <= abs(high)) low to high else high to low
+    fun real(x: Double) = (if (x < 0) "-" else "") + end(abs(x))
+    return (if (low + high > 0) sym.up else sym.down) + real(near) + ".." + real(far) + unit
 }
 
-/** A change in percent or points as [changeRange] writes it, `↓18..30%`, `↑4.7..5.9pp`: tenths under 10, by [intervalEnd]. */
+/**
+ * **A change as one value: the one function**, a change that moved in the brief view when it is certain or small
+ * ([Judged.oneValue]): its middle [v], [size] its size as text, unit included. Its real value, so it carries its
+ * sign; in ASCII, with no arrow before it, a rise takes its `+`: `-40%`, `+1.0pp`; in Unicode `↓-40%`, `↑1.0pp`.
+ */
+internal fun changeValue(v: Double, size: String): String =
+    if (v < 0) sym.down + "-" + size else sym.up + (if (sym.up.isEmpty()) "+" else "") + size
+
+/** A change in percent or points as [changeRange] writes it, `-18..-30%`, `4.7..5.9pp`: tenths under 10, by [intervalEnd]. */
 internal fun percentChangeRange(low: Double, high: Double, unit: String): String =
     changeRange(low, high, unit) { intervalEnd(it, if (it < 9.95) 1 else 0) }
+
+/**
+ * **A change with no interval: the one function**, one run on a side: its value with its sign and no arrow, as nothing
+ * judged it, in the places [percentChangeValue] writes, tenths under 10: `-24%`, `+12pp`, `+<0.1pp`.
+ */
+internal fun unjudgedChange(v: Double, unit: String): String = fixed(v, if (abs(v) < 9.95) 1 else 0, signed = true) + unit
+
+/** A change in time with no interval, as [unjudgedChange]: `-100ms`, `+2.13s`. */
+internal fun unjudgedDuration(v: Double): String = (if (v < 0) "-" else "+") + duration(abs(v))
+
+/** A change in percent or points as [changeValue] writes it, tenths under 10 as [signedPercent]: `-92%`, `+5.3pp`. */
+internal fun percentChangeValue(v: Double, unit: String): String {
+    val m = abs(v)
+    return changeValue(v, fixed(m, if (m < 9.95) 1 else 0) + unit)
+}
 
 /**
  * **An interval's end: at most two significant digits**, a figure's range and a change's alike: `0.15`, `2.4`,
@@ -239,8 +285,28 @@ internal fun intervalEnd(v: Double, maxDecimals: Int = Int.MAX_VALUE): String {
     if (v == 0.0) return exact.setScale(minOf(maxDecimals, 1)).toPlainString()
     val two = exact.round(java.math.MathContext(2, java.math.RoundingMode.HALF_UP))
     val exponent = two.precision() - two.scale() - 1
-    return exact.setScale(minOf(maxDecimals, 1 - exponent), java.math.RoundingMode.HALF_UP).toPlainString()
+    val places = minOf(maxDecimals, 1 - exponent)
+    val end = exact.setScale(places, java.math.RoundingMode.HALF_UP)
+    // Past the places the column writes, an end that is not 0 is below their last unit, not 0: `<0.1`.
+    return if (end.signum() == 0) belowPlaces(places) else end.toPlainString()
 }
+
+/**
+ * **A number at a fixed number of decimal places: the one function** for every such number a report writes, a figure,
+ * an interval, a change, a share or a count's mean. One that is not 0 but rounds to 0 at its [places] is written as
+ * below one unit of its last place, with its sign - `<0.1`, `-<0.01`, `<1` -, never as a measured `0.0`, which it is
+ * not. Times, at three significant digits, never round to 0; bytes under one, a mean over executions, are `<1 B`. [grouped] puts in thousands separators,
+ * `5,262`; [signed] a `+` before a rise.
+ */
+internal fun fixed(v: Double, places: Int, grouped: Boolean = false, signed: Boolean = false): String {
+    if (v.isNaN()) return UNKNOWN
+    if (v == 0.0) return String.format(Locale.ROOT, "%.${places}f", 0.0)  // -0.0 too, which has no sign to show
+    if (v != 0.0 && abs(v) < 0.5 * Math.pow(10.0, -places.toDouble())) return (if (v < 0) "-" else if (signed) "+" else "") + belowPlaces(places)
+    return String.format(Locale.ROOT, "%${if (signed) "+" else ""}${if (grouped) "," else ""}.${places}f", v)
+}
+
+/** Below one unit of the last of [places]: `<0.1`, `<0.01`, `<1`. See [fixed]. */
+private fun belowPlaces(places: Int): String = sym.less + if (places <= 0) "1" else "0." + "0".repeat(places - 1) + "1"
 
 
 /**
@@ -364,7 +430,7 @@ internal fun limitText(nanos: Double): String {
     if (nanos.isNaN()) return "-"
     val unit = durationUnitOf(nanos)
     val v = nanos / unit.scale
-    return String.format(Locale.ROOT, if (v >= 10) "%.0f" else "%.1f", v) + unit.text
+    return fixed(v, if (v >= 10) 0 else 1) + unit.text
 }
 
 /** The unit [duration] prints [nanos] in. */
@@ -382,7 +448,7 @@ internal fun durationCertain(value: Double, half: Double): String = duration(val
 
 /** `±5.0%`, `±12%`: an interval relative to its figure. */
 internal fun relativeText(pct: Double): String =
-    if (pct < 9.95) String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.1f%%", pct) else String.format(java.util.Locale.ROOT, "${sym.plusMinus}%.0f%%", pct)
+    sym.plusMinus + fixed(pct, if (pct < 9.95) 1 else 0) + "%"
 
 /** `4.4..460ms`: an interval of durations, both ends in the larger one's unit, each by [intervalEnd]. */
 internal fun durationRange(lo: Double, hi: Double): String {
@@ -391,11 +457,14 @@ internal fun durationRange(lo: Double, hi: Double): String {
     return intervalRange(one(lo), one(hi), unit.text)
 }
 
-/** A change in time as [changeRange] writes it, both ends in the larger one's unit: `↓3.7..5.7s`. */
+/** A change in time as [changeRange] writes it, both ends in the larger one's unit: `-3.7..-5.7s`. */
 internal fun durationChangeRange(low: Double, high: Double): String {
     val unit = intervalUnitOf(maxOf(kotlin.math.abs(low), kotlin.math.abs(high)))
     return changeRange(low, high, unit.text) { intervalEnd(it / unit.scale) }
 }
+
+/** A change in time as [changeValue] writes it, three digits as any one duration: `-1.97s`, `↓-1.97s`. */
+internal fun durationChangeValue(v: Double): String = changeValue(v, duration(kotlin.math.abs(v)))
 
 /** The unit an interval's larger end of [nanos] is written in: chosen again after two-digit rounding, so 996ms is `1.0s`. */
 private fun intervalUnitOf(nanos: Double): DurationUnit {
@@ -437,9 +506,9 @@ private fun threeSignificant(v: Double): Double = when {
 
 /** Three significant digits and no more, which is every digit any number here can support. */
 private fun threeSignificantString(v: Double): String = when {
-    v >= 100 -> String.format(Locale.ROOT, "%.0f", v)
-    v >= 10 -> String.format(Locale.ROOT, "%.1f", v)
-    else -> String.format(Locale.ROOT, "%.2f", v)
+    v >= 100 -> fixed(v, 0)
+    v >= 10 -> fixed(v, 1)
+    else -> fixed(v, 2)
 }
 
 /** Three significant digits and no unit, for a quantity that carries its own - `pp`, a ratio. */
@@ -459,11 +528,10 @@ internal fun percent(value: Double): String = when {
     // `Runnable / Wait` are supposed to add up on the page as well as in the arithmetic.
     value >= 100.0 -> "100%"
     value >= 99.95 -> ">99.9%"
-    value >= 9.995 -> String.format(Locale.ROOT, "%.1f%%", value)
-    value >= 0.9995 -> String.format(Locale.ROOT, "%.2f%%", value)
-    value > 0.0005 -> String.format(Locale.ROOT, "%.3f%%", value)
-    // Not "0.000%", which reads as measured zero. A share this small is one the report folds away.
-    value > 0 -> "<0.001%"
+    value >= 9.995 -> fixed(value, 1) + "%"
+    value >= 0.9995 -> fixed(value, 2) + "%"
+    // Not "0.000%", which reads as measured zero: `<0.001%` ([fixed]). A share this small is one the report folds away.
+    value > 0 -> fixed(value, 3) + "%"
     else -> "0%"
 }
 
@@ -900,7 +968,7 @@ class Run internal constructor(
     }
 
     private fun stepText(nanos: Double): String =
-        String.format(Locale.ROOT, if (nanos >= 1_000_000) "%.1fms" else "%.2fms", nanos / 1e6)
+        fixed(nanos / 1e6, if (nanos >= 1_000_000) 1 else 2) + "ms"
 
     /** Samples inside a fine label. Self time by construction: the hook keeps the innermost id. */
     internal val fineHits: Long get() = operations.sumOf { it.hits }
@@ -1394,8 +1462,8 @@ class Run internal constructor(
         appendLine("pool is the distinct threads that ever CALLED the operation, counted by the hook and exact.")
         appendLine("  workers 1 with pool 8 is eight threads queueing through one at a time, which the warnings")
         appendLine("  above say out loud")
-        appendLine("thread-time per call is thread-time / calls; Long is the calls that outlived a tick: how")
-        appendLine("  many, the thread-time inside them, and the longest")
+        appendLine("thread-time per call is thread-time / calls; long calls are the calls that outlived a tick:")
+        appendLine("  how many, the thread-time inside them (long time), and the longest")
         if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
             appendLine()
             appendLine("  for coarse operations:")
@@ -1450,13 +1518,13 @@ class Run internal constructor(
         val calls: Long,
         /** Null for a coarse row: the long-execution detector is a fine-tier instrument. */
         val stuckShare: Double?,
-        /** The `Long` group: executions over a tick, the thread-time in them, the longest. Fine rows only. */
+        /** `Long calls`, `Long time` and `Longest`: executions over a tick, the thread-time in them, the longest. Fine rows only. */
         val stuckInstances: Long = 0,
         val stuckHits: Long = 0,
         val longestStuckTicks: Long = 0,
     ) {
         /**
-         * Whether the `Long` group prints for this row: a fine row whose share in long executions
+         * Whether `Long calls`, `Long time` and `Longest` print for this row: a fine row whose share in long executions
          * is above what preemption and GC alone could give it. At or under the floor the three
          * columns are a dash, and the line under the table says what the floor was.
          */

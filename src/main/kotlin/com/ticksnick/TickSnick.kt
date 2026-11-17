@@ -16,11 +16,11 @@ object TickSnick {
     fun load(folder: Path): Profile = Profile.load(folder).also { Logo.once() }
 
     /**
-     * [before] -> [after]: each side the mean of its runs, the change with its 95% interval once both have two.
-     * [unicode] as in [Profile.render].
+     * [before] -> [after]: each side the mean of its runs, each change judged on its 95% interval once both have two.
+     * [unicode], [view] and [lenses] as in [Profile.render]: brief by default, one line a row.
      */
     @JvmStatic
     @JvmOverloads
-    fun diff(before: Profile, after: Profile, unicode: Boolean = false): String =
-        withSymbols(unicode) { diffText(before, after) }.also { Logo.once() }
+    fun diff(before: Profile, after: Profile, unicode: Boolean = false, view: View = View.BRIEF, lenses: Set<Lens> = emptySet()): String =
+        withSymbols(unicode) { diffText(before, after, view, lenses) }.also { Logo.once() }
 }

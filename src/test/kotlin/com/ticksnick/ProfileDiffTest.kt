@@ -96,14 +96,15 @@ class ProfileDiffTest {
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
             val header = text.lines().first { it.startsWith("runBatch ") }
-            // The interval is all that is said about how sure the change is: no mark beside it.
-            // A change is always a range, the interval's ends, in time and in percent.
-            assertTrue("11.0s -> 8.00s" in header && Regex("""-\([0-9.]+\.\.[0-9.]+\)%""").containsMatchIn(header) && "per execution" in header, header)
+            // The interval is all that is said about how sure the change is: no mark beside it. A change that moved is,
+            // in the full view, its interval's ends, by their real values, in time and in percent. Each side is a figure
+            // and written by its rule: 11.0 s ±2.5 s and 8.00 s ±2.5 s are loose, their ranges.
+            assertTrue("8.5..13s -> 5.5..10s" in header && Regex("""-[0-9.]+\.\.-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
-            // `same` moved by a nanosecond either way: its change crosses zero, so its direction is not known, `?`, and
-            // no range with both signs is written.
+            // `same` moved by a nanosecond either way: no direction, and small against before, so it did not move, `=`.
             val same = diffRow(text, "same")[2]
-            assertTrue("?" in same && !Regex("""[-+][0-9.]+\.\.[-+]""").containsMatchIn(same) && "could be noise" !in text, text)
+            // Its Wall's change, that is; a column whose sides are `?` has `?` for a change.
+            assertTrue(same.split("|")[1].trim() == "=" && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)
             assertTrue("no interval, so any" !in text, "runs on each side have their intervals: $text")
             assertTrue(text.lines().first { it.startsWith("NESTED WALL TIME") }.endsWith("the change its 95% interval"), text)
@@ -141,13 +142,18 @@ class ProfileDiffTest {
     }
 
     @Test
-    fun `the one-run line names the side, and is absent with runs on each side`() {
-        assertEquals("1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell", oneRunLine(1))
-        assertEquals(null, oneRunLine(2))
-        assertTrue(oneRunLine(1, 3)!!.startsWith("1 run before: no interval, so any change below"))
-        assertTrue(oneRunLine(3, 1)!!.startsWith("1 run after: "))
-        assertTrue(oneRunLine(1, 1)!!.startsWith("1 run on each side: "))
-        assertEquals(null, oneRunLine(2, 3))
+    fun `the few-runs line names the side, one run before two, and is absent with three runs on each side`() {
+        assertEquals(listOf("1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell"), fewRunsLines(1))
+        assertEquals(listOf("2 runs: the interval is too wide to say much - run at least 3 times to tell"), fewRunsLines(2))
+        assertEquals(emptyList(), fewRunsLines(3))
+        assertTrue(fewRunsLines(1, 3).single().startsWith("1 run before: no interval, so any change below"))
+        assertTrue(fewRunsLines(3, 1).single().startsWith("1 run after: "))
+        assertTrue(fewRunsLines(1, 1).single().startsWith("1 run on each side: "))
+        assertEquals(listOf("2 runs after: the interval is too wide to say much - run at least 3 times on each side to tell"), fewRunsLines(3, 2))
+        assertTrue(fewRunsLines(2, 2).single().startsWith("2 runs on each side: "))
+        // One line: with a side of one run no change has an interval, which says more than the other side's two.
+        assertTrue(fewRunsLines(2, 1).single().startsWith("1 run after: "))
+        assertEquals(emptyList(), fewRunsLines(3, 4))
     }
 
     /** A long name sizes its table in a diff of one run, a diff of several and the report over runs. */
@@ -193,14 +199,18 @@ class ProfileDiffTest {
             val three = folder("three", listOf(10_000_000_000L, 11_000_000_000L, 12_000_000_000L), true)
             val other = folder("other", listOf(7_000_000_000L, 9_000_000_000L, 8_500_000_000L), false)
             val otherOne = folder("otherOne", listOf(7_000_000_000L), false)
-            val shapes: List<Pair<String, (Boolean) -> String>> = listOf(
-                "one run" to { u -> one.render(u) },
-                "three runs" to { u -> three.render(u) },
-                "diff 1:1" to { u -> TickSnick.diff(one, otherOne, u) },
-                "diff 3:1" to { u -> TickSnick.diff(three, otherOne, u) },
-                "diff 3:3" to { u -> TickSnick.diff(three, other, u) },
-            )
-            val unicodeSymbols = UNICODE_SYMBOLS.run { plusMinus + micro + arrow + dash + ellipsis + times + down + up }.filter { it.code > 127 }.toSet()
+            // Each shape in both views: the brief one sizes its columns to their figures, so it lines up by its own measure.
+            val shapes: List<Pair<String, (Boolean) -> String>> = View.entries.flatMap { v ->
+                listOf(
+                    "one run, $v" to { u: Boolean -> one.render(u, v) },
+                    "three runs, $v" to { u: Boolean -> three.render(u, v) },
+                    "diff 1:1, $v" to { u: Boolean -> TickSnick.diff(one, otherOne, u, v) },
+                    "diff 3:1, $v" to { u: Boolean -> TickSnick.diff(three, otherOne, u, v) },
+                    "diff 3:3, $v" to { u: Boolean -> TickSnick.diff(three, other, u, v) },
+                )
+            }
+            val unicodeSymbols = UNICODE_SYMBOLS.run { plusMinus + micro + arrow + dash + ellipsis + times + down + up }
+                .filter { it.code > 127 }.toSet()
             var sawPlusMinus = false
             for ((what, render) in shapes) {
                 val ascii = render(false)
@@ -208,14 +218,23 @@ class ProfileDiffTest {
                 ascii.lines().forEach { line -> assertTrue(line.all { it.code <= 127 }, "$what, ASCII: $line") }
                 unicode.lines().forEach { line -> assertTrue(line.all { it.code <= 127 || it in unicodeSymbols }, "$what, Unicode: $line") }
                 sawPlusMinus = sawPlusMinus || '±' in unicode
-                for (text in listOf(ascii, unicode)) for (table in bars(text)) assertEquals(1, table.distinct().size, "$what: a table out of line:\n$text")
+                for (text in listOf(ascii, unicode)) for (table in bars(text)) assertTrue(inLine(table), "$what: a table out of line:\n$text")
                 // The check has teeth: the symbol swapped after the columns were measured breaks it.
-                if ('±' in unicode) assertTrue(bars(ascii.replace("+-", "±")).any { it.distinct().size > 1 }, "$what: a late swap went unseen")
+                if ('±' in unicode) assertTrue(bars(ascii.replace("+-", "±")).any { !inLine(it) }, "$what: a late swap went unseen")
             }
             assertTrue(sawPlusMinus, "no report shape printed an interval, so the test checked nothing")
         } finally {
             dir.toFile().deleteRecursively()
         }
+    }
+
+    /**
+     * Every line's bars at the columns of the table's fullest line: a row whose last groups are empty stops before
+     * their bars, since no bar closes an empty group, but each bar it has falls where the heading's does.
+     */
+    private fun inLine(table: List<List<Int>>): Boolean {
+        val fullest = table.maxBy { it.size }
+        return table.all { it == fullest.take(it.size) }
     }
 
     /** Each table's lines as the columns of their bars, one list per table. */
@@ -345,28 +364,83 @@ class ProfileDiffTest {
     }
 
     /**
-     * A change is judged by the same lines as a figure: crossing zero it is unknown, `?`, in time and in percent;
-     * certain it is still its range. 1.0, 1.1, 1.2 s against 1.06, 1.16, 1.11 s moves 0.01 s, ±0.27 s; 10.0, 10.1,
-     * 10.2 s against 8.0, 8.1, 8.2 s moves 2 s, ±0.23 s, 11% of it.
+     * A header line's change is judged once, on its percentage of before, and written in time and in percent alike.
+     * 1.0, 1.1, 1.2 s against 1.06, 1.16, 1.11 s: -24..+25%, no direction and large, `?`. 10.0, 10.1, 10.2 s against
+     * 10.09, 10.10, 10.14 s: -2.4..+2.6%, no direction but small, `=`. 10.0, 10.1, 10.2 s against 8.0, 8.1, 8.2 s:
+     * -18..-22%, certain, a range in the full view and its middle in the brief one.
      */
     @Test
-    fun `a change crossing zero is not known, and a certain one is still a range`() {
+    fun `a header line's change is judged once, in time and in percent`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             fun spans(folder: Path, vararg nanos: Long) = nanos.forEachIndexed { i, span ->
                 Files.createDirectories(folder)
                 RunStore.save(profile(emptyList(), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
             }
-            fun wallLine(b: Path, a: Path) = ProfileDiff(Profile.load(b), Profile.load(a)).render().lines().first { it.startsWith("Wall time") }
+            fun wallLine(b: String, a: String, view: View = View.FULL) =
+                ProfileDiff(Profile.load(dir.resolve(b)), Profile.load(dir.resolve(a)), view).render().lines().first { it.startsWith("Wall time") }
             spans(dir.resolve("b1"), 1_000_000_000, 1_100_000_000, 1_200_000_000)
             spans(dir.resolve("a1"), 1_060_000_000, 1_160_000_000, 1_110_000_000)
-            val across = wallLine(dir.resolve("b1"), dir.resolve("a1"))
-            assertTrue(Regex("""1\.10s -> 1\.11s\s+\?\s+\?$""").containsMatchIn(across), across)
+            assertTrue(Regex("""0\.85\.\.1\.3s -> 1\.11s \+-11%\s+\?\s+\?$""").containsMatchIn(wallLine("b1", "a1")), wallLine("b1", "a1"))
+            spans(dir.resolve("a3"), 10_090_000_000, 10_100_000_000, 10_140_000_000)
             spans(dir.resolve("b2"), 10_000_000_000, 10_100_000_000, 10_200_000_000)
+            assertTrue(Regex("""10\.1s \+-[0-9.]+% -> 10\.1s \+-[0-9.]+%\s+=\s+=$""").containsMatchIn(wallLine("b2", "a3")), wallLine("b2", "a3"))
             spans(dir.resolve("a2"), 8_000_000_000, 8_100_000_000, 8_200_000_000)
-            val certain = wallLine(dir.resolve("b2"), dir.resolve("a2"))
-            assertEquals(Sure.CERTAIN, Change(Estimate(listOf(10.0, 10.1, 10.2)), Estimate(listOf(8.0, 8.1, 8.2))).let { sureness(it.delta, it.half) })
-            assertTrue(Regex("""-\(1\.8\.\.2\.2\)s\s+-\(18\.\.22\)%$""").containsMatchIn(certain), certain)
+            assertTrue(Regex("""-1\.8\.\.-2\.2s\s+-18\.\.-22%$""").containsMatchIn(wallLine("b2", "a2")), wallLine("b2", "a2"))
+            assertTrue(Regex("""-2\.00s\s+-20%$""").containsMatchIn(wallLine("b2", "a2", View.BRIEF)), wallLine("b2", "a2", View.BRIEF))
+            withSymbols(unicode = true) {
+                assertTrue(Regex("""↓-1\.8\.\.-2\.2s\s+↓-18\.\.-22%$""").containsMatchIn(wallLine("b2", "a2")), wallLine("b2", "a2"))
+                assertTrue(Regex("""↓-2\.00s\s+↓-20%$""").containsMatchIn(wallLine("b2", "a2", View.BRIEF)), wallLine("b2", "a2", View.BRIEF))
+            }
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    /**
+     * Every figure with an interval is written by its rule, in every section and both views: the header lines' sides of a
+     * diff, and the active time the own table's heading quotes. 1.0, 1.1, 1.2 s is 1.10 s ±23%, loose, its range;
+     * 1.06, 1.16, 1.11 s is 1.11 s ±11%, certain, with its `+-` in the full view and without it in the brief one; 1.0, 3.0,
+     * 0.1 s reaches 0, unknown, `?`. The header lines line up on the arrow whatever their sides' forms.
+     */
+    @Test
+    fun `every figure with an interval is written by its rule, the header lines and the headings too`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            fun spans(folder: Path, vararg nanos: Long) = nanos.forEachIndexed { i, span ->
+                Files.createDirectories(folder)
+                RunStore.save(profile(emptyList(), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+            }
+            spans(dir.resolve("loose"), 1_000_000_000, 1_100_000_000, 1_200_000_000)
+            spans(dir.resolve("certain"), 1_060_000_000, 1_160_000_000, 1_110_000_000)
+            spans(dir.resolve("unknown"), 1_000_000_000, 3_000_000_000, 100_000_000)
+            fun diff(b: String, a: String, view: View) = ProfileDiff(Profile.load(dir.resolve(b)), Profile.load(dir.resolve(a)), view).render()
+            fun line(text: String, key: String) = text.lines().first { it.startsWith(key) }
+            val full = diff("loose", "certain", View.FULL)
+            assertTrue("0.85..1.3s -> 1.11s +-11%" in line(full, "Wall time"), line(full, "Wall time"))
+            assertTrue("0.85..1.3s -> 1.11s +-11%" in line(full, "  Active"), line(full, "  Active"))
+            val brief = diff("loose", "certain", View.BRIEF)
+            assertTrue(Regex("""0\.85\.\.1\.3s -> 1\.11s\s""").containsMatchIn(line(brief, "Wall time")) && "+-" !in line(brief, "Wall time"), line(brief, "Wall time"))
+            assertTrue(Regex("""^Wall time\s+\? -> 1\.11s \+-11%""").containsMatchIn(line(diff("unknown", "certain", View.FULL), "Wall time")))
+            // A wider side widens the column for every line, so the arrows stay one under another: the root's sides,
+            // the same each run, are plain and short, the wall time's a range and a `+-`.
+            listOf("rootB" to listOf(1_000_000_000L, 1_100_000_000L, 1_200_000_000L), "rootA" to listOf(1_060_000_000L, 1_160_000_000L, 1_110_000_000L))
+                .forEach { (name, spans) ->
+                    val folder = dir.resolve(name).also { Files.createDirectories(it) }
+                    val batch = if (name == "rootB") 500_000_000L else 400_000_000L
+                    spans.forEachIndexed { i, span ->
+                        RunStore.save(profile(listOf(node("runBatch", listOf(batch))), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+                    }
+                }
+            val mixed = diff("rootB", "rootA", View.FULL)
+            assertTrue("500ms -> 400ms" in line(mixed, "runBatch "), mixed)
+            assertEquals(line(mixed, "Wall time").indexOf("->"), line(mixed, "runBatch ").indexOf("->"), mixed)
+            // The own table's heading quotes the active time, the header's `Active`: by the same rule.
+            val report = Profile.load(dir.resolve("loose"))
+            assertTrue("out of 0.85..1.3s active time" in line(report.render(view = View.FULL), "OWN THREAD-TIME"), report.render(view = View.FULL))
+            val certain = Profile.load(dir.resolve("certain"))
+            assertTrue("out of 1.11s +-11% active time" in line(certain.render(view = View.FULL), "OWN THREAD-TIME"))
+            assertTrue("out of 1.11s active time" in line(certain.render(view = View.BRIEF), "OWN THREAD-TIME"))
         } finally {
             dir.toFile().deleteRecursively()
         }

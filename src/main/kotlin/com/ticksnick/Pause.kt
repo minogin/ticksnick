@@ -237,11 +237,11 @@ internal class Pauses internal constructor(
  * @param pauses how many, as the sampler counted them, and [longestNanos] the longest. Usually one
  * quantity from two sides with the time the JVM confirmed; when it confirmed less than one of the pauses
  * the sampler saw, "3.00 ms paused, longest 22.5 ms" is a line contradicting itself, and the counts are
- * left off rather than capped.
+ * left off rather than capped. [view] as [durationWithInterval]: the brief one leaves out a certain figure's `+-`.
  */
-internal fun wallLine(wall: Estimate, active: Estimate, paused: Estimate, pauses: Long, longestNanos: Long): String {
-    val head = "${durationWithInterval(wall)} = ${durationWithInterval(active)} active + "
+internal fun wallLine(wall: Estimate, active: Estimate, paused: Estimate, pauses: Long, longestNanos: Long, view: View = View.FULL): String {
+    val head = "${durationWithInterval(wall, view)} = ${durationWithInterval(active, view)} active + "
     if (paused.mean == 0.0) return head + "0 paused"
     val counts = if (longestNanos <= paused.mean) " in ${Run.plural(pauses, "pause")}, longest ${duration(longestNanos.toDouble())}" else ""
-    return "$head${durationWithInterval(paused)} paused (${percent(paused.mean * 100 / wall.mean)})$counts"
+    return "$head${durationWithInterval(paused, view)} paused (${percent(paused.mean * 100 / wall.mean)})$counts"
 }

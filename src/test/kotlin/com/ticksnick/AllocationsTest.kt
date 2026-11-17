@@ -181,7 +181,8 @@ class AllocationsTest {
         val head = lines.first { it.startsWith("Operation") }
         val end = head.indexOf("Per execution") + "Per execution".length
         assertEquals(' ', head[head.indexOf("Per execution") - 1])
-        assertTrue(lines[lines.indexOf(head) - 1].contains("Allocated"), "the group has no name")
+        assertTrue(lines[lines.indexOf(head) - 1].contains("Memory"), "the group has no name")
+        assertTrue(Regex("""\|\s+Paused\s+Allocated\s+Per execution \|""").containsMatchIn(head), "Memory's columns, together: $head")
         val row = lines.dropWhile { it != head }.first { it.startsWith("alloc.outer ") }
         assertEquals("3.00 MB", row.substring(end - 7, end), row)
 
@@ -212,9 +213,9 @@ class AllocationsTest {
             Profiler.stop().save(after)
         }
         val runs = TickSnick.load(before)
-        val across = runs.render()
+        val across = runs.render(view = View.FULL)
         assertTrue(across.lines().any { it.startsWith("alloc.outer") && "3.00 MB" in it && "MB +-" !in it }, across)
-        val row = diffRow(TickSnick.diff(runs, TickSnick.load(after)), "alloc.outer")
+        val row = diffRow(TickSnick.diff(runs, TickSnick.load(after), view = View.FULL), "alloc.outer")
         assertTrue("3.00 MB" in row[0] && "3.00 MB" in row[1] && "MB +-" !in row[0], row.toString())
     }
 
@@ -338,7 +339,10 @@ class AllocationsTest {
 
         val head = lines.indexOfFirst { it.startsWith("Operation") }
         val row = lines.first { it.trimStart().startsWith("- alloc.fine") }
-        assertEquals(lines[head].indexOf("Mean") + "Mean".length, row.trimEnd().length, "Mean out of line, or a cell in the column: $row")
+        val end = lines[head].indexOf("Mean") + "Mean".length
+        assertTrue(row[end - 1] != ' ', "Mean out of line: $row")
+        // Past Mean only the bars, drawn for every group whether the row has a figure in it or not.
+        assertTrue(row.drop(end).all { it == ' ' || it == '|' }, "a cell in the column: $row")
     }
 
     @Test
@@ -467,13 +471,13 @@ class AllocationsTest {
             session(true).save(before)
             session(false).save(after)
         }
-        val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
+        val diff = TickSnick.diff(TickSnick.load(before), TickSnick.load(after), view = View.FULL)
         assertTrue("Allocated: counted on one side only" in diff, diff)
         val row = diffRow(diff, "alloc.outer")
         assertTrue("3.00 MB" in row[0] && "MB" !in row[1], row.toString())
         // Not asked for is not unknown: the side that did not count is blank there, not `?`.
         val head = diff.lines().first { it.startsWith("Operation") }
-        val cells = row[1].padEnd(head.length).substring(head.indexOf("Total") - 5, head.indexOf("Per execution") + "Per execution".length)
+        val cells = row[1].padEnd(head.length).substring(head.indexOf("Allocated") - 1, head.indexOf("Per execution") + "Per execution".length)
         assertTrue(cells.isBlank(), "the side that did not count: ${row[1]}")
     }
 
@@ -495,7 +499,7 @@ class AllocationsTest {
         val folder = Files.createTempDirectory("alloc-some")
         session(true).save(folder)
         session(false).save(folder)
-        val text = TickSnick.load(folder).render()
+        val text = TickSnick.load(folder).render(view = View.FULL)
         assertTrue(text.lines().any { it.startsWith("alloc.outer") && "3.00 MB" in it }, text)
     }
 
@@ -514,7 +518,7 @@ class AllocationsTest {
             with().save(before)
             without().save(after)
         }
-        val two = diffRow(TickSnick.diff(TickSnick.load(before), TickSnick.load(after)), "alloc.gone")
+        val two = diffRow(TickSnick.diff(TickSnick.load(before), TickSnick.load(after), view = View.FULL), "alloc.gone")
         assertTrue("1.00 MB" in two[0] && "MB" !in two[1], two.toString())
     }
 

@@ -1,6 +1,5 @@
 package com.ticksnick
 
-import java.util.Locale
 
 /**
  * One gap of a warning, filled by a run. Its type says how the gaps of several runs merge into one
@@ -33,7 +32,7 @@ internal fun words(text: String): Gap = Gap.Words(text)
 internal fun note(text: String): Gap = Gap.Note(text)
 
 /** A count, `9,835,008`. */
-internal fun countText(n: Double): String = String.format(Locale.ROOT, "%,.0f", n)
+internal fun countText(n: Double): String = fixed(n, 0, grouped = true)
 
 /** A share in percent, as [percent] writes it, from a fraction. */
 internal fun shareText(fraction: Double): String = percent(fraction * 100)

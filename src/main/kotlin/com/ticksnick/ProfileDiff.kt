@@ -1,12 +1,13 @@
 package com.ticksnick
 
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.sqrt
 
-/** The header lines, wall, active, paused and the root row: before -> after, the change as a range, absolute and relative. */
-internal val RUNS_DIFF_HEADER: String get() = "%7s ${sym.arrow} %-7s  %-22s %-16s %s"
+/** The header lines' columns at their narrowest: before, after, the change in time, in percent. Wider sides widen them all. */
+private const val HEADER_SIDE = 7
+private const val HEADER_ABSOLUTE = 22
+private const val HEADER_RELATIVE = 16
 
 /** A change from [before] to [after] as a fraction of [before]: the one rule for it. NaN from 0, which no fraction describes. */
 internal fun relativeChange(before: Double, after: Double): Double = if (before == 0.0) Double.NaN else (after - before) / before
@@ -35,21 +36,16 @@ internal class Change(val before: Estimate, val after: Estimate) {
     val relativeHalf: Double get() = if (before.mean == 0.0) Double.NaN else half / before.mean
 }
 
-/** A fraction as a signed percentage, `-21%`, `+2.4%`. */
-internal fun signedPercent(f: Double): String {
-    if (f.isNaN()) return ""
-    val p = f * 100
-    val sign = if (p < 0) "-" else "+"
-    return if (abs(p) < 9.95) String.format(Locale.ROOT, "%s%.1f%%", sign, abs(p)) else String.format(Locale.ROOT, "%s%.0f%%", sign, abs(p))
-}
+/** A fraction as a signed percentage, `-21%`, `+2.4%`: a change with no interval ([unjudgedChange]). */
+internal fun signedPercent(f: Double): String = if (f.isNaN()) "" else unjudgedChange(f * 100, "%")
 
 /**
  * [before] -> [after] as text. The banner of each side's failed runs leads; a side whose runs all failed
  * has no profile, so the diff is the banners and nothing else.
  */
-internal fun diffText(before: Profile, after: Profile): String =
+internal fun diffText(before: Profile, after: Profile, view: View = View.FULL, lenses: Set<Lens> = emptySet()): String =
     if (before.runs.isEmpty() || after.runs.isEmpty()) before.failedBanner(named = true) + after.failedBanner(named = true)
-    else ProfileDiff(before, after).render()
+    else ProfileDiff(before, after, view, lenses).render()
 
 /**
  * **Two profiles compared**: each side a folder of runs (see [Profile]), each figure the mean of its
@@ -59,8 +55,13 @@ internal fun diffText(before: Profile, after: Profile): String =
  * **Calls are the check.** An operation that got faster at the same call count is faster; one with
  * fewer calls did less work, which is a different finding, and the column says `=` when the two agree
  * so that the exception stands out.
+ *
+ * [view] is what the two tables show, with the [lenses] opened, as in [Profile.render]; every other line is the same
+ * in every view.
  */
-internal class ProfileDiff(val before: Profile, val after: Profile) {
+internal class ProfileDiff(
+    val before: Profile, val after: Profile, private val view: View = View.FULL, private val lenses: Set<Lens> = emptySet(),
+) {
     private val wallRows = paired(before.wallTable.rows, after.wallTable.rows)
     private val sharedRows = paired(before.wallTable.shared, after.wallTable.shared)
 
@@ -70,13 +71,16 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         abs(time(r.after) - time(r.before))
     }
 
-    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, "Operation", WALL_NAME_WIDTH, WALL)
-    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, THREAD_TIME)
+    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, "Operation", WALL_NAME_WIDTH, WALL, view, lenses)
+    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, THREAD_TIME, view, lenses)
     private val width = maxOf(wallText.width, ownText.width)
 
-    // Only with both sides over runs: a side of one run leaves the change no interval, and oneRunLine says so instead.
+    // Only with both sides over runs: a side of one run leaves the change no interval, and fewRunsLines says so instead.
     private val overRuns = if (before.runs.size > 1 && after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""
-    private val oneRun = oneRunLine(before.runs.size, after.runs.size)
+    private val fewRuns = fewRunsLines(before.runs.size, after.runs.size)
+
+    /** The brief view's keys to its figures and changes, under each table: not with a side of one run, see [briefKeys]. */
+    private val keys = briefKeys(view, minOf(before.runs.size, after.runs.size), changes = true)
 
     private fun Profile.wallTime() = Estimate(runs.map { it.samplingSpanNanos.toDouble() })
     private fun Profile.active() = Estimate(runs.map { it.activeNanos.toDouble() })
@@ -84,27 +88,47 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
     private fun Profile.tree() = runs.map { it.coarseTree }
     private fun Profile.described() = if (runs.size == 1) "1 run" else "${runs.size} runs"
 
-    private fun header(key: String, b: Estimate, a: Estimate, suffix: String = ""): String {
+    /** A header line's side, by its rule in either view, as every figure with an interval is ([durationWithInterval]). */
+    private fun side(e: Estimate): String = durationWithInterval(e, view)
+
+    /** A header line's parts, laid out together by [headerLines] so the lines' columns agree whatever a side's form. */
+    private class HeaderLine(val key: String, val before: String, val after: String, val absolute: String, val relative: String, val suffix: String)
+
+    /**
+     * A header line, before -> after and the change in time and in percent: `?` from or to an unknown side, `=` when
+     * equal, signed values with no interval; else judged once, on its percentage of before - the time over before, so
+     * the two always agree - and written in both by [Judged.text]. From a before of 0 no percentage: judged on the time.
+     */
+    private fun header(key: String, b: Estimate, a: Estimate, suffix: String = ""): HeaderLine {
         val c = Change(b, a)
+        fun line(absolute: String, relative: String) = HeaderLine(key, side(b), side(a), absolute, relative, suffix)
         // Not knowing a side is not knowing the change.
-        if (b.unknown() || a.unknown())
-            return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), UNKNOWN, UNKNOWN, suffix).trimEnd())
-        val sign = if (c.delta < 0) "-" else "+"
-        // By sureness, in time and in percent: a range as changeRange writes it, `↓3.7..5.7s  ↓27..42%`, or `?` where it
-        // reaches or crosses zero. The percent is the time over before, so the two always agree.
-        val absolute = when (sureness(c.delta, c.half)) {
-            Sure.PLAIN -> sign + duration(abs(c.delta))
-            Sure.UNKNOWN -> UNKNOWN
-            Sure.CERTAIN, Sure.LOOSE -> durationChangeRange(c.delta - c.half, c.delta + c.half)
-        }
+        if (b.unknown() || a.unknown()) return line(UNKNOWN, UNKNOWN)
+        if (b.mean == a.mean) return line("=", "=")
+        if (c.half.isNaN()) return line(unjudgedDuration(c.delta), signedPercent(c.relative))
         val r = c.relative * 100
         val h = c.relativeHalf * 100
-        val relative = when (sureness(r, h)) {
-            Sure.PLAIN -> signedPercent(c.relative)
-            Sure.UNKNOWN -> UNKNOWN
-            Sure.CERTAIN, Sure.LOOSE -> percentChangeRange(maxOf(-100.0, r - h), r + h, "%")
-        }
-        return row(key, String.format(Locale.ROOT, RUNS_DIFF_HEADER, duration(b.mean), duration(a.mean), absolute, relative, suffix).trimEnd())
+        val judged = if (b.mean > 0) Judged(r, h, 100.0) else Judged(c.delta, c.half, 0.0)
+        // Runs that agree on each side give an interval of 0: known exactly, one value with its arrow in either view.
+        val exact = c.half == 0.0
+        return line(
+            judged.text(view, { durationChangeValue(c.delta) }, { if (exact) durationChangeValue(c.delta) else durationChangeRange(c.delta - c.half, c.delta + c.half) }),
+            if (b.mean > 0) judged.text(view, { percentChangeValue(r, "%") }, { if (exact) percentChangeValue(r, "%") else percentChangeRange(maxOf(-100.0, r - h), r + h, "%") }) else "",
+        )
+    }
+
+    /** The header lines, each column as wide as its widest cell: a side may be `6.34s ±5.0%` or `0.75..2.1s`. */
+    private fun StringBuilder.headerLines(lines: List<HeaderLine>) {
+        val before = maxOf(HEADER_SIDE, lines.maxOf { it.before.length })
+        val after = maxOf(HEADER_SIDE, lines.maxOf { it.after.length })
+        val absolute = maxOf(HEADER_ABSOLUTE, lines.maxOf { it.absolute.length })
+        val relative = maxOf(HEADER_RELATIVE, lines.maxOf { it.relative.length })
+        for (l in lines) appendLine(
+            row(
+                l.key, (l.before.padStart(before) + " ${sym.arrow} " + l.after.padEnd(after) + "  " + l.absolute.padEnd(absolute) +
+                        " " + l.relative.padEnd(relative) + " " + l.suffix).trimEnd()
+            )
+        )
     }
 
     fun render(): String = buildString {
@@ -115,19 +139,21 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         val rootName = (after.root() ?: before.root())?.name
         warningsSection(warnings(rootName))
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
-        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change the range of its 95% interval (Welch's t)"))
+        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change judged on its 95% interval (Welch's t)"))
         with(before) { runList("before") }
         with(after) { runList("after", header = false) }
-        appendLine(header("Wall time", before.wallTime(), after.wallTime()))
-        appendLine(header("  Active", before.active(), after.active()))
-        // No pause on either side is the default, nothing to look at: `Paused 0.00ns -> 0.00ns +0.00ns` said nothing.
-        if (before.paused().mean > 0 || after.paused().mean > 0) appendLine(header("  Paused", before.paused(), after.paused()))
-        if (rootName != null) {
-            val b = before.matched(before.tree(), rootName)
-            val a = after.matched(after.tree(), rootName)
-            if (b.present.isNotEmpty() && a.present.isNotEmpty())
-                appendLine(header(rootName, before.meanSpan(b), after.meanSpan(a), "per execution"))
-        }
+        headerLines(buildList {
+            add(header("Wall time", before.wallTime(), after.wallTime()))
+            add(header("  Active", before.active(), after.active()))
+            // No pause on either side is the default, nothing to look at: `Paused 0.00ns -> 0.00ns +0.00ns` said nothing.
+            if (before.paused().mean > 0 || after.paused().mean > 0) add(header("  Paused", before.paused(), after.paused()))
+            if (rootName != null) {
+                val b = before.matched(before.tree(), rootName)
+                val a = after.matched(after.tree(), rootName)
+                if (b.present.isNotEmpty() && a.present.isNotEmpty())
+                    add(header(rootName, before.meanSpan(b), after.meanSpan(a), "per execution"))
+            }
+        })
         clock()
         bothSides("Cores", before.coresText(), after.coresText())
         bothSides("Sampling", before.samplingText(), after.samplingText())
@@ -135,19 +161,23 @@ internal class ProfileDiff(val before: Profile, val after: Profile) {
         if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
             appendLine()
             appendLine("NESTED WALL TIME${sym.dash}each row its whole span, matched by path$overRuns")
-            oneRun?.let { appendLine(it) }
+            fewRuns.forEach { appendLine(it) }
+            appendLine(lensesLine(view, wallText.allColumns, lenses))
             with(wallText) { rows() }
             if (sharedRows.isNotEmpty()) {
                 appendLine(SHARED_HEADING)
                 with(wallText) { shared() }
             }
-            perSide(before.coarseKeys(), after.coarseKeys())
+            keys.forEach { appendLine(it) }
+            perSide(before.coarseKeys(view, lenses), after.coarseKeys(view, lenses))
         }
         appendLine()
         appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, matched by name, sorted by the change$overRuns")
-        oneRun?.let { appendLine(it) }
+        fewRuns.forEach { appendLine(it) }
+        appendLine(lensesLine(view, ownText.allColumns, lenses))
         with(ownText) { rows() }
-        perSide(before.fineNotes(), after.fineNotes())
+        keys.forEach { appendLine(it) }
+        perSide(before.fineNotes(view, lenses), after.fineNotes(view, lenses))
         appendLine()
         bothSides("Sampled", before.sampledText(), after.sampledText())
         appendLine("-".repeat(width))

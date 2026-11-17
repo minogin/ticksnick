@@ -90,7 +90,7 @@ for (depth in 0..5) op(LEVEL[depth]) { expand(depth) }
 val RESOLVE = Profiler.registerCoarse<Kind>("resolve")
 op(RESOLVE[kind]) { resolve(root, kind) }
 
-// Keep the slowest executions with a key, so the report can name them.
+// Keep the slowest executions with a key, so the report can name them (with the Latency lens open).
 op(REQUEST, key = { request.id }) { handle(request) }
 
 // In the middle of a chain: only the block is labelled.
@@ -147,10 +147,10 @@ fix, label one level up, where a `finally` fits.
 - `jitter` (0.25): each tick varies at random by up to this fraction, so sampling does not fall
   in step with a loop in the program.
 - `sampleState` (true): record whether each sampled thread was running or waiting.
-- `allocations` (false): count the bytes allocated under each coarse operation, for the report's
-  `Allocated` columns. It adds about 30 ns to each coarse execution. It needs a JVM that reports
-  them, as HotSpot and OpenJ9 do; on one that does not, the session runs without and the report says so.
-  Work on a virtual thread is not counted: the rows it ran under, and every row above them, read `?`,
+- `allocations` (false): count the bytes allocated under each coarse operation, for the report's `Allocated`
+  columns (the Memory lens, `--lens memory`). It adds about 30 ns to each coarse execution. It needs a JVM
+  that reports them, as HotSpot and OpenJ9 do; on one that does not, the session runs without and the report
+  says so. Work on a virtual thread is not counted: the rows it ran under, and every row above them, read `?`,
   and a warning says so.
 - `tags` (none): what the run cannot say by itself, see [Tags and setup](#tags-and-setup).
 
@@ -168,6 +168,9 @@ try (var b = Profiler.coarse(BATCH)) {
 }
 Profiler.stop().save(Path.of("profiles", "baseline"));
 System.out.println(TickSnick.load(Path.of("profiles", "baseline")).render());
+// The full view, and the brief one with a lens open:
+System.out.println(TickSnick.load(Path.of("profiles", "baseline")).render(false, View.FULL));
+System.out.println(TickSnick.diff(before, after, false, View.BRIEF, Set.of(Lens.LATENCY)));
 ```
 
 - A fine and a coarse handle are both `int`, so Java cannot tell them apart. The calls name the
@@ -193,10 +196,17 @@ runs, and on disk it is a folder of them.
   named by the time. A save never overwrites another run.
 - **A folder holds one profile.** Save a run that differs in code, workload or setup to a new folder.
   If a run should not count, move it out of the folder. Each run should come from its own JVM.
-- `TickSnick.load(folder).render()` reports the profile: each figure is the mean of the runs, Max the
-  largest, and what says how much has its 95% interval.
-- `TickSnick.diff(before, after)` compares two profiles and gives each change as the range of its 95% interval. Which of code, workload or setup differs between the two
-  is the question it answers.
+- `TickSnick.load(folder).render()` reports the profile: each figure is the mean of the runs, with its
+  95% interval.
+- `TickSnick.diff(before, after)` compares two profiles and judges each change on its 95% interval.
+  Which of code, workload or setup differs between the two is the question it answers.
+
+**A report is brief by default**: its tables show the basis - each operation's time, its share, how many
+times it ran and the price of one; a certain figure is written without its interval, and a diff is one
+line a row; each table names what it leaves out. The rest are lenses - Parallelism, Waiting,
+Memory, Latency - opened one by one: `render(lenses = setOf(Lens.LATENCY))`, the same on `diff`, the CLI's
+`--lens latency`. `render(view = View.FULL)` and `diff(before, after, view = View.FULL)` show every lens
+with every interval; the CLI takes `--view full`. [docs/output.md](docs/output.md), "Two views".
 
 Reports are ASCII. `render(unicode = true)` and `diff(before, after, unicode = true)` print `±`, `µs`,
 `→`, `—`, `…` and `×` instead, for output that is read as Unicode; the CLI takes `--unicode`. On Windows,
@@ -249,9 +259,13 @@ The same from the command line, with the jar and the Kotlin standard library on 
 ```
 java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli render profiles/baseline
 java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli diff profiles/baseline profiles/presized
+java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli --lens latency render profiles/baseline
+java -cp ticksnick.jar:kotlin-stdlib.jar com.ticksnick.Cli --view full render profiles/baseline
 ```
 
-In a clone of this repository: `./gradlew cli --args="render profiles/baseline"`.
+In a clone of this repository: `./gradlew cli --args="render profiles/baseline"`. Before the verb,
+`--unicode`, `--view brief|full` and `--lens parallelism|waiting|memory|latency`, once for each lens, in
+any order.
 
 ## What it does not do
 

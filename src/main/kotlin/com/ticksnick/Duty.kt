@@ -1,7 +1,6 @@
 package com.ticksnick
 
 import java.lang.management.ManagementFactory
-import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 
@@ -357,10 +356,7 @@ internal class DutyCycle(private val windowNanos: Long = DEFAULT_WINDOW_NANOS) {
         !ThreadCpuClock.supported -> "this JVM does not support per-thread CPU time"
         !ThreadCpuClock.enabled -> "per-thread CPU time is supported but disabled and would not enable"
         resolution < 0 -> "the per-thread CPU clock did not move during the probe"
-        resolution * 10 > windowNanos -> String.format(
-            Locale.ROOT, "clock resolution %.3fms is too coarse for a %.3fs window",
-            resolution / 1e6, windowNanos / 1e9
-        )
+        resolution * 10 > windowNanos -> "clock resolution ${fixed(resolution / 1e6, 3)}ms is too coarse for a ${fixed(windowNanos / 1e9, 3)}s window"
 
         else -> null
     }
@@ -947,10 +943,7 @@ internal class Duty internal constructor(
      */
     fun summary(): String =
         if (!available) "Time on CPU not measured: ${reason ?: "no window closed"}"
-        else String.format(
-            Locale.ROOT, "Time on CPU %.2f%% of active time, bound %s pp, %d windows over %d threads",
-            activeDuty * 100, threeDigits(boundPp), windows, threads
-        )
+        else "Time on CPU ${fixed(activeDuty * 100, 2)}% of active time, bound ${threeDigits(boundPp)} pp, $windows windows over $threads threads"
 
     /**
      * What is wrong with `Runnable`, if anything: warnings for the `WARNINGS` section, none on a
@@ -1021,14 +1014,11 @@ internal fun coresLine(runs: List<Cores>): String? {
     val sampler = mean { it.sampler }
     val jit = mean { it.jit }
     val parts = listOfNotNull(
-        gc to (if (mean { it.gcInPauses } > 0) String.format(Locale.ROOT, "GC %.2f (%.2f in pauses)", gc, mean { it.gcInPauses })
-        else String.format(Locale.ROOT, "GC %.2f", gc)),
-        sampler to String.format(Locale.ROOT, "sampler %.2f", sampler),
-        if (jit.isNaN()) null else jit to String.format(Locale.ROOT, "JIT %.2f", jit),
+        gc to ("GC " + fixed(gc, 2) + if (mean { it.gcInPauses } > 0) " (${fixed(mean { it.gcInPauses }, 2)} in pauses)" else ""),
+        sampler to "sampler " + fixed(sampler, 2),
+        if (jit.isNaN()) null else jit to "JIT " + fixed(jit, 2),
     ).sortedByDescending { it.first }
-    return String.format(
-        Locale.ROOT, "%sprofiled threads %.2f, the rest %.2f: %s",
-        if (runs[0].processors > 0) "${runs[0].processors} processors: " else "",
-        mean { it.profiled }, gc + sampler + (if (jit.isNaN()) 0.0 else jit), parts.joinToString(", ") { it.second }
-    )
+    return (if (runs[0].processors > 0) "${runs[0].processors} processors: " else "") +
+            "profiled threads ${fixed(mean { it.profiled }, 2)}, the rest ${fixed(gc + sampler + (if (jit.isNaN()) 0.0 else jit), 2)}: " +
+            parts.joinToString(", ") { it.second }
 }

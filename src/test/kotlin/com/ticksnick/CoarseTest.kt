@@ -368,7 +368,7 @@ class CoarseTest {
         val c = stat(count = 10, sumNanos = 10_000_000, hits = 100, running = 100, instanceTicks = 100)
         val text = report(listOf(c)).render(legend = true)
         assertTrue("NOT CPU" in text, "the traps went missing")
-        assertTrue("Long is the calls that outlived a tick" in text, "the full legend was not printed")
+        assertTrue("long calls are the calls that outlived a tick" in text, "the full legend was not printed")
         assertTrue("create work for everything else" in text, "the counterfactual argument was not printed")
         assertTrue("the wall table is a tree" in text, "the coarse half was not printed")
     }
@@ -416,8 +416,9 @@ class CoarseTest {
         assertEquals(12e9 / 3.4, walls.getValue(branch), 1.0)
         assertEquals(8.4e9 / 3.4, walls.getValue(leaf), 1.0)
         val text = r.render()
-        assertTrue(Regex("""branch\s+\|\s+800\s+4\s+3\.4\s+3\.53s\s+88%""").containsMatchIn(text), text)
-        assertTrue(Regex("""leaf\s+\|\s+2,400\s+3\s+2\.47s\s+70%""").containsMatchIn(text), text)
+        // Time, Share, Work, Cost, then Parallelism: Wall, % parent, Executions and Per parent, Mean, Parallel.
+        assertTrue(Regex("""branch\s+\|\s+3\.53s\s+\|\s+88%\s+\|\s+800\s+4\s+\|\s+\S+\s+\|\s+3\.4\b""").containsMatchIn(text), text)
+        assertTrue(Regex("""leaf\s+\|\s+2\.47s\s+\|\s+70%\s+\|\s+2,400\s+3\s+\|""").containsMatchIn(text), text)
     }
 
     /**
@@ -734,7 +735,8 @@ class CoarseTest {
         val head = lines.first { it.startsWith("Operation") }
         assertTrue("Per execution" in head, head)
         val row = lines.first { it.trimStart().startsWith("- fine") }
-        assertEquals(head.indexOf("Mean") + "Mean".length, row.trimEnd().length, "out of line: $row")
+        val end = head.indexOf("Mean") + "Mean".length
+        assertTrue(row[end - 1] != ' ' && row.drop(end).all { it == ' ' || it == '|' }, "out of line: $row")
     }
 
     // --- the name column -------------------------------------------------------------
@@ -853,7 +855,7 @@ class CoarseTest {
         assertEquals(1, lines.count { it.trim().startsWith("query ") }, "an operation is printed more than once: $text")
         val fineRow = lines[iQuery + 1].split(Regex(" +")).filter { it.isNotEmpty() && it != "|" }
         // A split row's calls and time per call were not saved: unknown, not blank.
-        assertEquals(listOf("-", "fine", "?", "3.00s", "100%", "?"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
+        assertEquals(listOf("-", "fine", "3.00s", "100%", "?", "?"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
         assertTrue(text.contains("- rows split a leaf's time by the innermost label"), "the split rows have no key: $text")
         assertFalse(lines[iQuery].trim().startsWith("fine "), "the fine row is not under its leaf")
         assertTrue(lines[iBatch + 1].trim().startsWith("query "), "a parent repeats its children's breakdown: ${lines[iBatch + 1]}")

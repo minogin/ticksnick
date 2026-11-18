@@ -1,15 +1,15 @@
 # TickSnick
 
-A profiler for the JVM that measures operations you name, down to a few nanoseconds each, and says how
+A profiler for the JVM that measures ops you name, down to a few nanoseconds each, and says how
 much each one costs and where its parent's time went.
 
-You wrap the code you care about in a label. A labelled operation can be a 100 ns hash lookup called
+You wrap the code you care about in a label. A labelled op can be a 100 ns hash lookup called
 half a billion times, or a 30-second batch. TickSnick reports, per label:
 
 - **its share of the time and its cost per call**, by sampling, not by timing each call. A label costs
-  about 2 ns, so the cheapest operations can carry one.
-- **for longer operations, every execution timed**: counts, percentiles, the slowest executions, and
-  a tree of which operation ran inside which, across threads.
+  about 2 ns, so the cheapest ops can carry one.
+- **for longer ops, every execution timed**: counts, percentiles, the slowest executions, and
+  a tree of which op ran inside which, across threads.
 - **how far to trust each number**: how much the runs differ, GC pauses, the CPU clock, threads that
   waited rather than ran.
 
@@ -27,7 +27,7 @@ import com.ticksnick.TickSnick
 import com.ticksnick.op
 import java.nio.file.Path
 
-// Once, at startup: register each operation and keep the handle.
+// Once, at startup: register each op and keep the handle.
 val BATCH = Profiler.registerCoarse("batch")   // long: every execution timed
 val PARSE = Profiler.registerFine("parse")     // short: sampled
 
@@ -56,25 +56,25 @@ println(TickSnick.diff(before, after))
 
 ## Fine and coarse labels
 
-There are two kinds of label, and you choose one when you register the operation. Wrapping code looks
+There are two kinds of label, and you choose one when you register the op. Wrapping code looks
 the same for both: `op(X) { ... }`.
 
-**Fine** (`registerFine`) is for short operations, from about 50 ns up on a fast machine. Entering a fine label writes
+**Fine** (`registerFine`) is for short ops, from about 50 ns up on a fast machine. Entering a fine label writes
 its id to a slot of the current thread. A sampling thread reads every thread's slot once a
 millisecond and counts what it finds. The share of samples is the share of time. Per call cost comes
 from the time and an exact call count. No call is timed, so the label costs about as much as a field
 write.
 
-**Coarse** (`registerCoarse`) is for operations of a few microseconds or more: a request, a batch, a
+**Coarse** (`registerCoarse`) is for ops of a few microseconds or more: a request, a batch, a
 phase of an algorithm. Each execution is timed at both ends, about 50 ns. You get exact counts,
-percentiles and a tree of which operation ran inside which. A coarse operation also shows which fine
+percentiles and a tree of which op ran inside which. A coarse op also shows which fine
 labels its own time went to, and how many times each was called per execution.
 
 Below its floor a fine label is a visible part of what it measures. The report says so and names the
 label. The floors are counted in bodies, a fixed piece of CPU work that TickSnick times once a second
 during the run, so they follow the machine and its clock: a fine label needs 2 bodies, about 50 ns on a
 fast machine, and a coarse one 100 bodies, about 2.5 us, a little more for each registered fine label and
-with `Allocated`. Label the enclosing loop instead, and pass the number of operations inside:
+with `Allocated`. Label the enclosing loop instead, and pass the number of ops inside:
 
 ```kotlin
 op(LOOKUP, times = keys.size) { for (k in keys) table.find(k) }
@@ -100,7 +100,7 @@ list.op(FILTER) { filter { it.valid } }
 
 ### Threads
 
-A coarse operation that hands work to other threads keeps it as its own when the tasks carry its
+A coarse op that hands work to other threads keeps it as its own when the tasks carry its
 context:
 
 ```kotlin
@@ -128,7 +128,7 @@ Profiler.expectBalanced()   // where no label should be open
 
 `enter` and `exit` have no `finally`, so an exception between them leaves the label set. TickSnick
 finds such a leak at `expectBalanced()`, or at an `exit` that names another label, and stops the
-session there: every sample after it would be charged to the wrong operation. The run has failed: its report says why and shows no figures, and a profile
+session there: every sample after it would be charged to the wrong op. The run has failed: its report says why and shows no figures, and a profile
 leaves it out. TickSnick never reports figures it knows are false, so there is no switch to profile
 anyway. A label still open at `stop()` is a warning instead. Where the labels are in code you cannot
 fix, label one level up, where a `finally` fits.
@@ -147,7 +147,7 @@ fix, label one level up, where a `finally` fits.
 - `jitter` (0.25): each tick varies at random by up to this fraction, so sampling does not fall
   in step with a loop in the program.
 - `sampleState` (true): record whether each sampled thread was running or waiting.
-- `allocations` (false): count the bytes allocated under each coarse operation, for the report's `Allocated`
+- `allocations` (false): count the bytes allocated under each coarse op, for the report's `Allocated`
   columns (the Memory lens, `--lens memory`). It adds about 30 ns to each coarse execution. It needs a JVM
   that reports them, as HotSpot and OpenJ9 do; on one that does not, the session runs without and the report
   says so. Work on a virtual thread is not counted: the rows it ran under, and every row above them, read `?`,
@@ -175,9 +175,9 @@ System.out.println(TickSnick.diff(before, after, false, View.BRIEF, Set.of(Lens.
 
 - A fine and a coarse handle are both `int`, so Java cannot tell them apart. The calls name the
   kind instead: `fine` and `coarse`, `enterFine`/`exitFine` and `enterCoarse`/`exitCoarse`. Passing
-  one kind to the other's call compiles and reports the wrong operation, or throws, for a fine handle
+  one kind to the other's call compiles and reports the wrong op, or throws, for a fine handle
   past the coarse ones.
-- A scope is not allocated: each operation has one, made at startup. A coarse execution still makes
+- A scope is not allocated: each op has one, made at startup. A coarse execution still makes
   its context.
 - `Profiler.fine(LOOKUP, keys.size())` is `op(LOOKUP, times = keys.size) { }`.
 - Families: `LEVEL.get(depth)`, and `Profiler.registerCoarse("resolve", Kind.class)` for an enum.
@@ -201,7 +201,7 @@ runs, and on disk it is a folder of them.
 - `TickSnick.diff(before, after)` compares two profiles and judges each change on its 95% interval.
   Which of code, workload or setup differs between the two is the question it answers.
 
-**A report is brief by default**: its tables show the basis - each operation's time, its share, how many
+**A report is brief by default**: its tables show the basis - each op's time, its share, how many
 times it ran and the price of one; a certain figure is written without its interval, and a diff is one
 line a row; each table names what it leaves out. The rest are lenses - Parallelism, Waiting,
 Memory, Latency - opened one by one: `render(lenses = setOf(Lens.LATENCY))`, the same on `diff`, the CLI's
@@ -233,7 +233,7 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
 - **In the background:** a body timed once a second, under 0.1% of a core; the CPU clock read from the
   OS once a second, on Windows by a `typeperf` process; and a few ms at `stop()`.
 - **On your program** the cost is per label entered, not per second of work: a fine label on a 50 ns
-  operation is about 5% of it. The report warns where a label is under its floor, and when the hooks
+  op is about 5% of it. The report warns where a label is under its floor, and when the hooks
   may add more than 1% to the work inside labels, with the most they can add to the wall time.
 
 ## Tags and setup
@@ -269,20 +269,70 @@ any order.
 
 ## What it does not do
 
-- **It sees only what you label.** Time outside every label shows as `(no operation)`, with no
+- **It sees only what you label.** Time outside every label shows as `(no op)`, with no
   breakdown. Use a stack profiler first to find where to put labels.
-- **A share is not a saving.** An operation that takes 40% of the time can be worth far more than
+- **A share is not a saving.** An op that takes 40% of the time can be worth far more than
   40% if removing it would also remove work it causes elsewhere. It can also be worth less, if the
   work moves somewhere else.
 - **Coroutines and virtual threads are not tested.** A fine label belongs to the thread that set it.
   A coroutine that suspends inside a label and resumes on another thread leaves the label behind.
-- Up to 256 fine and 64 coarse operations, and up to 1024 threads at once. A thread past that is not sampled, and the
+- Up to 256 fine and 64 coarse ops, and up to 1024 threads at once. A thread past that is not sampled, and the
   report says so.
 - The CPU clock is recorded on Windows and Linux. On macOS it needs root, so the report says it was
   not measured.
 - **GraalVM Native Image is not supported.** It compiles the program ahead of time, and much of the
   JVM's management interface, which TickSnick reads its checks from, is missing or limited there.
   GraalVM in its usual JIT mode is HotSpot.
+
+## Words
+
+The words the report and the API use, each with one meaning. Every column is explained in
+[docs/output.md](docs/output.md).
+
+**Runs**
+- **profile** - how a program behaves: same code, same workload, same setup. On disk, one folder of
+  runs; the report averages them.
+- **run** - one measurement of a profile, from `start()` to `stop()`, saved as one `.tsr` file. Each
+  run needs its own JVM.
+- **diff** - two profiles compared: each figure before and after, and the change.
+- **tag** - a name and a value you set on a run, `warmups: 2`, for what TickSnick cannot see.
+
+**Ops**
+- **op** - something your program does that you labelled. A **label** is its name in the code.
+- **coarse op** - an op timed at each execution, from its start to its end: a request, a query.
+- **fine op** - an op whose calls are counted and whose time is sampled: a lookup, a check.
+- **execution** - one time a coarse op runs. It has a time of its own.
+- **call** - one time a fine op runs. It is counted and has no time of its own.
+- **parent op** - of an op, the op it ran in directly.
+- **child op** - of an op, an op that ran in it directly.
+- **root op** - an op with no parent op.
+
+**Time**
+- **wall time** - time as a clock on the wall measures it.
+- **active time** - wall time less the pauses.
+- **own time** - an op's time outside its child ops.
+- **thread-time** - time summed over threads, from samples. It is not CPU time.
+- **tick** - one wake-up of the sampler, and the time between two of them: 1 ms by default.
+
+**Figures**
+- **figure** - a value the report prints: `5.49s`, `100%`, `5,262`. Over several runs, it is their mean.
+- **interval** - a figure's 95% interval: where its true value lies, 95% sure. It comes from how much
+  the runs differ, so a single run has none.
+- **change** - in a diff, a figure after against before: `-24%` for a time, `+5.3pp` for a share.
+- **certain, loose, unknown** - how sure a figure is, by the width of its interval against the figure:
+  up to 20% it is certain and written plain, `6.34s`; up to 100% it is loose and written as its range,
+  `370..560ms`; past that it is unknown, `?`.
+
+**The report**
+- **view** - what a report shows: **brief**, the default, shows the basis and the lenses you open;
+  **full** shows everything.
+- **basis** - what every view shows: time, share, how many times, the cost of one.
+- **lens** - a group of columns you open when it is the problem: Parallelism, Waiting, Memory, Latency.
+- **wall table** - `NESTED WALL TIME`: the tree of ops, in wall time.
+- **own table** - `OWN THREAD-TIME`: each op's own time, in thread-time.
+- **warning** - how to read a result: a figure that may be off, a limit on the whole run, a label in
+  the wrong place.
+- **failure** - a run whose numbers are not a result. The report opens with a banner that says so.
 
 ## Contribution
 

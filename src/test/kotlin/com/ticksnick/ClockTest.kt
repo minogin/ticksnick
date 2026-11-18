@@ -51,7 +51,7 @@ class ClockTest {
         val moved = report(205.0, 206.0, 204.0, 205.0, 205.0, 150.0, 135.0, 135.0, 136.0, 134.0, 135.0).warnings()
         assertEquals(1, moved.size)
         assertEquals(
-            "CPU clock: ran at 135%..205% during the run - times drift with it, shares hold; turbo off holds it still",
+            "CPU clock: ran at 135%..205% during the run - times change with the clock, shares do not; turning turbo off keeps the clock steady",
             moved[0].text(),
         )
         // One second caught in a collection is not a trend.
@@ -60,7 +60,7 @@ class ClockTest {
         assertEquals(emptyList(), report(205.0, 135.0).warnings())
         val mac = ClockTrace(DoubleArray(0), ofBase = true, notMeasured = "macOS reads the CPU clock only as root")
         assertEquals(
-            listOf("CPU clock: not measured (macOS reads the CPU clock only as root) - times may drift unseen; shares hold"),
+            listOf("CPU clock: not measured (macOS reads the CPU clock only as root) - times may drift without a warning; shares are not affected"),
             mac.warnings().map { it.text() },
         )
         assertEquals(emptyList(), ClockTrace.NOT_RECORDED.warnings())

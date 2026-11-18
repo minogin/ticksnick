@@ -48,7 +48,7 @@ class BriefViewTest {
     @Test
     fun `brief shows the basis columns and names each table's lenses right after its heading`() = folders { before, _ ->
         val lines = Profile.load(before).render().lines()
-        val heads = lines.filter { it.startsWith("Operation") }
+        val heads = lines.filter { it.startsWith("Op ") }
         assertEquals(2, heads.size, lines.joinToString("\n"))
         val (wall, own) = heads
         for (name in listOf("Executions", "Per parent", "Wall v", "% parent", "Mean")) assertTrue(name in wall, wall)
@@ -56,7 +56,7 @@ class BriefViewTest {
         for (name in listOf("Thread-time v", "Thread-time%", "Calls", "Thread-time per call")) assertTrue(name in own, own)
         for (name in listOf("Waiting", "Long calls", "Longest", "Wall-time", "Concurrency", "Workers", "Pool")) assertFalse(name in own, own)
         fun after(heading: String) = lines[lines.indexOfFirst { it.startsWith(heading) } + 1]
-        val full = "the full view, every lens and every interval, is --view full"
+        val full = "--view full shows every lens and every interval"
         assertEquals("Lenses not shown: Parallelism, Waiting, Memory, Latency - open one with --lens; $full", after("NESTED WALL TIME"))
         assertEquals("Lenses not shown: Parallelism, Waiting, Latency - open one with --lens; $full", after("OWN THREAD-TIME"))
     }
@@ -70,22 +70,22 @@ class BriefViewTest {
     fun `a lens opened is shown, and the notice says what is left and what the full view is`() = folders { before, after ->
         val b = Profile.load(before)
         val a = Profile.load(after)
-        val full = "the full view, every lens and every interval"
+        val full = "--view full shows every lens and every interval"
         for (text in listOf(b.render(lenses = setOf(Lens.LATENCY)), TickSnick.diff(b, a, lenses = setOf(Lens.LATENCY)))) {
             val lines = text.lines()
             fun after(heading: String) = lines[lines.indexOfFirst { it.startsWith(heading) } + 1]
-            val (wall, own) = lines.filter { it.startsWith("Operation") }
+            val (wall, own) = lines.filter { it.startsWith("Op ") }
             for (name in listOf("p50", "p90", "p99", "Max")) assertTrue(name in wall, wall)
             for (name in listOf("Parallel", "Paused", "Waiting")) assertFalse(name in wall, wall)
             for (name in listOf("Long calls", "Long time", "Longest")) assertTrue(name in own, own)
-            assertEquals("Lenses not shown: Parallelism, Waiting, Memory - open one with --lens; $full, is --view full", after("NESTED WALL TIME"))
-            assertEquals("Lenses not shown: Parallelism, Waiting - open one with --lens; $full, is --view full", after("OWN THREAD-TIME"))
+            assertEquals("Lenses not shown: Parallelism, Waiting, Memory - open one with --lens; $full", after("NESTED WALL TIME"))
+            assertEquals("Lenses not shown: Parallelism, Waiting - open one with --lens; $full", after("OWN THREAD-TIME"))
         }
         val all = b.render(lenses = Lens.entries.toSet()).lines()
-        assertEquals("All lenses shown; $full, is --view full", all[all.indexOfFirst { it.startsWith("NESTED WALL TIME") } + 1])
+        assertEquals("All lenses shown; --view full also shows every interval", all[all.indexOfFirst { it.startsWith("NESTED WALL TIME") } + 1])
         val fullView = b.render(view = View.FULL).lines()
         assertEquals(
-            "This is $full; the brief view, the basis with lenses opened by --lens, is --view brief",
+            "The full view shows every lens and every interval; --view brief shows the basis, and --lens adds a lens to it",
             fullView[fullView.indexOfFirst { it.startsWith("NESTED WALL TIME") } + 1],
         )
     }
@@ -108,7 +108,7 @@ class BriefViewTest {
             val lines = Profile.load(dir).render().lines()
             for (heading in listOf("NESTED WALL TIME", "OWN THREAD-TIME")) {
                 val at = lines.indexOfFirst { it.startsWith(heading) }
-                assertTrue(lines[at + 1].startsWith("1 run: no interval"), lines[at + 1])
+                assertTrue(lines[at + 1].startsWith("1 run: the "), lines[at + 1])
                 assertTrue(lines[at + 2].startsWith("Lenses not shown: "), lines[at + 2])
             }
         } finally {
@@ -159,7 +159,7 @@ class BriefViewTest {
     fun `every heading is right-aligned over its column's right edge`() = folders { before, after ->
         val text = TickSnick.diff(Profile.load(before), Profile.load(after))
         val lines = text.lines()
-        val head = lines.first { it.startsWith("Operation") }
+        val head = lines.first { it.startsWith("Op ") }
         val row = lines.first { it.startsWith("runBatch ") && "|" in it }
         // Wall's change ends where its heading does; Mean's, the last column, too.
         assertEquals(head.indexOf("Wall v") + "Wall v".length, row.indexOf("-20%") + "-20%".length, "$head\n$row")
@@ -172,13 +172,13 @@ class BriefViewTest {
         val b = Profile.load(before)
         val a = Profile.load(after)
         for (text in listOf(b.render(), TickSnick.diff(b, a))) {
-            assertFalse("Max is the mean of the runs' largest" in text, text)
-            assertFalse("  Long calls: calls over a tick" in text, text)
+            assertFalse("Max is the mean of each run's longest execution" in text, text)
+            assertFalse("  Long calls are calls longer than a tick" in text, text)
             assertFalse("+- in percentage points" in text, text)
         }
         // A lens opened brings the keys to its own columns.
         for (text in listOf(b.render(view = View.FULL), b.render(lenses = setOf(Lens.LATENCY)))) {
-            assertTrue("Max is the mean of the runs' largest" in text && "  Long calls: calls over a tick" in text, text)
+            assertTrue("Max is the mean of each run's longest execution" in text && "  Long calls are calls longer than a tick" in text, text)
         }
     }
 
@@ -204,7 +204,7 @@ class BriefViewTest {
             for (text in listOf(b.render(view = view), TickSnick.diff(b, a, view = view))) {
                 val lines = text.lines()
                 // A table's heads have the band right above them; the block under the wall table has none.
-                val heads = lines.indices.filter { lines[it].startsWith("Operation") && "|" in lines[it - 1] && !lines[it - 1].startsWith("Operation") }
+                val heads = lines.indices.filter { lines[it].startsWith("Op ") && "|" in lines[it - 1] && !lines[it - 1].startsWith("Op ") }
                 assertEquals(2, heads.size, text)
                 for ((at, names, band) in listOf(Triple(heads[0], wallHeads, wallBand), Triple(heads[1], ownHeads, ownBand))) {
                     val head = lines[at]
@@ -242,8 +242,8 @@ class BriefViewTest {
     /** Each brief table ends with the key to its forms; a diff's with one to its changes too; the full view has none. */
     @Test
     fun `each brief table ends with the key to its forms`() = folders { before, after ->
-        val figures = "  A plain figure (3.4) means its 95% interval is within 20% of it; otherwise a range (2.2..7.0) shows the interval's ends; ? is unknown and requires more runs"
-        val changes = "  A change as one value (-40%) is certain (20% interval) or small (5% of before); a range shows its interval's ends; = did not move; ? is unknown: the change is within its sides' run-to-run noise, and more runs would tell"
+        val figures = "  A plain figure (3.4) has its 95% interval within 20% of it. Otherwise a range (2.2..7.0) shows the two ends of the interval. ? is unknown and needs more runs"
+        val changes = "  A change written as one value (-40%) is certain, its interval within 20% of it, or small, within 5% of before. A range shows the two ends of the change's interval. = means it did not move. ? means it is unknown: the change is within the noise between runs, and more runs would show it"
         val b = Profile.load(before)
         val a = Profile.load(after)
         val report = b.render().lines()
@@ -271,9 +271,9 @@ class BriefViewTest {
             val single = Profile.load(one).render()
             val pair = Profile.load(two).render()
             for (heading in listOf("NESTED WALL TIME", "OWN THREAD-TIME")) {
-                assertTrue(under(single, heading)[0].startsWith("1 run: no interval"), single)
+                assertTrue(under(single, heading)[0].startsWith("1 run: the "), single)
                 assertTrue(under(single, heading)[1].startsWith("Lenses not shown: "), single)
-                assertEquals("2 runs: the interval is too wide to say much - run at least 3 times to tell", under(pair, heading)[0], pair)
+                assertEquals("2 runs: the intervals from two runs are too wide to say much - run at least 3 times", under(pair, heading)[0], pair)
                 assertTrue(under(pair, heading)[1].startsWith("Lenses not shown: "), pair)
             }
             assertFalse("A plain figure" in single, single)
@@ -368,7 +368,7 @@ class BriefViewTest {
      * `Max` is the mean of the runs' largest, not the largest of all of them, which grows with how many runs there are.
      */
     @Test
-    fun `a count that differs across runs has its interval, and Max is the mean of the runs' largest`() {
+    fun `a count that differs across runs has its interval, and Max is the mean of each run's longest execution`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             // Executions 2, 3 and 4; each run's largest 10.0, 10.1 and 10.2 ms.

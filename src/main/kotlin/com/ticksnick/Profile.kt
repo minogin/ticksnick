@@ -45,7 +45,16 @@ internal const val WARNING_INDENT = "  "
 internal const val FAILED_WIDTH = 100
 
 /** Over the block of operations under more than one parent, each over all of its rows, right under the tree. */
-internal val SHARED_HEADING: String get() = "Under multiple parents${sym.dash}each over all of them"
+internal val SHARED_HEADING: String get() = "Under multiple parents${sym.dash}each op here is summed over all its parent ops"
+
+/** The head of a table's name column. */
+internal const val OP_HEAD = "Op"
+
+/** What the wall table times, right after its title, in a report and in a diff. */
+internal const val WALL_TIMED = "Each execution is timed from its start to its end, with the child ops that ran in it"
+
+/** What the own table shows, right after its title, in a report and in a diff. */
+internal const val OWN_TIMED = "Each op's own time, in thread-time"
 
 /** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
 internal const val FOLDED_ROWS = "and more"
@@ -146,14 +155,14 @@ internal fun durationWithInterval(e: Estimate, view: View = View.FULL): String =
 internal fun briefKeys(view: View, runs: Int, changes: Boolean = false): List<String> {
     if (view != View.BRIEF || runs < 2) return emptyList()
     val certain = "${Math.round(CERTAIN * 100)}%"
-    val figures = "  A plain figure (3.4) means its 95% interval is within $certain of it; otherwise a range (2.2..7.0) shows the " +
-            "interval's ends; $UNKNOWN is unknown and requires more runs"
+    val figures = "  A plain figure (3.4) has its 95% interval within $certain of it. Otherwise a range (2.2..7.0) shows the " +
+            "two ends of the interval. $UNKNOWN is unknown and needs more runs"
     if (!changes) return listOf(figures)
     return listOf(
         figures,
-        "  A change as one value (-40%) is certain ($certain interval) or small (${Math.round(SMALL_CHANGE * 100)}% of before); " +
-                "a range shows its interval's ends; = did not move; $UNKNOWN is unknown: the change is within its sides' run-to-run noise, " +
-                "and more runs would tell",
+        "  A change written as one value (-40%) is certain, its interval within $certain of it, or small, within " +
+                "${Math.round(SMALL_CHANGE * 100)}% of before. A range shows the two ends of the change's interval. = means it did not move. " +
+                "$UNKNOWN means it is unknown: the change is within the noise between runs, and more runs would show it",
     )
 }
 
@@ -172,11 +181,11 @@ internal fun fewRunsLines(before: Int, after: Int? = null): List<String> {
         after == n -> " after"
         else -> null
     }
-    val what = if (after == null) "figure" else "change"
+    val what = if (after == null) "figures" else "changes"
     val where = if (after == null) "" else " on each side"
     return listOfNotNull(
-        side(1)?.let { "1 run$it: no interval, so any $what below may be loose or unknown${sym.dash}run at least $RUNS_TO_ASK times$where to tell" },
-        side(2)?.let { "2 runs$it: the interval is too wide to say much${sym.dash}run at least $RUNS_TO_ASK times$where to tell" },
+        side(1)?.let { "1 run$it: the $what below have no interval, so any of them may be loose or unknown${sym.dash}run at least $RUNS_TO_ASK times$where to find out" },
+        side(2)?.let { "2 runs$it: the intervals from two runs are too wide to say much${sym.dash}run at least $RUNS_TO_ASK times$where" },
     ).take(1)
 }
 
@@ -229,7 +238,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     fun render(unicode: Boolean = false, view: View = View.BRIEF, lenses: Set<Lens> = emptySet()): String = withSymbols(unicode) {
         Logo.once()
         if (runs.isEmpty()) failedBanner()
-        else report(false, warnings(), view, lenses)
+        else report(warnings(), view, lenses)
     }
 
     /**
@@ -244,9 +253,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             appendLine("!".repeat(width))
             appendLine(
                 when {
-                    runs.isNotEmpty() -> "FAILED: ${failed.size} of $total runs$where, left out of the profile"
-                    total == 1 -> "FAILED: the run$where, so there is no profile"
-                    else -> "FAILED: every run$where, so there is no profile"
+                    runs.isNotEmpty() -> "FAILED: ${failed.size} of $total runs$where failed and " +
+                            (if (failed.size == 1) "is" else "are") + " left out of the profile"
+                    total == 1 -> "FAILED: the run$where failed, so there is no profile"
+                    else -> "FAILED: every run$where failed, so there is no profile"
                 }
             )
             for ((file, failure) in failed) appendLine("  ${file.fileName}: $failure")
@@ -308,11 +318,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     /** How much evidence there is, which is the precision of everything in the tables. See [Run]. */
     internal fun sampledText(): String {
         val per = if (runs.size > 1) " a run" else ""
-        return (fixed(runs.map { it.allHits }.average(), 0, grouped = true) + " samples$per${sym.dash}" +
-            fixed(runs.map { it.ticks }.average(), 0, grouped = true) + " ticks at " + fixed(runs.map { it.stepNanos }.average() / 1e6, 3) +
-            "ms mean (jittered) ${sym.times} " + Run.plural(Math.round(runs.map { it.threads }.average()), "thread") +
-            ", one sample per thread per tick"
-        )
+        val about = if (runs.size > 1) "about " else ""
+        return fixed(runs.map { it.allHits }.average(), 0, grouped = true) + " samples$per: one sample of each thread at each tick, from " +
+            fixed(runs.map { it.ticks }.average(), 0, grouped = true) + " ticks " + fixed(runs.map { it.stepNanos }.average() / 1e6, 3) +
+            "ms apart on average (the interval is jittered) and $about" + Run.plural(Math.round(runs.map { it.threads }.average()), "thread")
     }
 
     /**
@@ -324,11 +333,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * and the tables' own rules do that. The logo is not here: it is printed once per JVM by the first
      * TickSnick call, see [Logo].
      *
-     * @param legend every column explained, at the bottom. See [Run.renderLegend].
      * @param warnings the warnings, in the `WARNINGS` section: before any number, see [warningsSection].
      * @param view what the tables show, with the [lenses] opened; every other line is the same in every view.
      */
-    internal fun report(legend: Boolean, warnings: Warnings, view: View = View.FULL, lenses: Set<Lens> = emptySet()): String = buildString {
+    internal fun report(warnings: Warnings, view: View = View.FULL, lenses: Set<Lens> = emptySet()): String = buildString {
         if (runs.isEmpty()) {
             append(failedBanner(width = FAILED_WIDTH))
             return@buildString
@@ -341,9 +349,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         appendLine("=".repeat(pageWidth))
         appendLine(
             row(
-                "Runs", if (n == 1) "1 run of '$name', one JVM: no interval"
-                else "$n runs of '$name', one JVM each: every figure below is their mean, " +
-                        "with its 95% interval from how much the runs differ (Student's t, ${Run.plural((n - 1).toLong(), "degree")} of freedom)"
+                "Runs", if (n == 1) "1 run of '$name'. A single run gives no figure an interval"
+                else "$n runs of '$name', each in its own JVM. Every figure below is the mean of the $n runs, " +
+                        "with a 95% interval that comes from how much the runs differ (Student's t, ${Run.plural((n - 1).toLong(), "degree")} of freedom)"
             )
         )
         warningsSection(warnings)
@@ -376,7 +384,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         appendLine("-".repeat(pageWidth))
         // Said in the output rather than only in a document: the gap between a share and what removing
         // the operation would save can be a factor of 275, and nothing else on the screen hints at it.
-        with(runs[0]) { renderLegend(legend) }
+        with(runs[0]) { renderLegend() }
         appendLine("=".repeat(pageWidth))
     }
 
@@ -630,18 +638,18 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * The full view's tables, made for each use and never kept: a column is as wide as its widest cell, and a cell's
      * width depends on the symbols of the render it is in - `+-` is two characters, `±` one.
      */
-    internal val wallText: TableText get() = TableText(wallTable, "Operation", WALL_NAME_WIDTH)
-    internal val ownText: TableText get() = TableText(ownTable, "Operation", OWN_NAME_WIDTH)
+    internal val wallText: TableText get() = TableText(wallTable, OP_HEAD, WALL_NAME_WIDTH)
+    internal val ownText: TableText get() = TableText(ownTable, OP_HEAD, OWN_NAME_WIDTH)
 
     /** The wall table as [view] writes it, with [lenses]. */
-    private fun wallTextOf(view: View, lenses: Set<Lens>): TableText = TableText(wallTable, "Operation", WALL_NAME_WIDTH, view, lenses)
+    private fun wallTextOf(view: View, lenses: Set<Lens>): TableText = TableText(wallTable, OP_HEAD, WALL_NAME_WIDTH, view, lenses)
 
-    private fun ownTextOf(view: View, lenses: Set<Lens>): TableText = TableText(ownTable, "Operation", OWN_NAME_WIDTH, view, lenses)
+    private fun ownTextOf(view: View, lenses: Set<Lens>): TableText = TableText(ownTable, OP_HEAD, OWN_NAME_WIDTH, view, lenses)
 
     /** The widest table, for the rules around a report. */
     internal val pageWidth: Int get() = maxOf(wallText.width, ownText.width)
 
-    private val overRuns: String get() = if (runs.size > 1) "; each figure the mean of the runs, with its 95% interval" else ""
+    private val overRuns: String get() = if (runs.size > 1) ". Each figure is the mean of the runs, with its 95% interval" else ""
 
     /**
      * The wall table with its keys, each once and next to the rows that need it.
@@ -662,8 +670,8 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             // Wall time, so each row says what part of its parent it took: `branch` 88% of the request,
             // and the rest the request's own merge. Summed durations would read 988% of the parent
             // once a fork runs ten at a time. See Run.wallsOf.
-            "NESTED WALL TIME${sym.dash}each row its whole span, under its parent as it ran" +
-                    (if (paused) "; a pause is charged to every operation it interrupted" else "") + overRuns
+            "NESTED WALL TIME${sym.dash}$WALL_TIMED. An op is placed under its parent op" +
+                    (if (paused) ". A pause counts in every op it interrupted" else "") + overRuns
         )
         fewRunsLines(runs.size).forEach { appendLine(it) }
         appendLine(lensesLine(view, wallTable.columns, lenses))
@@ -696,34 +704,38 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         }
         val anyOwn = all.any { it.own }
         if (wallTable.splitLeaves && anyOwn) add(
-            "  $SPLIT_MARK rows split a leaf's time by the innermost label, each sample once${sym.dash}they add up to 100%;" +
-                    " a fine label with labels inside it shows only its own part"
+            "  Rows marked $SPLIT_MARK split their parent op's time by the innermost fine op. Each sample counts once, so they add up" +
+                    " to 100%. A fine op with child ops shows only its own time"
         )
         if (!wallTable.splitLeaves && anyOwn) add(
-            "  $SPLIT_MARK rows are fine labels in a row's own time, outside its coarse children; " +
-                    (if (view.shows(Lens.PARALLELISM, lenses)) "Parallel on one is how many threads ran it at a time in one execution; " else "") +
-                    "a fine label with labels inside it shows only its own part"
+            "  A row marked $SPLIT_MARK shows a fine op in its parent op's own time, outside the parent op's coarse child ops. " +
+                    (if (view.shows(Lens.PARALLELISM, lenses)) "Its Parallel is how many threads ran it at once in one execution of the parent op. " else "") +
+                    "A fine op with child ops shows only its own time"
         )
         if (all.any { it.own && it.foldedRows == 0 && (it.figures[EXECUTIONS]?.n ?: 0) != 0 }) add(
-            "  on a $SPLIT_MARK row, Executions is its calls on that path and Per parent per execution of the row above, both counted;" +
-                    " Mean is its own thread-time per call, sampled; $UNKNOWN for a label called there and never caught"
+            "  On a row marked $SPLIT_MARK, Executions is the op's calls at that place in the tree, and Per parent is its calls per" +
+                    " execution of its parent op; both are counted. Mean is its thread-time per call, which is sampled. $UNKNOWN means" +
+                    " the op was called there but never sampled"
         )
         if (allocations && view.shows(Lens.MEMORY, lenses)) add(
-            "  Allocated: bytes created under the row, its coarse children and every thread under it included, in all and per execution;" +
-                    " counted, not sampled; what the collector has to clear, not memory held" +
-                    if (runs.size > 1) "; the mean of the runs that counted them" else ""
+            "  Allocated is the bytes an op allocated, with its coarse child ops and every thread that worked under it, in all and" +
+                    " per execution. The bytes are counted, not sampled. They are what the collector has to clear, not memory held" +
+                    if (runs.size > 1) ". Over several runs, each figure is the mean of the runs that counted them" else ""
         )
         if (all.any { it.parents > 1 }) add(
-            "  (N parents): an operation on N rows of the tree, each its part under that parent; the whole of it is in the block above"
+            "  (N parents): the op has N parent ops and a row under each, with its part there. Its whole is in \"Under multiple parents\""
         )
         if (wallTable.shared.isNotEmpty()) add(
-            "  $ROOT_SHARE in that block is each run's share of the Wall of " +
-                    (wallTable.rows.map { it.name }.distinct().singleOrNull()?.let { "its root, $it" } ?: "its roots together") +
-                    if (runs.size > 1 && full) ", ${sym.plusMinus} in percentage points" else ""
+            "  $ROOT_SHARE in \"Under multiple parents\" is the op's share of the Wall of " +
+                    (wallTable.rows.map { it.name }.distinct().singleOrNull()?.let { "its root op, $it" } ?: "all root ops together") +
+                    ", taken in each run" + if (runs.size > 1 && full) "; its interval is in percentage points" else ""
         )
         if (runs.size > 1) {
-            add("  % parent is each run's share of its own parent" + (if (full) ", ${sym.plusMinus} in percentage points" else "") + ": the run's speed cancels out of it")
-            if (latency) add("  Max is the mean of the runs' largest, and a percentile the mean of the runs' percentiles")
+            add(
+                "  % parent is the op's share of its parent op's Wall, taken in each run, so the speed of a run cancels out" +
+                        if (full) "; its interval is in percentage points" else ""
+            )
+            if (latency) add("  Max is the mean of each run's longest execution, and a percentile is the mean of that percentile over the runs")
         }
         if (latency && all.any { r -> listOf(P50, P90, P99).any { r.figures[it]?.n == 0 } }) add("  ${percentilesNeedText()}")
     }
@@ -738,7 +750,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     internal fun StringBuilder.ownSection(view: View = View.FULL, text: TableText = ownText, lenses: Set<Lens> = emptySet()) {
         val fine = ownTable
         // The active time is the header's `Active`, a figure with an interval: written by its rule, as everywhere.
-        appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, out of ${durationWithInterval(over { it.activeNanos.toDouble() }, view)} active time$overRuns")
+        appendLine("OWN THREAD-TIME${sym.dash}$OWN_TIMED, out of ${durationWithInterval(over { it.activeNanos.toDouble() }, view)} of active time$overRuns")
         if (fine.rows.isNotEmpty()) {
             fewRunsLines(runs.size).forEach { appendLine(it) }
             appendLine(lensesLine(view, fine.columns, lenses))
@@ -756,8 +768,8 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             val ticks = runs.maxOf { it.ticks }
             appendLine(
                 if (runs.all { it.labelledHits == 0L } && ticks < Run.MIN_TICKS_FOR_A_TABLE)
-                    "  nothing was sampled${sym.dash}$ticks ticks is too few for the sampler to catch anything. Run for longer."
-                else "  nothing was sampled."
+                    "  Nothing was sampled${sym.dash}$ticks ticks are too few for the sampler to catch anything; run for longer"
+                else "  Nothing was sampled"
             )
         }
         if (fine.rows.isNotEmpty()) briefKeys(view, runs.size).forEach { appendLine(it) }
@@ -768,8 +780,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     internal fun fineNotes(view: View = View.FULL, lenses: Set<Lens> = emptySet()): List<String> = buildList {
         val fine = ownTable
         if (fine.contained.isNotEmpty()) add(
-            "  " + fine.contained.joinToString { it + STAR } + ": coarse, with no own time${sym.dash}every sample inside " +
-                    (if (fine.contained.size == 1) "it" else "them") + " was in an operation above"
+            "  " + fine.contained.joinToString { it + STAR } +
+                    (if (fine.contained.size == 1) ": a coarse op with no own time${sym.dash}every sample taken inside it fell in one of its child ops"
+                    else ": coarse ops with no own time${sym.dash}every sample taken inside them fell in one of their child ops")
         )
         if (fine.folded.isNotEmpty()) {
             val called = fine.folded.filter { it.calls > 0 }
@@ -780,11 +793,12 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             // In the reader's words: what happened to them, not what the table did with them.
             val uncalled = fine.folded.filter { it.calls <= 0 }
             val parts = buildList {
+                fun were(n: Int) = if (n == 1) "was" else "were"
                 if (called.isNotEmpty()) add(
-                    "${Run.plural(called.size.toLong(), "operation")} called but never sampled: " + names(called.sortedByDescending { it.calls })
+                    "${Run.plural(called.size.toLong(), "op")} ${were(called.size)} called but never sampled: " + names(called.sortedByDescending { it.calls })
                 )
                 if (uncalled.isNotEmpty()) add(
-                    (if (called.isEmpty()) Run.plural(uncalled.size.toLong(), "operation") else "${uncalled.size}") + " never called: " + names(uncalled)
+                    (if (called.isEmpty()) Run.plural(uncalled.size.toLong(), "op") else "${uncalled.size}") + " ${were(uncalled.size)} never called: " + names(uncalled)
                 )
             }
             add("  " + parts.joinToString("; "))
@@ -792,7 +806,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         // The marker, explained once and next to the rows that carry it. Not in the legend
         // alone: a star with no key is the reader's problem, and the key is one line.
         if (fine.rows.any { it.coarse } || fine.contained.isNotEmpty()) {
-            add("  * a coarse operation, showing its OWN work${sym.dash}its full span is in the table above")
+            add("  * marks a coarse op. Here it shows only its own time; its whole time is in the wall table above")
         }
         // A note and not a warning: it is the threshold `Long calls`, `Long time` and `Longest` are printed
         // against, so it belongs under the table that has those columns rather than in the warning section. The
@@ -801,8 +815,10 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         if (view.shows(Lens.LATENCY, lenses)) add(
             String.format(
                 Locale.ROOT,
-                "  Long calls: calls over a tick hold %s of thread-time run-wide; preemption and GC pauses alone could put it at %s, and a row at or under that is blank",
-                percent(runs.map { it.stuckBaseline }.average() * 100), percent(runs.map { it.machineFloor }.average() * 100)
+                "  Long calls are calls longer than a tick. They hold %s of all thread-time in this run. Preemption and GC pauses alone" +
+                        " could make that %s, so an op whose share is %s or less is left blank",
+                percent(runs.map { it.stuckBaseline }.average() * 100), percent(runs.map { it.machineFloor }.average() * 100),
+                percent(runs.map { it.machineFloor }.average() * 100)
             )
         )
     }
@@ -864,7 +880,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         if (header) appendLine(
             String.format(
                 Locale.ROOT, "              %s%-4s %-28s %10s %11s", if (side.isEmpty()) "" else " ".repeat(7),
-                "run", "file", "wall", "CPU clock"
+                "run", "file", "wall time", "CPU clock"
             ).trimEnd()
         )
         runs.forEachIndexed { i, p ->

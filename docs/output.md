@@ -24,7 +24,7 @@ graph. It runs on four threads in three batches of about 27 s each. Its coarse l
 
 Every report comes in two views of the same figures:
 
-- **Brief**, the default: the everyday look. The tables show the basis - each operation's time, its
+- **Brief**, the default: the everyday look. The tables show the basis - each op's time, its
   share, how many times it ran and the price of one - and the lenses opened, and name the ones left out.
   A lens is opened by name: `render(lenses = setOf(Lens.LATENCY))`, the same on `TickSnick.diff`, or
   `--lens latency` on the command line, once for each lens.
@@ -38,10 +38,10 @@ nothing else differs. The sections after this one show the full view, since it h
 The brief view of a report over three runs, on a smaller workload:
 
 ```
-NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
-Lenses not shown: Parallelism, Waiting, Memory, Latency - open one with --lens; the full view, every lens and every interval, is --view full
+NESTED WALL TIME - Each execution is timed from its start to its end, with the child ops that ran in it. An op is placed under its parent op. A pause counts in every op it interrupted. Each figure is the mean of the runs, with its 95% interval
+Lenses not shown: Parallelism, Waiting, Memory, Latency - open one with --lens; --view full shows every lens and every interval
                                    |    Time    |    Share    |          Work           |    Cost
-Operation                          |     Wall v |    % parent | Executions   Per parent |       Mean
+Op                                 |     Wall v |    % parent | Executions   Per parent |       Mean
 -----------------------------------+------------+-------------+-------------------------+-----------
 runBatch                           |      6.34s |             |          1              |      6.34s
   resolveRoot                      |      6.34s |        100% |      5,262        5,262 |     4.79ms
@@ -77,10 +77,10 @@ The brief view of a diff is one line a row, here on the same smaller workload, b
 to the code:
 
 ```
-OWN THREAD-TIME - outside the operations inside, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
-Lenses not shown: Parallelism, Waiting, Latency - open one with --lens; the full view, every lens and every interval, is --view full
+OWN THREAD-TIME - Each op's own time, in thread-time. An op is matched between the sides by its name, and the rows are sorted by the change. Each side is the mean of its runs, and each change has its 95% interval
+Lenses not shown: Parallelism, Waiting, Latency - open one with --lens; --view full shows every lens and every interval
                            |                Time                 |                   Share                    | Work  |         Cost
-Operation                  |                       Thread-time v |                               Thread-time% | Calls | Thread-time per call
+Op                         |                       Thread-time v |                               Thread-time% | Calls | Thread-time per call
 ---------------------------+-------------------------------------+--------------------------------------------+-------+---------------------
 dependencies               |      5.90s -> 250..410ms       -94% |         14.5% -> 0.85..1.3%          -13pp |     = |                 -94%
 visit                      |      8.10s -> 4.43s       -35..-55% |         20.0% -> 14.3%        -2.8..-8.5pp |     = |            -35..-55%
@@ -89,8 +89,8 @@ resolve *                  |      560ms -> 1.89s       180..300% |         1.38%
 passedOn                   |      3.47s -> 2.2..3.6s   1.3..-35% |         8.55% -> 7.2..11%                ? |     = |            1.3..-35%
 merge                      |      10.1s -> 10.3s               ? |         24.8% -> 33.3%           4.3..13pp |     = |                    ?
 ---------------------------+-------------------------------------+--------------------------------------------+-------+---------------------
-  A plain figure (3.4) means its 95% interval is within 20% of it; otherwise a range (2.2..7.0) shows the interval's ends; ? is unknown and requires more runs
-  A change as one value (-40%) is certain (20% interval) or small (5% of before); a range shows its interval's ends; = did not move; ? is unknown: the change is within its sides' run-to-run noise, and more runs would tell
+  A plain figure (3.4) has its 95% interval within 20% of it. Otherwise a range (2.2..7.0) shows the two ends of the interval. ? is unknown and needs more runs
+  A change written as one value (-40%) is certain, its interval within 20% of it, or small, within 5% of before. A range shows the two ends of the change's interval. = means it did not move. ? means it is unknown: the change is within the noise between runs, and more runs would show it
 ```
 
 - **Time and Share** read `before -> after` and the change, the two sides aligned on the arrow, and so do
@@ -107,18 +107,18 @@ merge                      |      10.1s -> 10.3s               ? |         24.8%
 ## One run
 
 ```
-Runs          1 run of 'naive', one JVM: no interval
+Runs          1 run of 'naive'. A single run gives no figure an interval
 
 WARNINGS
-  Runs: 1 in 'naive', no interval - run at least 3 times
+  Runs: only 1 in 'naive', so no figure has an interval - run at least 3 times
 
 Tags          warmups: 2; batches: 3; roots: org.apache.*
 Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; CPU: Intel64 Family 6 Model 197 Stepping 2, GenuineIntel; Processors: 14; Heap: 18.0 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
-              run  file                               wall   CPU clock
+              run  file                          wall time   CPU clock
               1    2026-10-26T18-16-43.tsr            117s         99%
-Wall time     117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
-Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
-Sampling      every 1.0ms: the sampler keeps one of the 14 processors busy to hold the tick
+Wall time     117s = 104s active + 13.0s paused (11.1% of the wall time, in 57 pauses, the longest 1.98s)
+Cores         Of 14 processors, on average 2.85 ran the profiled threads and 2.67 ran everything else: GC 1.73 (1.20 of it in pauses), the sampler 0.88, JIT 0.07
+Sampling      A sample every 1.0ms. To hold that pace, the sampler occupies one of the 14 processors
 ```
 
 ### WARNINGS
@@ -133,29 +133,29 @@ A second line, further in, gives the cause.
 
 The common ones:
 
-- `Runs: 1 in 'naive', no interval` - one JVM cannot say how much the next one will differ. Save at
+- `Runs: only 1 in 'naive', so no figure has an interval` - one JVM cannot say how much the next one will differ. Save at
   least 3 runs into the same folder: two give an interval too wide to say much. A line right over each
   table says the same.
 - `CPU clock: ran at 140%..230% during the run` (or `across the runs`) - the CPU's frequency changed, so
   durations drift with it. Shares are not affected. Turbo off holds it still.
-- ``The labels, mostly `visit`, may add up to P to the work inside them and W to the wall time`` - every
+- ``The labels, mostly `visit`, may add as much as P to the work inside them and W to the wall time`` - every
   fine call and coarse execution at its budget, against the time the labels hold, and against the run's
   wall time: the most the wall can grow, where the labels sit on the run's critical path. Said above
   1% of the work. Fewer, larger labels cost less.
-- `` `visit`: its calls are under the recommended 50ns `` - the label is a visible part of what it
+- `` `visit`: its calls are shorter than the recommended 50ns `` - the label is a visible part of what it
   measures. Label the loop around it, with `op(handle, times = n) { }`. The floor is 2 bodies at the
   run's body, rounded up.
-- `` `request`: its executions, 1.20us, are under the recommended 3.0us `` - the operation is too short
+- `` `request`: its executions, 1.20us on average, are shorter than the recommended 3.0us `` - the op is too short
   for a coarse label. Register it fine; the `op` calls stay the same. What raises the floor is named.
-- `` `parse`: entered and never exited by `stop()` `` - a label set with `enter` was still open when the
+- `` `parse`: entered and not exited before `stop()` `` - a label set with `enter` was still open when the
   session stopped, so the time after its missed `exit` may have gone to it. Put `exit` in a `finally`.
 - `Thread-time%: may be off by up to 1.10pp` and the `Runnable` warnings - some time inside labels read
   as Runnable may have been waiting, so a share of time may differ from a share of CPU. The second line
   splits it: waiting for a free core (run fewer threads) or in I/O, native calls or other programs
   (label the wait).
-- `Paused: 1.85s of pauses, 2.10% of the run, is counted as work in the times below` - GC pauses
+- `Paused: 1.85s of pauses, 2.10% of the run, are counted as work in the times below` - GC pauses
   TickSnick could not tell from work.
-- `Runs: they differ in Heap, so each mean mixes them` - the runs of a folder disagree on a tag, the
+- `Runs: they differ in Heap, so each mean mixes runs that are not alike` - the runs of a folder disagree on a tag, the
   or the setup, so they are not one profile. Split the folder. It is
   always the last warning.
 - `Runs: 2 of 4 shared a JVM` - two sessions of one JVM are not independent, so every interval is too narrow.
@@ -192,11 +192,11 @@ the rest of the process (GC, the sampler, the JIT) and its parts. Here four work
 busy, while GC took 1.73.
 
 **Sampling** is how often a sample was taken, and what the sampler cost the program. With 4 or more
-processors it spins on one of them to hold the tick, as here. With fewer it sleeps between samples,
+processors it spins on one of them to hold the pace, as here. With fewer it sleeps between samples,
 which leaves the processor to the program and makes the tick longer and less regular:
 
 ```
-Sampling      every 1.6ms (1.0ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors
+Sampling      A sample every 1.6ms (1.0ms asked). The sampler sleeps between samples, so it takes no processor
 ```
 
 A sampler told to spin on fewer than 4 processors gets the remedy at the end of the line:
@@ -209,11 +209,11 @@ the runs.
 ### Nested wall time
 
 ```
-NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted
-1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell
-This is the full view, every lens and every interval; the brief view, the basis with lenses opened by --lens, is --view brief
+NESTED WALL TIME - Each execution is timed from its start to its end, with the child ops that ran in it. An op is placed under its parent op. A pause counts in every op it interrupted
+1 run: the figures below have no interval, so any of them may be loose or unknown - run at least 3 times to find out
+The full view shows every lens and every interval; --view brief shows the basis, and --lens adds a lens to it
                                    |  Time  |  Share   |          Work           |  Cost  | Parallelism | Waiting | Memory |             Latency
-Operation                          | Wall v | % parent | Executions   Per parent |   Mean |    Parallel | Waiting | Paused |    p50      p90      p99     Max
+Op                                 | Wall v | % parent | Executions   Per parent |   Mean |    Parallel | Waiting | Paused |    p50      p90      p99     Max
 -----------------------------------+--------+----------+-------------------------+--------+-------------+---------+--------+---------------------------------
 runBatch                           |  82.0s |          |          3              |  27.3s |             |   20.0% |  4.20s |  27.4s        ?        ?   27.6s
   resolveRoot                      |  82.0s |     100% |     92,667       30,889 | 3.53ms |         4.0 |         |  4.20s |  602us   7.50ms   61.6ms   434ms
@@ -223,26 +223,26 @@ runBatch                           |  82.0s |          |          3             
       reach                        |  10.1s |      12% |    278,001              |  145us |             |         |  1.15s | 27.8us    362us   1.65ms   166ms
 ```
 
-The table is a tree: each operation sits under the one it ran inside, and its figures cover the
-executions on that path only. The same label on two paths is two rows.
+The table is a tree: each op sits under its parent op, and its figures cover the
+executions at that place in the tree only. The same label in two places is two rows.
 
 The columns come in groups, each named over its columns and each a question, in the same order as in
 the own table below: **Time**, **Share**, **Work** and **Cost**, then the lenses **Parallelism**,
 **Waiting**, **Memory** and **Latency**.
 
-- **Wall** (Time) - the part of the root's wall time this row took: its durations summed, then
+- **Wall** (Time) - the part of its root op's wall time the op took: its durations summed, then
   divided by how many ran at a time, at its level and above. The table is sorted by it (`v`).
-- **% parent** (Share) - Wall as a share of the parent's Wall. What the children leave out of 100% is
-  time the parent spent outside them.
-- **Executions** (Work) - how many times it ran on this path. Measured, not sampled.
-- **Per parent** (Work) - executions per execution of the parent: 30,889 `resolveRoot` per
+- **% parent** (Share) - Wall as a share of the parent op's Wall. What the child ops leave out of 100% is
+  time the parent op spent outside them.
+- **Executions** (Work) - how many times it ran at this place. Measured, not sampled.
+- **Per parent** (Work) - executions per execution of the parent op: 30,889 `resolveRoot` per
   `runBatch`, three `resolve` per `resolveRoot`. Blank at one.
 - **Mean** (Cost) - measured per execution.
-- **Parallel** (Parallelism) - how many of its executions ran at the same time under one parent
-  execution. Blank when they ran one at a time. Read it beside `Per parent`: `30,889` with `4.0` is
+- **Parallel** (Parallelism) - how many of its executions ran at the same time under one execution of
+  the parent op. Blank when they ran one at a time. Read it beside `Per parent`: `30,889` with `4.0` is
   30,889 started, four at a time.
-- **Waiting** - of the samples inside the row, the share whose thread was parked, blocked or
-  waiting: a part of the row's time, not added to it. Blank where nothing waited. `runBatch` is 20%
+- **Waiting** - of the samples inside the op, the share whose thread was parked, blocked or
+  waiting: a part of the op's time, not added to it. Blank where nothing waited. `runBatch` is 20%
   waiting: the main thread waits for the workers.
 - **Paused** (Memory) - GC pauses that fell inside its executions. A pause is charged to every
   execution it interrupted, not to the one that caused it.
@@ -250,12 +250,11 @@ the own table below: **Time**, **Share**, **Work** and **Cost**, then the lenses
   executions and within 0.8% after. A p90 needs 10 executions and a p99 100; with fewer, a row run
   once included, it shows `?`.
 
-**The `-` rows under an operation** are the fine labels in its own time, outside its coarse
-children:
+**The `-` rows under an op** are the fine ops in its own time, outside its coarse child ops:
 
 ```
                                |  Time  |  Share   |          Work           |  Cost  | Parallelism | Waiting | Memory |            Latency
-Operation                      | Wall v | % parent | Executions   Per parent |   Mean |    Parallel | Waiting | Paused |    p50      p90   p99      Max
+Op                             | Wall v | % parent | Executions   Per parent |   Mean |    Parallel | Waiting | Paused |    p50      p90   p99      Max
 -------------------------------+--------+----------+-------------------------+--------+-------------+---------+--------+-------------------------------
 batch                          |  1.14s |          |          1              |  1.14s |             |         |        |      ?        ?     ?    1.14s
   plan                         |  984ms |      87% |         10           10 | 98.4ms |             |         |        | 98.3ms   98.6ms     ?   99.5ms
@@ -268,84 +267,84 @@ batch                          |  1.14s |          |          1              |  
     - unlabelled               | 51.1ms |      34% |                         |        |             |         |        |
     - rare (2 parents)         |      ? |        ? |         10            1 |      ? |             |         |        |
 -------------------------------+--------+----------+-------------------------+--------+-------------+---------+--------+-------------------------------
-Under multiple parents - each over all of them
-Operation                      | Wall v |   % root | Executions              |   Mean |             |         |        |
+Under multiple parents - each op here is summed over all its parent ops
+Op                             | Wall v |   % root | Executions              |   Mean |             |         |        |
   - visit                      |  303ms |      27% |      1,100              |  275us |             |         |        |
   - rare                       | 97.2ms |       9% |        510              |  191us |             |         |        |
 -------------------------------+--------+----------+-------------------------+--------+-------------+---------+--------+-------------------------------
 ```
 
-- **Executions** - the label's calls on this path, counted. **Per parent** - calls per execution of
-  the row above: 340 `rule` per `plan`. It does not depend on how many plans the run made, so it
+- **Executions** - the label's calls at this place, counted. **Per parent** - calls per execution of
+  its parent op: 340 `rule` per `plan`. It does not depend on how many plans the run made, so it
   can be compared between runs of different sizes.
-- **Wall, % parent** - its time, sampled, and its share of the row's Wall, as a coarse child's is.
+- **Wall, % parent** - its time, sampled, and its share of its parent op's Wall, as a coarse child op's is.
 - **Mean** - its own time per call: `visit` is 205 us under `plan` and 972 us under `cleanup`.
-- A label called on a path and never sampled there still has its row, with `?` for its time:
+- A label called at a place and never sampled there still has its row, with `?` for its time:
   `rare` ran once per `cleanup`, too briefly to be caught.
 - `unlabelled` is time under no fine label.
-- **Every fact about a row is in one parenthesis on its name:** `(2 parents)` when an operation is on
-  more than one row of the tree, each row its part under that parent, and `(2 of 3 runs)` when some
+- **Every fact about a row is in one parenthesis on its name:** `(2 parents)` when an op has
+  more than one parent op, with a row under each and its part there, and `(2 of 3 runs)` when some
   runs do not have it. A diff writes the same with `->` where the sides differ: `(3 parents, 3 -> 0
   runs)`.
-- **Under multiple parents**, right under the tree and above the keys, has each such operation, coarse or
+- **Under multiple parents**, right under the tree and above the keys, has each such op, coarse or
   fine, over all of its rows: `visit` 303 ms and 1,100 calls, under `plan` and `cleanup` together. It is
   sorted by Wall, so a label spread over three rows ranks by its whole, and not by its largest part. Its
   heading names only what it shows, in the same places, and `% root` stands where `% parent` does: the share
-  of the root's Wall, `batch` here (of all roots together when there are several), since an operation over all
-  its parents has no one parent to be a share of.
+  of its root op's Wall, `batch` here (of all root ops together when there are several), since an op over all
+  its parent ops has no one parent op to be a share of.
 - `and 1 more` folds the small rows into one row, with their time in the same columns: only what adds up,
-  so not their calls, which are of different operations. Small rows with calls are drawn while they
+  so not their calls, which are of different ops. Small rows with calls are drawn while they
   fit within six rows.
 
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns
 when only one did.
 
-A coarse label suits an operation from 100 bodies, about 2.5 us on a fast machine, with no fine label
+A coarse label suits an op from 100 bodies, about 2.5 us on a fast machine, with no fine label
 registered: under it the part of
-TickSnick's hook that runs inside the span makes its share of the samples read high, and a very short
+TickSnick's hook that runs inside the execution makes its share of the samples read high, and a very short
 one loses samples. A body is a fixed piece of CPU work that TickSnick times once a second during the
 run, so the floor follows the machine and its clock. The hook is mostly its two `System.nanoTime()`
-calls, so where `nanoTime` is slow the floor rises with it. Counting the calls per path adds 0.48
+calls, so where `nanoTime` is slow the floor rises with it. Counting the calls at each place adds 0.48
 bodies to the floor for every registered fine label, and `Allocated` 25.6 bodies: at 25 ns a body, about
-2.7 us with 20 fine labels, 3.4 us with `Allocated` too, 5.5 us with 250 labels, before rounding up. An operation under the floor is still
+2.7 us with 20 fine labels, 3.4 us with `Allocated` too, 5.5 us with 250 labels, before rounding up. An op under the floor is still
 measured; a warning says it is under the recommended floor, rounded up, and what raises it.
 
 **`Allocated`** and **Per execution**, in the Memory group after `Paused`, appear only in a run started with
-`allocations = true`: the bytes created under the row, with its coarse children and every thread that ran
+`allocations = true`: the bytes allocated under the op, with its coarse child ops and every thread that ran
 under it, counted, not sampled. **Allocated** is all its executions together, so it follows the tree as `Wall`
-does: a parent's is its own and its children's, exactly. **Per execution** is that over `Executions`, which
-compares runs of different sizes, as `Mean` does. It is bytes allocated, not memory held: an operation can
+does: a parent op's is its own and its child ops', exactly. **Per execution** is that over `Executions`, which
+compares runs of different sizes, as `Mean` does. It is bytes allocated, not memory held: an op can
 allocate gigabytes and hold none of it. What it measures is the collector's work - a young collection comes
 every time the young generation fills - and not how much memory the program needs. Work on a virtual thread is
-not counted: the rows it ran under, and every row above them, read `?`, and a warning says so. The label's own
+not counted: the ops it ran under, and every op above them, read `?`, and a warning says so. The label's own
 context, one per execution, is left out, so an execution that allocates nothing reads 0; the first execution
-on a path still includes a few KB of the label's own, which matters only for an operation that allocates very
+at a place still includes a few KB of the label's own, which matters only for an op that allocates very
 little. A thread counts from its first coarse boundary in the session, so an execution already open at `start`
 misses what it allocates up to there, and one still open at `stop` misses what came after its last.
 
-**`slowest:`** appears under an operation opened with a key (`op(X, key = { id }) { }`): its
-longest executions on that path, with their keys.
+**`slowest:`** appears under an op opened with a key (`op(X, key = { id }) { }`): its
+longest executions at that place, with their keys.
 
 ### Own thread-time
 
 ```
-OWN THREAD-TIME - outside the operations inside, out of 104s active time
-1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell
-This is the full view, every lens and every interval; the brief view, the basis with lenses opened by --lens, is --view brief
+OWN THREAD-TIME - Each op's own time, in thread-time, out of 104s of active time
+1 run: the figures below have no interval, so any of them may be loose or unknown - run at least 3 times to find out
+The full view shows every lens and every interval; --view brief shows the basis, and --lens adds a lens to it
                            |     Time      |    Share     |    Work     |         Cost         |               Parallelism                | Waiting |             Latency
-Operation                  | Thread-time v | Thread-time% |       Calls | Thread-time per call | Wall-time   Concurrency   Workers   Pool | Waiting | Long calls   Long time   Longest
+Op                         | Thread-time v | Thread-time% |       Calls | Thread-time per call | Wall-time   Concurrency   Workers   Pool | Waiting | Long calls   Long time   Longest
 ---------------------------+---------------+--------------+-------------+----------------------+------------------------------------------+---------+---------------------------------
 onCentral                  |          117s |        28.1% | 569,233,860 |                205ns |     65.5s          1.78         4     12 |         |          8      10.0ms    2.00ms
 runBatch *                 |         77.8s |        18.8% |           3 |                25.9s |     77.8s          1.00         2      1 |   99.8% |
 merge                      |         58.4s |        14.1% | 199,138,728 |                293ns |     43.1s          1.36         4     12 |         |          5      7.01ms    2.00ms
 visit                      |         58.2s |        14.0% | 562,928,865 |                103ns |     43.5s          1.34         4     12 |         |
-(no operation)             |         26.4s |        6.37% |             |                      |                                          |  0.950% |
+(no op)                    |         26.4s |        6.37% |             |                      |                                          |  0.950% |
 passedOn                   |         24.9s |        6.00% | 222,178,167 |                112ns |     21.9s          1.14         4     12 |         |
 ```
 
-One row per label, across the whole run, in its **own** time: time inside it and inside no label
-nested in it. A row marked `*` is a coarse operation's own work; its full execution is in the table
-above. `(no operation)` is time on profiled threads under no label.
+One row per op, across the whole run, in its **own** time: time inside it and outside its child ops.
+A row marked `*` is a coarse op's own time; its whole time is in the wall table
+above. `(no op)` is time on profiled threads under no label.
 
 The groups are the wall table's, in the same order. **Time, Share, Work, Cost** - what the time went to.
 
@@ -372,7 +371,7 @@ for a core, or inside a native call, also reads runnable.
 
 **Latency** - calls of the label that lasted over a sampling tick: how many (**Long calls**), the time
 they held (**Long time**), and the **Longest**. A fine call is counted and not timed, so this is what
-stands in for the wall table's percentiles, and a coarse row is blank there. A short operation with a
+stands in for the wall table's percentiles, and a coarse row is blank there. A short op with a
 few long calls is usually a rehash, a lock or a GC pause. Blank means they hold no more than preemption
 and pauses alone would explain; the footnote, `Long calls: calls over a tick hold ...`, says how much
 that is.
@@ -380,11 +379,11 @@ that is.
 ### Sampled
 
 ```
-Sampled       414,466 samples - 103,684 ticks at 1.001ms mean (jittered) x 5 threads, one sample per thread per tick
+Sampled       414,466 samples: one sample of each thread at each tick, from 103,684 ticks 1.001ms apart on average (the interval is jittered) and 5 threads
 ```
 
 How many samples the own table is made of: the ticks, the mean time between them, and the threads
-read on each. A row's share of them carries an error of about `1/sqrt(samples)` from sampling alone: 96
+read on each. An op's share of them carries an error of about `1/sqrt(samples)` from sampling alone: 96
 samples is 10%, 100,000 is 0.3%.
 
 ## Several runs
@@ -394,19 +393,19 @@ One run is a folder of one, so a report prints the same lines however many runs 
 With two runs or more, each figure is the mean of the runs, with its 95% interval:
 
 ```
-Runs          4 runs of 'naive', one JVM each: every figure below is their mean, with its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
-              run  file                               wall   CPU clock
+Runs          4 runs of 'naive', each in its own JVM. Every figure below is the mean of the 4 runs, with a 95% interval that comes from how much the runs differ (Student's t, 3 degrees of freedom)
+              run  file                          wall time   CPU clock
               1    2026-10-26T18-16-43.tsr            117s         99%
               2    2026-10-26T18-23-49.tsr            117s         99%
               3    2026-10-26T18-30-57.tsr            117s         99%
               4    2026-10-26T18-38-06.tsr            117s         99%
-Wall time     117s +-0.4% = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 59 pauses, longest 2.01s
-Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
+Wall time     117s +-0.4% = 104s +-0.3% active + 13.2s +-2.4% paused (11.3% of the wall time, in 59 pauses, the longest 2.01s)
+Cores         Of 14 processors, on average 2.85 ran the profiled threads and 2.70 ran everything else: GC 1.75 (1.22 of it in pauses), the sampler 0.88, JIT 0.06
 
-NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
-This is the full view, every lens and every interval; the brief view, the basis with lenses opened by --lens, is --view brief
+NESTED WALL TIME - Each execution is timed from its start to its end, with the child ops that ran in it. An op is placed under its parent op. A pause counts in every op it interrupted. Each figure is the mean of the runs, with its 95% interval
+The full view shows every lens and every interval; --view brief shows the basis, and --lens adds a lens to it
                                    |     Time     |     Share      |          Work           |     Cost      | Parallelism |    Waiting     |    Memory    |                           Latency
-Operation                          |       Wall v |       % parent | Executions   Per parent |          Mean |    Parallel |        Waiting |       Paused |           p50             p90             p99            Max
+Op                                 |       Wall v |       % parent | Executions   Per parent |          Mean |    Parallel |        Waiting |       Paused |           p50             p90             p99            Max
 -----------------------------------+--------------+----------------+-------------------------+---------------+-------------+----------------+--------------+-------------------------------------------------------------
 runBatch                           | 82.4s +-0.9% |                |          3              |  27.5s +-0.9% |             | 20.0% +-<0.1pp | 4.29s +-5.2% |  27.5s +-1.2%               ?               ?   27.7s +-1.6%
   resolveRoot                      | 82.4s +-0.9% |  100% +-<0.1pp |     92,667       30,889 | 3.55ms +-0.9% | 4.0 +-<0.1% |                | 4.29s +-5.2% |         602us   7.54ms +-0.8%   61.3ms +-1.4%    405ms +-18%
@@ -420,7 +419,7 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
 
 - **The run list** shows each run's wall time and its clock. A run that stands out is visible here
   before it widens every interval below.
-- **% parent** is each run's share of its own parent, with its interval in percentage points. The
+- **% parent** is the op's share of its parent op's Wall, taken in each run, with its interval in percentage points. The
   run's speed cancels out, so it shows whether the structure held while the whole run got faster or
   slower.
 - **Every figure has an interval**, each a mean over the runs: the basis's and every lens's, the
@@ -435,10 +434,10 @@ differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval
   `<1`, never `0.0`, which would read as a measured nothing. A real 0 is `0`.
 
   One run has no interval: the figure alone, `52%`. It prints as a certain one would, so a line right
-  over each table says it may not be: `1 run: no interval, so any figure below may be loose or unknown -
-  run at least 3 times to tell`. Two runs have an interval, but at 12.7 times their spread over the root
+  over each table says it may not be: `1 run: the figures below have no interval, so any of them may be loose or unknown -
+  run at least 3 times to find out`. Two runs have an interval, but at 12.7 times their spread over the square root
   of two it leaves most figures loose or `?`, and a line says why: `2 runs: the interval is too wide to say
-  much - run at least 3 times to tell`.
+  much - run at least 3 times to find out`.
 - **A percentile is the mean of the runs' percentiles, and Max the mean of the runs' largest:** the
   largest of all runs would grow with how many runs there are. One run's collection moves its largest,
   so Max is often `?`.
@@ -471,19 +470,19 @@ Wall time      117s +-0.4% -> 91.6s +-1.8%  -24..-27s              -20..-23%
   Active       104s +-0.3% -> 79.2s +-1.9%  -23..-26s              -22..-25%
   Paused      13.2s +-2.4% -> 12.4s +-2.3%  -0.46..-1.1s           -3.5..-8.7%
 
-NESTED WALL TIME - each row its whole span, matched by path; each side the mean of its runs, the change its 95% interval
-This is the full view, every lens and every interval; the brief view, the basis with lenses opened by --lens, is --view brief
+NESTED WALL TIME - Each execution is timed from its start to its end, with the child ops that ran in it. An op is matched between the sides by its place in the tree: its parent op, that op's parent op, up to the root op. Each side is the mean of its runs, and each change has its 95% interval
+The full view shows every lens and every interval; --view brief shows the basis, and --lens adds a lens to it
                                              |     Time     |     Share      |          Work           |     Cost      |  Parallelism  |    Waiting     |    Memory    |                           Latency
-Operation                                    |       Wall v |       % parent | Executions   Per parent |          Mean |      Parallel |        Waiting |       Paused |           p50             p90             p99            Max
+Op                                           |       Wall v |       % parent | Executions   Per parent |          Mean |      Parallel |        Waiting |       Paused |           p50             p90             p99            Max
 ---------------------------------------------+--------------+----------------+-------------------------+---------------+---------------+----------------+--------------+-------------------------------------------------------------
       select                                 | 42.5s +-1.1% |    52% +-0.4pp |    278,001              |  611us +-1.1% |               |                | 4.01s +-9.1% | 62.8us +-0.6%   1.28ms +-1.2%   11.7ms +-1.0%   330ms +-8.6%
                                              | 33.1s +-2.9% |    57% +-0.6pp |    278,001              |  475us +-2.9% |               |                | 3.70s +-8.0% | 49.9us +-3.5%    995us +-2.8%   8.75ms +-3.0%   188ms +-1.0%
                                              |    -20..-24% |     4.7..5.9pp |          =            = |     -20..-24% |               |              = |    1.8..-17% |     -18..-23%       -20..-24%       -23..-27%      -34..-52%
 
-OWN THREAD-TIME - outside the operations inside, matched by name, sorted by the change; each side the mean of its runs, the change its 95% interval
-This is the full view, every lens and every interval; the brief view, the basis with lenses opened by --lens, is --view brief
+OWN THREAD-TIME - Each op's own time, in thread-time. An op is matched between the sides by its name, and the rows are sorted by the change. Each side is the mean of its runs, and each change has its 95% interval
+The full view shows every lens and every interval; --view brief shows the basis, and --lens adds a lens to it
                            |     Time      |      Share      |    Work     |         Cost         |                  Parallelism                   |    Waiting     |                 Latency
-Operation                  | Thread-time v |    Thread-time% |       Calls | Thread-time per call |    Wall-time    Concurrency     Workers   Pool |        Waiting | Long calls        Long time      Longest
+Op                         | Thread-time v |    Thread-time% |       Calls | Thread-time per call |    Wall-time    Concurrency     Workers   Pool |        Waiting | Long calls        Long time      Longest
 ---------------------------+---------------+-----------------+-------------+----------------------+------------------------------------------------+----------------+-----------------------------------------
 onCentral (4 -> 0 runs)    |   118s +-1.6% |   28.3% +-0.3pp | 569,233,860 |         207ns +-1.6% | 65.9s +-1.4%    1.78 +-0.2%           4     12 |                |          ?                ?            ?
                            |               |                 |             |                      |                                                |                |
@@ -530,10 +529,10 @@ and a note under a table that only one side has names it.
 - **A row on one side only** is blank on the other and has no change: `onCentral (4 -> 0 runs)` was
   removed. In the brief view it has no arrow, only its side, in its place.
 - **One run on a side** gives the change with no interval: one signed value, `-24%`, with no arrow. A
-  warning says so, and a line right over each table names the side: `1 run before: no interval, so any
-  change below may be loose or unknown - run at least 3 times on each side to tell` (`1 run after`, `1
+  warning says so, and a line right over each table names the side: `1 run before: the changes below have no
+  interval, so any of them may be loose or unknown - run at least 3 times on each side to find out` (`1 run after`, `1
   run on each side`). The tables' headings then claim no interval. **Two runs on a side** get a line
-  too, `2 runs after: the interval is too wide to say much - run at least 3 times on each side to tell`,
+  too, `2 runs after: the intervals from two runs are too wide to say much - run at least 3 times on each side`,
   unless the other side has one run, whose line says more. A change whose sides each agree across their
   runs is known exactly: one value, with its arrow.
 - **`CPU clock`** under the header is each side's mean. When the two differ, a warning says by how
@@ -545,14 +544,14 @@ Every report ends with a short legend:
 
 ```
 HOW TO READ THIS
-  thread-time is sampled and summed across threads over ACTIVE time, NOT CPU
-  waiting is a part of the thread-time beside it, NOT added to it
-  concurrency is threads INSIDE at once, running or parked - not a speedup
-  a share is where time went, NOT what removing the operation would save
-  full notes: docs/output.md
+  thread-time is sampled and summed over all threads, in ACTIVE time; it is NOT CPU time
+  waiting is part of the thread-time next to it, NOT extra to it
+  concurrency is how many threads are INSIDE an op at once, running or parked; it is NOT a speedup
+  a share is where time went, NOT what removing the op would save
+  every column explained: docs/output.md
 ```
 
 The last line matters most. A share says where the time went. It does not say what removing the
-operation would save: an operation can create work for everything else as well as doing its own, and
+op would save: an op can create work for everything else as well as doing its own, and
 removing it removes that work too. The two numbers answer different questions, and they can be far
 apart.

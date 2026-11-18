@@ -354,7 +354,7 @@ class CoarseTest {
         val c = stat(count = 10, sumNanos = 10_000_000, hits = 100, running = 100, instanceTicks = 100)
         val text = report(listOf(c)).render()
         assertTrue("NOT CPU" in text, "the traps are not printed")
-        assertTrue("full notes: docs/output.md" in text, "there is no way to find the rest")
+        assertTrue("every column explained: docs/output.md" in text, "there is no way to find the rest")
         // The reference half is the long part, and it is in output.md.
         assertTrue("noise is 1/sqrt(hits)" !in text, "the full legend printed by default")
         // The legend section itself.
@@ -364,13 +364,11 @@ class CoarseTest {
     }
 
     @Test
-    fun `asking for the legend gets the whole thing`() {
+    fun `the report ends with the four traps and where every column is explained`() {
         val c = stat(count = 10, sumNanos = 10_000_000, hits = 100, running = 100, instanceTicks = 100)
-        val text = report(listOf(c)).render(legend = true)
-        assertTrue("NOT CPU" in text, "the traps went missing")
-        assertTrue("long calls are the calls that outlived a tick" in text, "the full legend was not printed")
-        assertTrue("create work for everything else" in text, "the counterfactual argument was not printed")
-        assertTrue("the wall table is a tree" in text, "the coarse half was not printed")
+        val text = report(listOf(c)).render()
+        assertTrue("it is NOT CPU time" in text, "the traps went missing: $text")
+        assertTrue("every column explained: docs/output.md" in text, text)
     }
 
     private fun stat(
@@ -571,7 +569,7 @@ class CoarseTest {
         val profile = Profile("p", runs.indices.map { java.nio.file.Path.of("$it.tsr") }, runs)
         val floor = profile.warnings().ranked.filter { "recommended" in it }
         assertEquals(1, floor.size, floor.joinToString("\n"))
-        assertTrue(floor[0].startsWith("`fine`: its calls are under the recommended 50ns..60ns"), floor[0])
+        assertTrue(floor[0].startsWith("`fine`: its calls are shorter than the recommended 50ns..60ns"), floor[0])
         assertTrue("(2 of 2 runs)" in floor[0], floor[0])
     }
 
@@ -586,7 +584,7 @@ class CoarseTest {
         val heavy = run(100_000_000).hookCost()!!
         assertEquals(0.25, heavy.share, 0.01)
         val said = run(100_000_000).warnings().single { it.kind == Kind.HOOKS_COST }.text()
-        assertTrue(said.startsWith("The labels, mostly `fine`, may add up to 25.0% to the work inside them"), said)
+        assertTrue(said.startsWith("The labels, mostly `fine`, may add as much as 25.0% to the work inside them"), said)
         // 0.25 s of a run active for 1,000 s: the most the wall time can grow.
         assertEquals(0.00025, heavy.wallShare, 0.00001)
         assertTrue(run(10_000_000).hookCost() != null)
@@ -652,7 +650,7 @@ class CoarseTest {
         val msg = r.warnings().single { it.kind == Kind.COARSE_UNDER_FLOOR }.text()
         // "200ns" and not "200.0ns": durations print to three significant digits, so the fourth
         // one - which for a sampled or bucketed number is noise - never reaches the page.
-        assertTrue(msg.startsWith("`req`: its executions, 200ns, are under the recommended ${limitText(r.coarseFlatFloorNanos)}"), msg)
+        assertTrue(msg.startsWith("`req`: its executions, 200ns on average, are shorter than the recommended ${limitText(r.coarseFlatFloorNanos)}"), msg)
         assertTrue(msg.contains("`registerFine(\"req\")`"), "the message does not say what to do instead: $msg")
         assertTrue(msg.lines().size == 1, "one line: $msg")
     }
@@ -720,7 +718,7 @@ class CoarseTest {
         assertEquals(listOf("req"), counted.coarseTooSmall().map { it.name })
         val text = counted.render()
         assertTrue(
-            "`req`: its executions, 3.20us, are under the recommended 3.5us (Allocated adds 650ns, 1 fine label adds 15ns)" in text,
+            "`req`: its executions, 3.20us on average, are shorter than the recommended 3.5us (Allocated adds 650ns, 1 fine label adds 15ns)" in text,
             "the floor does not say what raises it: $text"
         )
     }
@@ -732,7 +730,7 @@ class CoarseTest {
         val fine = LongArray(MAX_OPERATIONS + 1).also { it[0] = 3000 }
         val lines = report(listOf(query), labelled = 3000, tree = listOf(node(query, fine = fine)), allocations = true).render().lines()
 
-        val head = lines.first { it.startsWith("Operation") }
+        val head = lines.first { it.startsWith("Op ") }
         assertTrue("Per execution" in head, head)
         val row = lines.first { it.trimStart().startsWith("- fine") }
         val end = head.indexOf("Mean") + "Mean".length
@@ -751,13 +749,13 @@ class CoarseTest {
         val lines = text.lines()
 
         val ownTable = lines.indexOfFirst { it.startsWith("OWN THREAD-TIME") }
-        val fine = lines.drop(ownTable).filter { it.startsWith("Operation") || it.startsWith(long) }
+        val fine = lines.drop(ownTable).filter { it.startsWith("Op ") || it.startsWith(long) }
         assertEquals(2, fine.size, text)
         assertEquals(1, fine.map { it.indexOf('|') }.distinct().size, text)
         val cross = lines.drop(ownTable).first { "+" in it && it.startsWith("-") }.indexOf('+')
         assertEquals(fine[0].indexOf('|'), cross, "the bar and the rule's cross part: $text")
 
-        val head = lines.indexOfFirst { it.startsWith("Operation") }
+        val head = lines.indexOfFirst { it.startsWith("Op ") }
         val executionsEnd = lines[head].indexOf("Executions") + "Executions".length
         val rows = lines.take(ownTable).filter { (it.startsWith("$long ") || it.startsWith("short ")) && "|" in it }
         assertEquals(2, rows.size, text)
@@ -800,8 +798,8 @@ class CoarseTest {
         assertEquals(0.75, r.labelledOutsideCoarseShare)
         assertEquals(listOf("fine"), r.outsideCoarseSuspects().map { it.name })
         val text = r.render()
-        val line = text.lines().firstOrNull { it.startsWith("  75.0% of the fine labels' time") }
-        assertTrue(line != null && "mostly `fine`, is under no coarse row" in line, "the report does not mention it: $text")
+        val line = text.lines().firstOrNull { it.startsWith("  75.0% of the fine ops' time") }
+        assertTrue(line != null && "mostly `fine`, ran inside no coarse op" in line, "the report does not mention it: $text")
         assertTrue("wrap their tasks with `propagating()`" in line, "the report does not say what to do on other threads: $line")
     }
 
@@ -829,8 +827,8 @@ class CoarseTest {
         val batch = stat(count = 2, sumNanos = 2_000_000_000, hits = 0, running = 0, inclusive = 2000, runningInclusive = 2000, name = "runBatch")
         val text = report(listOf(batch), labelled = 2000).render()
         assertTrue(text.lines().none { it.startsWith("runBatch *") }, "a zero row was printed: $text")
-        assertTrue("runBatch *: coarse, with no own time - every sample inside it was in an operation above" in text, text)
-        assertTrue("* a coarse operation" in text, "the star is used and not explained")
+        assertTrue("runBatch *: a coarse op with no own time - every sample taken inside it fell in one of its child ops" in text, text)
+        assertTrue("* marks a coarse op" in text, "the star is used and not explained")
         assertFalse("never sampled" in text, "a sampled span was folded away as never sampled")
     }
 
@@ -856,7 +854,7 @@ class CoarseTest {
         val fineRow = lines[iQuery + 1].split(Regex(" +")).filter { it.isNotEmpty() && it != "|" }
         // A split row's calls and time per call were not saved: unknown, not blank.
         assertEquals(listOf("-", "fine", "3.00s", "100%", "?", "?"), fineRow, "the leaf carries no split row: ${lines[iQuery + 1]}")
-        assertTrue(text.contains("- rows split a leaf's time by the innermost label"), "the split rows have no key: $text")
+        assertTrue(text.contains("Rows marked - split their parent op's time by the innermost fine op"), "the split rows have no key: $text")
         assertFalse(lines[iQuery].trim().startsWith("fine "), "the fine row is not under its leaf")
         assertTrue(lines[iBatch + 1].trim().startsWith("query "), "a parent repeats its children's breakdown: ${lines[iBatch + 1]}")
         assertTrue("200ms" in lines[iQuery], "the pause charged to the row is not on it: ${lines[iQuery]}")
@@ -877,7 +875,7 @@ class CoarseTest {
         val via = stat(count = 36, sumNanos = 1_200_000_000, hits = 0, running = 0, inclusive = 1200, runningInclusive = 1200, name = "via", id = 3)
         val tree = listOf(node(run, children = listOf(node(resolve, children = listOf(node(select), node(via))))))
         val lines = report(listOf(run, resolve, select, via), labelled = 4000, tree = tree).render().lines()
-        val header = lines.first { it.startsWith("Operation") }
+        val header = lines.first { it.startsWith("Op ") }
         val perAt = header.indexOf("Per parent")
         val shareAt = header.indexOf("% parent")
         assertTrue(perAt > 0 && shareAt > 0, "the columns have no header: $header")
@@ -909,12 +907,12 @@ class CoarseTest {
         // of the roots' Wall, both roots here, 2 s and 1 s, so the 3 s of parse are all of it.
         val lines = text.lines()
         val heading = lines[lines.indexOf(SHARED_HEADING) + 1]
-        val table = lines.first { it.startsWith("Operation") }
+        val table = lines.first { it.startsWith("Op ") }
         assertTrue(ROOT_SHARE in heading && "% parent" !in heading && "Per parent" !in heading && "Executions" in heading, heading)
         assertEquals(table.indexOf("% parent") + "% parent".length, heading.indexOf(ROOT_SHARE) + ROOT_SHARE.length, "out of line: $heading")
         val whole = lines.drop(lines.indexOf(SHARED_HEADING) + 2).first { it.trim().startsWith("parse ") }
         assertEquals("100%", whole.substring(heading.indexOf(ROOT_SHARE), heading.indexOf(ROOT_SHARE) + ROOT_SHARE.length).trim(), whole)
-        assertTrue(lines.any { "$ROOT_SHARE in that block is each run's share of the Wall of its roots together" in it }, text)
+        assertTrue(lines.any { "$ROOT_SHARE in \"Under multiple parents\" is the op's share of the Wall of all root ops together" in it }, text)
     }
 
     @Test

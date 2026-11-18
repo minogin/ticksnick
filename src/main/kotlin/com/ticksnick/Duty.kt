@@ -1014,11 +1014,12 @@ internal fun coresLine(runs: List<Cores>): String? {
     val sampler = mean { it.sampler }
     val jit = mean { it.jit }
     val parts = listOfNotNull(
-        gc to ("GC " + fixed(gc, 2) + if (mean { it.gcInPauses } > 0) " (${fixed(mean { it.gcInPauses }, 2)} in pauses)" else ""),
-        sampler to "sampler " + fixed(sampler, 2),
+        gc to ("GC " + fixed(gc, 2) + if (mean { it.gcInPauses } > 0) " (${fixed(mean { it.gcInPauses }, 2)} of it in pauses)" else ""),
+        sampler to "the sampler " + fixed(sampler, 2),
         if (jit.isNaN()) null else jit to "JIT " + fixed(jit, 2),
     ).sortedByDescending { it.first }
-    return (if (runs[0].processors > 0) "${runs[0].processors} processors: " else "") +
-            "profiled threads ${fixed(mean { it.profiled }, 2)}, the rest ${fixed(gc + sampler + (if (jit.isNaN()) 0.0 else jit), 2)}: " +
-            parts.joinToString(", ") { it.second }
+    val profiled = fixed(mean { it.profiled }, 2)
+    val rest = fixed(gc + sampler + (if (jit.isNaN()) 0.0 else jit), 2)
+    return (if (runs[0].processors > 0) "Of ${runs[0].processors} processors, on average $profiled ran" else "On average, $profiled processors ran") +
+            " the profiled threads and $rest ran everything else: " + parts.joinToString(", ") { it.second }
 }

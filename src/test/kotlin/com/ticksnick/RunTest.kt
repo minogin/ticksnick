@@ -54,7 +54,6 @@ class RunTest {
         check("stale", staleContextMessage("req", 0.42))
         // And a report carrying as many of the optional blocks at once as one can.
         check("render", loadedRun().render())
-        check("render(legend)", loadedRun().render(legend = true))
         check("render, failed", loadedRun(failure = leakMessage("op", "worker-1")).render())
         assertTrue(
             offenders.isEmpty(),
@@ -144,7 +143,7 @@ class RunTest {
      *
      * Over labelled samples only, a share would stay still when idle time changed and every row
      * would move whenever a label was added. Unlabelled time is a row of its own,
-     * `(no operation)`, and the rows add up to the run.
+     * `(no op)`, and the rows add up to the run.
      */
     @Test
     fun `a share is of every sample, and unlabelled time is the rest`() {
@@ -154,8 +153,8 @@ class RunTest {
         assertEquals(0.75, quiet.rows()[0].shareOf(), 1e-9)
         assertEquals(0.375, noisy.rows()[0].shareOf(), 1e-9, "a share must be of every sample")
         val text = noisy.render()
-        assertTrue(text.lines().any { it.startsWith("(no operation)") && "50.0%" in it }, text)
-        assertFalse(quiet.render().contains("(no operation)"), "a row for nothing")
+        assertTrue(text.lines().any { it.startsWith("(no op)") && "50.0%" in it }, text)
+        assertFalse(quiet.render().contains("(no op)"), "a row for nothing")
     }
 
     // ---------------------------------------------------------------- the long-execution verdict
@@ -221,7 +220,7 @@ class RunTest {
         assertEquals(listOf(tiny), r.tooSmall())
         val text = r.render()
         assertTrue(text.contains("tiny"), "the below-floor label was not named")
-        assertTrue(text.contains("  `tiny`: its calls are under the recommended 50ns, so the label is a visible part of their time"), "no floor warning in the report: $text")
+        assertTrue(text.contains("  `tiny`: its calls are shorter than the recommended 50ns, so the label itself is a visible part of their time"), "no floor warning in the report: $text")
         assertTrue(r.ok, "a below-floor label invalidated the report")
     }
 
@@ -237,7 +236,7 @@ class RunTest {
         val d = duty(labelled = 0.0, runnable = 0.0, aggregate = 0.6563, invisible = 0.344, labelledFraction = 0.139)
         assertTrue(d.unbounded, "the event-loop regime is no longer recognised as unbounded")
         val lines = d.warnings(activeNanos = 20_000_000_000L, reclaimedSlots = 0).joinToString("\n") { it.text() }
-        assertTrue(lines.contains("Runnable: all of it inside labels may have been off a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")
+        assertTrue(lines.contains("Runnable time: all of it inside labels may have been off a CPU") && lines.contains("label the call"), "no diagnosis for an unbounded run: $lines")
         assertFalse(lines.contains("may be off by"), "printed a bound it does not have")
         assertFalse(lines.contains("%"), "printed a share it does not have: $lines")
     }
@@ -268,7 +267,7 @@ class RunTest {
             jitNanos = 3_000_000_000, pausedProcessCpuNanos = 6_000_000_000, processors = 6,
         )
         assertEquals(
-            "6 processors: profiled threads 2.94, the rest 2.40: GC 1.10 (0.60 in pauses), sampler 1.00, JIT 0.30",
+            "Of 6 processors, on average 2.94 ran the profiled threads and 2.40 ran everything else: GC 1.10 (0.60 of it in pauses), the sampler 1.00, JIT 0.30",
             coresOf(d)
         )
         val careful = d.warnings(activeNanos = 10_000_000_000L, reclaimedSlots = 0).single().text()
@@ -313,7 +312,7 @@ class RunTest {
     fun `the cores line leaves out what it does not have and never goes negative`() {
         val noJit = coresOf(dutyWith(jit = -1))!!
         assertFalse("JIT" in noJit, noJit)
-        assertTrue("GC 1.40 (0.60 in pauses), sampler 1.00" in noJit, noJit)
+        assertTrue("GC 1.40 (0.60 of it in pauses), the sampler 1.00" in noJit, noJit)
 
         val noPause = coresOf(dutyWith(paused = 0))!!
         assertFalse("in pauses" in noPause, noPause)
@@ -324,7 +323,7 @@ class RunTest {
 
         // The profiled threads read ten times a second win over the window figure when present.
         val newer = coresOf(dutyWith(profiled = 32_400_000_000))!!
-        assertTrue("profiled threads 3.24, the rest 2.10: sampler 1.00, GC 0.80 (0.60 in pauses)" in newer, newer)
+        assertTrue("3.24 ran the profiled threads and 2.10 ran everything else: the sampler 1.00, GC 0.80 (0.60 of it in pauses)" in newer, newer)
     }
 
     /**
@@ -344,16 +343,16 @@ class RunTest {
 
         val crowded = careful(full = 9_000.0, spare = 500.0).lines()
         assertEquals(
-            "94.7% of it waited for a free core - run fewer threads; 5.26% waited in I/O, native calls or other programs - label the wait",
+            "Of that time, 94.7% waited for a free core - run fewer threads; 5.26% waited in I/O, native calls or other programs - label the wait",
             crowded[1],
         )
 
         val both = careful(full = 5_000.0, spare = 5_000.0).lines()
-        assertTrue(both[1].startsWith("50.0% of it waited for a free core") && "; 50.0% waited in I/O" in both[1], both[1])
+        assertTrue(both[1].startsWith("Of that time, 50.0% waited for a free core") && "; 50.0% waited in I/O" in both[1], both[1])
 
-        assertEquals("All of it waited for a free core - run fewer threads", careful(full = 9_000.0, spare = 0.0).lines()[1])
+        assertEquals("All of that time waited for a free core - run fewer threads", careful(full = 9_000.0, spare = 0.0).lines()[1])
         assertEquals(
-            "All of it waited in I/O, native calls or other programs - label the wait",
+            "All of that time waited in I/O, native calls or other programs - label the wait",
             careful(full = 0.0, spare = 500.0).lines()[1],
         )
 
@@ -385,7 +384,7 @@ class RunTest {
         val r = report(listOf(stat("a", hits = 100, calls = 1000)), failure = leakMessage("leaked", "worker-1"))
         assertFalse(r.ok)
         val text = r.render()
-        assertTrue(text.contains("FAILED: the run, so there is no profile"), text)
+        assertTrue(text.contains("FAILED: the run failed, so there is no profile"), text)
         assertTrue(text.contains("leaked"), "the failure did not name the operation")
         assertFalse(text.contains("Wall time"), "a failed run rendered figures: $text")
     }
@@ -404,9 +403,9 @@ class RunTest {
         )
         assertTrue(run(emptyList()).ok)
         val counted = run(emptyList()).render()
-        assertTrue(counted.contains("  2 labels: entered and never exited by `stop()` - an exception skipped the `exit`"), counted)
+        assertTrue(counted.contains("  2 labels: entered and not exited before `stop()` - an exception probably skipped the `exit`"), counted)
         val named = run(listOf("merge", "parse")).render()
-        assertTrue(named.contains("  `merge`, `parse`: entered and never exited by `stop()` - "), named)
+        assertTrue(named.contains("  `merge`, `parse`: entered and not exited before `stop()` - "), named)
     }
 
     // ---------------------------------------------------------------- formatting
@@ -435,7 +434,7 @@ class RunTest {
         try {
             RunStore.save(p, path)
             val back = Run.load(path)
-            assertEquals(p.render(legend = true), back.render(legend = true), "the file lost something")
+            assertEquals(p.render(), back.render(), "the file lost something")
         } finally {
             Files.delete(path)
         }
@@ -469,7 +468,7 @@ class RunTest {
     @Test
     fun `a parked sampler says what it freed and the step it got`() {
         assertEquals(
-            "every 1.6ms (1.0ms asked): the sampler sleeps between samples, so as not to take one of the 2 processors",
+            "A sample every 1.6ms (1.0ms asked). The sampler sleeps between samples, so it takes no processor",
             sampled(WaitStrategy.PARK, processors = 2, ticks = 626).samplingLine(),
         )
     }
@@ -477,7 +476,7 @@ class RunTest {
     @Test
     fun `a spinning sampler on enough processors says what it holds, with no remedy`() {
         assertEquals(
-            "every 1.0ms: the sampler keeps one of the 14 processors busy to hold the tick",
+            "A sample every 1.0ms. To hold that pace, the sampler occupies one of the 14 processors",
             sampled(WaitStrategy.SPIN, processors = 14, ticks = 1_001).samplingLine(),
         )
     }
@@ -485,7 +484,7 @@ class RunTest {
     @Test
     fun `a spinning sampler on few processors names the remedy`() {
         assertEquals(
-            "every 1.0ms: the sampler keeps one of the 2 processors busy to hold the tick - start(wait = PARK) to free it",
+            "A sample every 1.0ms. To hold that pace, the sampler occupies one of the 2 processors - start(wait = PARK) frees it",
             sampled(WaitStrategy.SPIN, processors = 2, ticks = 1_001).samplingLine(),
         )
     }
@@ -506,7 +505,7 @@ class RunTest {
             val loaded = RunStore.load(path)
             assertEquals(WaitStrategy.PARK, loaded.wait)
             assertEquals(1_000_000, loaded.askedStepNanos)
-            assertTrue("Sampling      every 1.6ms (1.0ms asked)" in loaded.render())
+            assertTrue("Sampling      A sample every 1.6ms (1.0ms asked)" in loaded.render())
 
             RunStore.save(report(emptyList()), path)
             assertEquals(null, RunStore.load(path).samplingLine())

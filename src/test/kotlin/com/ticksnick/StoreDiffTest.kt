@@ -78,7 +78,7 @@ class StoreDiffTest {
         val stallRow = lines.first { it.startsWith("store-stalls ") }
         val smoothRow = lines.first { it.startsWith("store-smooth ") }
         // The own table's Latency group, from its bar to the line's end: the last group.
-        val head = lines.first { it.startsWith("Operation") && "Long calls" in it }
+        val head = lines.first { it.startsWith("Op ") && "Long calls" in it }
         val from = head.lastIndexOf('|', head.indexOf("Long calls")) + 1
         val longOf = { row: String -> row.padEnd(head.length).substring(from).trim() }
         assertTrue(longOf(stallRow).first().isDigit(), "the Latency group is empty on the stalled row: $stallRow")
@@ -93,7 +93,7 @@ class StoreDiffTest {
         try {
             RunStore.save(p, path)
             val back = Run.load(path)
-            assertEquals(p.render(legend = true), back.render(legend = true), "the file lost something")
+            assertEquals(p.render(), back.render(), "the file lost something")
             assertEquals(p.coarseTree.single().children.single().name, back.coarseTree.single().children.single().name)
             assertEquals(
                 p.operations.first { it.name == "store-stalls" }.stuckRuns.toList(),
@@ -223,7 +223,7 @@ class StoreDiffTest {
         val before = profile(listOf(stat("a", 100, 1_000)), clock = steadyAt(200.0))
         val after = profile(listOf(stat("a", 100, 1_000)), clock = steadyAt(150.0))
         val text = diffOf(before, after)
-        assertTrue("CPU clock     200% -> 150%, the mean of each side's runs" in text, text)
+        assertTrue("CPU clock     200% -> 150% (the mean of each side's runs)" in text, text)
         assertTrue("CPU clock: 200% -> 150% between the sides" in text, text)
     }
 
@@ -336,7 +336,7 @@ class StoreDiffTest {
             assertTrue("Wall time" in capture { Cli.main(arrayOf("render", a.toString())) }, "render printed no report")
             val diff = capture { Cli.main(arrayOf("diff", a.toString(), b.toString())) }
             assertTrue("Diff          a (1 run) -> b (1 run)" in diff, diff)
-            assertTrue("Runs: 1 in 'a', no interval" in diff && "Runs: 1 in 'b', no interval" in diff, diff)
+            assertTrue("Runs: only 1 in 'a', so no figure has an interval" in diff && "Runs: only 1 in 'b', so no figure has an interval" in diff, diff)
         } finally {
             dir.toFile().deleteRecursively()
         }

@@ -365,8 +365,8 @@ internal fun coarseFloorNanos(share: Double, flatFloorNanos: Double, contextNano
  * has no other way to know which.
  */
 internal fun staleContextMessage(worst: String, share: Double): String =
-    "${shareText(share)} of the coarse time, mostly ${code(worst)}'s, came from tasks it handed off that ran on after it ended" +
-            "${sym.dash}wait for the tasks inside its block"
+    "${shareText(share)} of the coarse time, mostly ${code(worst)}'s, came from tasks that an execution handed off and that ran on" +
+            " after the execution ended${sym.dash}wait for the tasks inside the block that starts them"
 
 /**
  * The failure of a label closed while another was open (`exit-mismatch`). Names both, because the
@@ -381,7 +381,8 @@ internal fun mismatchMessage(closed: String, open: String): String =
  * reader has no other way to know which.
  */
 internal fun leakMessage(open: String, thread: String = Thread.currentThread().name): String =
-    "${code(open)} was still open at `expectBalanced()` on thread ${code(thread)}, so the time after its missed `exit` went to it" +
+    "${code(open)} was still open at `expectBalanced()` on thread ${code(thread)}, so the time after the missed `exit` of " +
+            "${code(open)} went to ${code(open)}" +
             "${sym.dash}put `exit` in a `finally`"
 
 /**
@@ -397,7 +398,8 @@ internal fun samplerErrorMessage(e: Throwable): String =
  */
 internal fun leftOpenFailure(leaks: Int): String? =
     if (leaks <= 0) null
-    else "${Run.plural(leaks.toLong(), "label")} left open, and the session went on past them${sym.dash}put `exit` in a `finally`"
+    else "${Run.plural(leaks.toLong(), "label")} ${if (leaks == 1) "was" else "were"} left open, and the run went on past " +
+            "${if (leaks == 1) "it" else "them"}${sym.dash}put `exit` in a `finally`"
 
 /**
  * Whether one operation's long executions are evidence of anything, given what the machine was
@@ -592,8 +594,8 @@ internal fun executionsNeeded(p: Double): Long = if (p >= 1.0) 1L else Math.roun
 
 /** Why a percentile reads [UNKNOWN], and what gives it: the key under the wall table says it where one does. */
 internal fun percentilesNeedText(): String =
-    "p50, p90 and p99 need ${executionsNeeded(0.50)}, ${executionsNeeded(0.90)} and ${executionsNeeded(0.99)} executions in a run," +
-            " and show $UNKNOWN with fewer: more executions give them"
+    "p50, p90 and p99 need ${executionsNeeded(0.50)}, ${executionsNeeded(0.90)} and ${executionsNeeded(0.99)} executions in a run;" +
+            " with fewer they show $UNKNOWN"
 
 /**
  * The [p]-th percentile of [count] executions' [spans], or NaN when there are **fewer than
@@ -958,12 +960,12 @@ class Run internal constructor(
         val n = duty.processors
         val processors = if (n > 0) "one of the $n processors" else "a processor"
         return if (w == WaitStrategy.SPIN) {
-            "every ${stepText(stepNanos)}: the sampler keeps $processors busy to hold the tick" +
-                    if (n in 1 until SPIN_MIN_PROCESSORS) "${sym.dash}start(wait = PARK) to free it" else ""
+            "A sample every ${stepText(stepNanos)}. To hold that pace, the sampler occupies $processors" +
+                    if (n in 1 until SPIN_MIN_PROCESSORS) "${sym.dash}start(wait = PARK) frees it" else ""
         } else {
             val asked = if (askedStepNanos > 0 && abs(stepNanos / askedStepNanos - 1) > ASKED_STEP_TOLERANCE)
                 " (${stepText(askedStepNanos.toDouble())} asked)" else ""
-            "every ${stepText(stepNanos)}$asked: the sampler sleeps between samples, so as not to take $processors"
+            "A sample every ${stepText(stepNanos)}$asked. The sampler sleeps between samples, so it takes no processor"
         }
     }
 
@@ -1391,100 +1393,17 @@ class Run internal constructor(
     }
 
     /**
-     * The wall table, or nothing at all when no coarse label was placed.
-     *
-     * Printed after the fine one and not instead of it, because the two answer different halves of
-     * the same question and the report is worth less if a reader has to choose. Fine sampling says
-     * what is hot; a span says how long one execution took. Only the pair says *of the time this
-     * request spent, this much was that operation*.
+     * The four lines under every report: the four things that make a reader draw the wrong conclusion,
+     * and nothing else. Every column is explained in docs/output.md, which the last line names.
      */
-    /**
-     * Every explanation, collected, after every number.
-     *
-     * After every number and not between the tables: numbers interleaved with prose read as a wall
-     * of text. Explaining a column and interleaving the explanation with the data are not the same
-     * decision.
-     *
-     * Kept short by naming columns so the name carries its own caveat: a name needs no paragraph,
-     * and unlike a paragraph it still works on the tenth run.
-     *
-     * ⚠ Every line here is also a paragraph in docs/output.md. Reword one, reword the other, in the
-     * same commit.
-     */
-    internal fun StringBuilder.renderLegend(full: Boolean) {
+    internal fun StringBuilder.renderLegend() {
         appendLine()
         appendLine("HOW TO READ THIS")
-        // Four lines, always. Not a summary of the rest — the four things that will make a reader
-        // draw the wrong conclusion, and nothing else. Everything below them is reference, and
-        // reference belongs in output.md where it can be read once rather than skipped thirty times.
-        appendLine("  thread-time is sampled and summed across threads over ACTIVE time, NOT CPU")
-        appendLine("  waiting is a part of the thread-time beside it, NOT added to it")
-        appendLine("  concurrency is threads INSIDE at once, running or parked${sym.dash}not a speedup")
-        appendLine("  a share is where time went, NOT what removing the operation would save")
-        if (!full) {
-            appendLine("  full notes: docs/output.md")
-            return
-        }
-        appendLine()
-        appendLine("a share is where time went. It is not what removing the operation would save: an operation")
-        appendLine("  can create work for everything else as well as doing its own. The two numbers are")
-        appendLine("  different questions and the gap can be orders of magnitude")
-        appendLine("thread-time% and thread-time are the same quantity, relative and absolute: sampled and")
-        appendLine("  summed across threads, with waiting counted in full. NOT CPU${sym.dash}a warning says when the")
-        appendLine("  gap matters. The share is of every sample, so it is a share of active")
-        appendLine("  time and '(no operation)' is the rest; the absolute one is the column to compare between")
-        appendLine("  two runs")
-        appendLine("wall time = active + paused. Paused is time every thread was stopped: ticks the sampler ran")
-        appendLine("  a whole tick late, as far as the JVM's own count of its collections confirms them. A late")
-        appendLine("  tick nobody confirmed stays in active time${sym.dash}the sampler may have been stopped alone. No")
-        appendLine("  sample is taken in a pause, so the own table is ACTIVE time throughout: a pause does not")
-        appendLine("  move a share, and thread-time and time per call are scaled to the active tick. The coarse")
-        appendLine("  table is WALL time, two timestamps per execution, so a span includes the pauses inside it")
-        appendLine("runnable / waiting are the two halves of the thread-time beside them and add to 100%: the")
-        appendLine("  share of its samples whose thread was parked, blocked or waiting, and the rest. Runnable is")
-        appendLine("  NOT working${sym.dash}a thread the scheduler merely preempted reads runnable, and so does one")
-        appendLine("  stopped inside a native call, which the JVM cannot see into. So the left half is an UPPER")
-        appendLine("  BOUND on the work and the CPU clock is the only thing that bounds it in turn, which is what")
-        appendLine("  the warning about it says; the right half is waiting that some other thread caused")
-        appendLine("wall-time is the clock with at least one thread inside, and it is NOT summed across threads,")
-        appendLine("  which thread-time is. Not latency either: it is every execution's interval unioned, so it")
-        appendLine("  says nothing about any single one of them")
-        appendLine("concurrency is thread-time / wall-time: the MEAN number of threads inside this operation")
-        appendLine("  while anybody was. The tick cancels${sym.dash}thread-ticks over ticks${sym.dash}so the ratio is a count. It")
-        appendLine("  is what turns a big thread-time back into real cost: 100 s of waiting is a convoy to break")
-        appendLine("  up at 15 and steady contention to design out at 1.7. NOT parallelism: threads inside are")
-        appendLine("  not threads executing, and two threads asleep in the same label is a concurrency of 2 with")
-        appendLine("  nothing running at all. Multiply by the runnable half for that")
-        appendLine("workers is the most threads ever inside at one tick${sym.dash}the maximum of the series concurrency")
-        appendLine("  averages. The column to read against what you DISPATCHED: three submitted and workers 2")
-        appendLine("  means something is off. Detected, not measured, so it is a lower bound${sym.dash}an overlap that")
-        appendLine("  starts and ends between two ticks is one nobody saw")
-        appendLine("pool is the distinct threads that ever CALLED the operation, counted by the hook and exact.")
-        appendLine("  workers 1 with pool 8 is eight threads queueing through one at a time, which the warnings")
-        appendLine("  above say out loud")
-        appendLine("thread-time per call is thread-time / calls; long calls are the calls that outlived a tick:")
-        appendLine("  how many, the thread-time inside them (long time), and the longest")
-        if (coarse.any { it.count > 0 || it.inclusiveHits > 0 }) {
-            appendLine()
-            appendLine("  for coarse operations:")
-            appendLine("  executions, mean and the percentiles are MEASURED, two timestamps per execution${sym.dash}the")
-            appendLine("    only numbers here that are not sampled. Percentiles are exact up to $EXACT_SPANS executions and")
-            appendLine("    within 0.8% past them; ${percentilesNeedText()}")
-            appendLine("  wall is the part of its root's wall time a row took: its durations summed, divided by")
-            appendLine("    how many ran at a time under each parent, at its level and above. % parent is of the")
-            appendLine("    parent's wall, and the rest of 100% is the parent's own time outside this child")
-            appendLine("  parallel is how many of a row's executions ran at a time under the same parent execution,")
-            appendLine("    blank at 1. Read it beside Per parent: 4 with 2.0 is four started, two at a time")
-            appendLine("  '- name  own' under a row: a fine label in its own time, outside its coarse children, with")
-            appendLine("    its own Parallel when one execution ran it on several threads at a time")
-            appendLine("  the wall table is a tree: an operation under the one it ran inside, and its figures are")
-            appendLine("    the executions on that path alone; the '-' rows under a leaf split its time by the innermost label, sampled")
-            appendLine("  'paused' is charged to every span a pause interrupted${sym.dash}not to the span that caused it")
-            if (coarseTree.any { t -> t.flatten().any { it.slowest.isNotEmpty() } }) {
-                appendLine("  'slowest:' under a row opened with a key: its longest executions on that path, measured,")
-                appendLine("    wall time with any pause in it")
-            }
-        }
+        appendLine("  thread-time is sampled and summed over all threads, in ACTIVE time; it is NOT CPU time")
+        appendLine("  waiting is part of the thread-time next to it, NOT extra to it")
+        appendLine("  concurrency is how many threads are INSIDE an op at once, running or parked; it is NOT a speedup")
+        appendLine("  a share is where time went, NOT what removing the op would save")
+        appendLine("  every column explained: docs/output.md")
     }
 
     /**
@@ -1694,7 +1613,7 @@ class Run internal constructor(
     /**
      * This run as a report of its own. See [Profile.report].
      */
-    internal fun render(legend: Boolean = false, warnings: Warnings = table.warnings()): String = table.report(legend, warnings)
+    internal fun render(warnings: Warnings = table.warnings()): String = table.report(warnings)
 
     /**
      * Writes this run as a new file in [folder], named by the time it is saved -
@@ -1755,7 +1674,7 @@ class Run internal constructor(
         internal const val FLOOR_NANOS = FINE_FLOOR_BODIES * DEFAULT_BODY_NANOS
 
         /** The own table's row for samples inside no label. */
-        internal const val NO_OPERATION = "(no operation)"
+        internal const val NO_OPERATION = "(no op)"
 
         /**
          * Below this share, labelled time outside every coarse span is not worth a word.

@@ -51,35 +51,39 @@ internal fun codeList(names: List<String>): String = names.joinToString(", ") { 
 internal enum class Kind(val text: (List<String>) -> String) {
     // Numbers missing or false.
     LABELS_LEFT_OPEN({ g ->
-        "${g[0]}: entered and never exited by `stop()`${sym.dash}an exception skipped the `exit`, so later time went to it; put `exit` in a `finally`"
+        "${g[0]}: entered and not exited before `stop()`${sym.dash}an exception probably skipped the `exit`, so the time after it went to the open label; put `exit` in a `finally`"
     }),
     ALLOCATIONS_UNAVAILABLE({ _ -> "Allocated: not shown${sym.dash}this JVM cannot count allocated bytes per thread; HotSpot can" }),
     ALLOCATIONS_VIRTUAL_THREADS({ _ ->
-        "Allocated: not counted on virtual threads, so the rows that ran on them read `?`${sym.dash}run that work on platform threads to count it"
+        "Allocated: not counted on virtual threads, so the ops that ran on them read `?`${sym.dash}run that work on platform threads to count it"
     }),
     THREADS_UNSAMPLED({ g ->
-        "${g[0]} threads were not sampled, past the ${countText(MAX_SLOTS.toDouble())} TickSnick follows at once${sym.dash}" +
-                "their time is missing from every figure; `Profiler.release()` frees the slot of a thread done labelling"
+        "${g[0]} threads were not sampled, since TickSnick follows at most ${countText(MAX_SLOTS.toDouble())} threads at once${sym.dash}" +
+                "their time is missing from every figure; `Profiler.release()` frees the place of a thread that has finished labelling"
     }),
     COARSE_OPEN_AT_END({ g ->
-        if (g[0].isEmpty()) "${g[1]} coarse executions still open at `stop()`, left out of their rows${sym.dash}call `stop()` after the work is done"
-        else "${g[0]}: ${g[1]} executions still open at `stop()`, left out of its row${sym.dash}call `stop()` after the work is done"
+        val were = if (g[1] == "1") "execution was" else "executions were"
+        val are = if (g[1] == "1") "is" else "are"
+        if (g[0].isEmpty()) "${g[1]} coarse $were still open at `stop()` and $are left out of their ops' figures${sym.dash}call `stop()` after the work is done"
+        else "${g[0]}: ${g[1]} $were still open at `stop()` and $are left out of its figures${sym.dash}call `stop()` after the work is done"
     }),
     STALE_TIME({ g ->
-        if (g[1].isEmpty()) "${g[0]} of the coarse time came from tasks handed off that ran on after their execution ended, and is left out of its row${sym.dash}wait for the tasks inside its block"
-        else "${g[0]} of the coarse time, mostly ${g[1]}'s, came from tasks it handed off that ran on after it ended, and is left out of its row${sym.dash}wait for the tasks inside its block"
+        val tasks = "came from tasks that an execution handed off and that ran on after the execution ended; that time is left out"
+        val wait = "${sym.dash}wait for the tasks inside the block that starts them"
+        if (g[1].isEmpty()) "${g[0]} of the coarse time $tasks$wait"
+        else "${g[0]} of the coarse time, mostly ${g[1]}'s, $tasks$wait"
     }),
 
     // Limits on the whole run.
     PAUSES_NOT_MEASURED({ g ->
         "Paused: not measured with `wait = ${g[0]}`, so GC pauses are inside the times below${sym.dash}`wait = SPIN` measures them but keeps a core busy"
     }),
-    PAUSES_IN_TIMES({ g -> "Paused: ${g[0]} of pauses, ${g[1]} of the run, is counted as work in the times below" }),
-    RUNNABLE_UNCHECKED({ g -> "Runnable: not checked against CPU time (${g[0]})${sym.dash}it may include threads waiting in native calls" }),
+    PAUSES_IN_TIMES({ g -> "Paused: ${g[0]} of pauses, ${g[1]} of the run, are counted as work in the times below" }),
+    RUNNABLE_UNCHECKED({ g -> "Runnable time: not checked against CPU time (${g[0]})${sym.dash}it may include threads that waited in native calls" }),
     // A row the CPU time contradicts, with the share of its own Runnable time; or run-wide, where the
     // bound ran out of evidence and the share of all Runnable time inside labels would always be all.
     RUNNABLE_OFF_CPU({ g ->
-        (if (g[1].isEmpty()) "Runnable: all of it inside labels may have been off a CPU" else "${g[1]}: ${g[0]} of its Runnable time was not on a CPU") +
+        (if (g[1].isEmpty()) "Runnable time: all of it inside labels may have been off a CPU" else "${g[1]}: ${g[0]} of its Runnable time was not on a CPU") +
                 "${sym.dash}a thread waiting in a native call, such as a socket read, shows as Runnable; label the call to give the wait its own row"
     }),
     // The cause line: both causes with their shares, or the one alone, a 0% cause having nothing to do.
@@ -89,53 +93,53 @@ internal enum class Kind(val text: (List<String>) -> String) {
         val io = "waited in I/O, native calls or other programs${sym.dash}label the wait"
         "Thread-time%: may be off by up to ${g[0]}${sym.dash}some Runnable time inside labels may have been waiting" + when {
             g[1].isEmpty() -> ""
-            g[2] == none -> "\nAll of it $core"
-            g[1] == none -> "\nAll of it $io"
-            else -> "\n${g[1]} of it $core; ${g[2]} $io"
+            g[2] == none -> "\nAll of that time $core"
+            g[1] == none -> "\nAll of that time $io"
+            else -> "\nOf that time, ${g[1]} $core; ${g[2]} $io"
         }
     }),
-    CLOCK_NOT_MEASURED({ g -> "CPU clock: not measured (${g[0]})${sym.dash}times may drift unseen; shares hold" }),
-    CLOCK_MOVED({ g -> "CPU clock${g[0]}: ran at ${g[1]} ${g[2]}${sym.dash}times drift with it, shares hold; turbo off holds it still" }),
+    CLOCK_NOT_MEASURED({ g -> "CPU clock: not measured (${g[0]})${sym.dash}times may drift without a warning; shares are not affected" }),
+    CLOCK_MOVED({ g -> "CPU clock${g[0]}: ran at ${g[1]} ${g[2]}${sym.dash}times change with the clock, shares do not; turning turbo off keeps the clock steady" }),
     HOOKS_COST({ g ->
-        "The labels${if (g[0].isEmpty()) "" else ", mostly ${g[0]},"} may add up to ${g[1]} to the work inside them and ${g[2]} to the wall time${sym.dash}" +
+        "The labels${if (g[0].isEmpty()) "" else ", mostly ${g[0]},"} may add as much as ${g[1]} to the work inside them and ${g[2]} to the wall time${sym.dash}" +
                 "fewer, larger labels cost less"
     }),
 
     // Labels in the wrong place or tier.
     OUTSIDE_COARSE({ g ->
-        "${g[0]} of the fine labels' time${if (g[1].isEmpty()) "" else ", mostly ${g[1]},"} is under no coarse row${sym.dash}" +
-                "expected where no coarse label encloses it; for other threads, wrap their tasks with `propagating()`"
+        "${g[0]} of the fine ops' time${if (g[1].isEmpty()) "" else ", mostly ${g[1]},"} ran inside no coarse op${sym.dash}" +
+                "that is expected where no coarse label encloses the code; on other threads, wrap their tasks with `propagating()`"
     }),
     COARSE_NOT_IN_TREE({ g -> "${g[0]} ${if (", " in g[0]) "have" else "has"} no row in the wall table${sym.dash}a TickSnick bug, please report it" }),
     LONG_CALLS({ g ->
-        "${g[0]}: ${g[1]} of its time is in calls over ${g[2]}, which its per-call time hides${sym.dash}register it coarse, ${g[3]}"
+        "${g[0]}: ${g[1]} of its time is in calls longer than ${g[2]}, which its time per call hides${sym.dash}register it coarse: ${g[3]}"
     }),
     FINE_UNDER_FLOOR({ g ->
-        "${g[0]}: its calls are under the recommended ${g[1]}, so the label is a visible part of their time${sym.dash}" +
-                "label the loop around it, `op(handle, times = n) { }`, or drop it"
+        "${g[0]}: its calls are shorter than the recommended ${g[1]}, so the label itself is a visible part of their time${sym.dash}" +
+                "label the loop around the calls, `op(handle, times = n) { }`, or remove the label"
     }),
     COARSE_UNDER_FLOOR({ g ->
-        "${g[0]}: its executions, ${g[1]}, are under the recommended ${g[2]}${if (g[3].isEmpty()) "" else " (${g[3]})"}, " +
-                "so timing is a visible part of them${sym.dash}register it fine, ${g[4]}, or label a batch of them"
+        "${g[0]}: its executions, ${g[1]} on average, are shorter than the recommended ${g[2]}${if (g[3].isEmpty()) "" else " (${g[3]})"}, " +
+                "so timing them is a visible part of their time${sym.dash}register it fine, ${g[4]}, or label a batch of executions"
     }),
     COARSE_OVER_SHARE({ g ->
-        "${g[0]}: timing its executions costs ${g[1]} of the run${sym.dash}they are too short and too many to time each one; " +
+        "${g[0]}: timing its executions costs ${g[1]} of the run${sym.dash}they are too short and too many to time one by one; " +
                 "register it fine, ${g[2]}, or put the coarse label around a batch of them"
     }),
 
     // The runs of a profile together.
-    ONE_RUN({ g -> "Runs: 1 in '${g[0]}', no interval${sym.dash}run at least $RUNS_TO_ASK times" }),
+    ONE_RUN({ g -> "Runs: only 1 in '${g[0]}', so no figure has an interval${sym.dash}run at least $RUNS_TO_ASK times" }),
     RUNS_ONE_JVM({ g -> "Runs${g[0]}: ${g[1]} of ${g[2]} shared a JVM${sym.dash}every interval is too narrow; give each run its own JVM" }),
     RUNS_MIXED({ g ->
-        "Runs${g[0]}: they differ in ${g[1]}, so each mean mixes them${sym.dash}split the folder by them; the run list shows which run has what"
+        "Runs${g[0]}: they differ in ${g[1]}, so each mean mixes runs that are not alike${sym.dash}split the folder by ${g[1]}"
     }),
 
     // The two sides of a diff.
     CLOCK_BETWEEN_SIDES({ g ->
-        "CPU clock: ${g[0]} ${sym.arrow} ${g[1]} between the sides${sym.dash}a change in time of up to ${g[2]} may be the machine, not the code; shares hold"
+        "CPU clock: ${g[0]} ${sym.arrow} ${g[1]} between the sides${sym.dash}a change in time of up to ${g[2]} may be the machine, not the code; shares are not affected"
     }),
     ALLOCATIONS_ONE_SIDE({ g ->
-        "Allocated: counted on one side only${sym.dash}it adds about ${g[0]} to each coarse execution there; count it on both sides or neither"
+        "Allocated: counted on one side only${sym.dash}counting adds about ${g[0]} to each coarse execution on that side; count on both sides or on neither"
     }),
 }
 

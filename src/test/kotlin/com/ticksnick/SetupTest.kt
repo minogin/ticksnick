@@ -163,7 +163,7 @@ class SetupTest {
         val mix = lines.filter { "they differ in" in it }
         assertEquals(1, mix.size, lines.joinToString("\n"))
         assertTrue("warmups, batches, Heap" in mix[0], mix[0])
-        assertTrue(lines.indexOf(mix[0]) > lines.indexOfFirst { "1 label: entered and never exited" in it }, lines.joinToString("\n"))
+        assertTrue(lines.indexOf(mix[0]) > lines.indexOfFirst { "1 label: entered and not exited before" in it }, lines.joinToString("\n"))
     }
 
     @Test
@@ -198,9 +198,9 @@ class SetupTest {
         save(dir, "c", run(openAtEnd = 2))
         val lines = Profile.load(dir).render().lines()
         // Saved without the names, a run says how many: different counts are different words.
-        assertEquals(1, lines.count { "  1 label: entered and never exited" in it }, lines.joinToString("\n"))
-        assertTrue(lines.any { "  1 label: entered and never exited" in it && "(2 of 3 runs)" in it }, lines.joinToString("\n"))
-        assertTrue(lines.any { "  2 labels: entered and never exited" in it && "(1 of 3 runs)" in it }, lines.joinToString("\n"))
+        assertEquals(1, lines.count { "  1 label: entered and not exited before" in it }, lines.joinToString("\n"))
+        assertTrue(lines.any { "  1 label: entered and not exited before" in it && "(2 of 3 runs)" in it }, lines.joinToString("\n"))
+        assertTrue(lines.any { "  2 labels: entered and not exited before" in it && "(1 of 3 runs)" in it }, lines.joinToString("\n"))
     }
 
     @Test
@@ -208,7 +208,7 @@ class SetupTest {
         save(dir, "a", run(failure = "a label leaked"))
         save(dir, "b", run())
         val text = Profile.load(dir).render()
-        assertTrue("FAILED: 1 of 2 runs, left out of the profile" in text, text)
+        assertTrue("FAILED: 1 of 2 runs failed and is left out of the profile" in text, text)
         assertTrue("a$RUN_EXTENSION: a label leaked" in text, text)
         assertTrue("1 run of" in text, "the failed run was counted in the profile: $text")
         assertFalse("profiling stopped" in text, "a failure was repeated as a warning: $text")
@@ -219,7 +219,7 @@ class SetupTest {
         save(dir, "a", run(failure = "a label leaked"))
         save(dir, "b", run(failure = "a label leaked"))
         val text = Profile.load(dir).render()
-        assertTrue("FAILED: every run, so there is no profile" in text, text)
+        assertTrue("FAILED: every run failed, so there is no profile" in text, text)
         assertFalse("Wall time" in text, "a profile with no runs left rendered figures: $text")
     }
 
@@ -231,7 +231,7 @@ class SetupTest {
         save(before, "b", run(failure = "a label leaked"))
         save(after, "a", run())
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
-        assertTrue("FAILED: 1 of 2 runs in 'before', left out of the profile" in text, text)
+        assertTrue("FAILED: 1 of 2 runs in 'before' failed and is left out of the profile" in text, text)
         assertTrue(text.indexOf("FAILED") < text.indexOf("Diff"), "the banner did not lead: $text")
     }
 
@@ -242,7 +242,7 @@ class SetupTest {
         save(before, "a", run())
         save(after, "a", run(failure = "a label leaked"))
         val text = TickSnick.diff(TickSnick.load(before), TickSnick.load(after))
-        assertTrue("FAILED: the run in 'after', so there is no profile" in text, text)
+        assertTrue("FAILED: the run in 'after' failed, so there is no profile" in text, text)
         assertFalse("Diff" in text, "a diff with no profile on one side was drawn: $text")
     }
 

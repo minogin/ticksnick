@@ -38,8 +38,8 @@ internal const val SMALL_CHANGE = 0.05
  */
 internal const val ROOT_SHARE = "% root"
 
-/** What the full view is, said in every table's notice, whichever view it is in ([lensesLine]). */
-internal const val FULL_VIEW = "the full view, every lens and every interval"
+/** What the full view shows, said in every table's notice, whichever view it is in ([lensesLine]). */
+internal const val FULL_VIEW = "every lens and every interval"
 
 /**
  * **The measures that answer one question, and lead to one kind of work**: what a column's measure is used
@@ -135,10 +135,10 @@ internal fun shownIn(view: View, columns: List<Column>, lenses: Set<Lens> = empt
  * and how to open one; in the full one, how to go back. The CLI's flags; the API's names are the same.
  */
 internal fun lensesLine(view: View, columns: List<Column>, lenses: Set<Lens> = emptySet()): String {
-    if (view == View.FULL) return "This is $FULL_VIEW; the brief view, the basis with lenses opened by --lens, is --view brief"
+    if (view == View.FULL) return "The full view shows $FULL_VIEW; --view brief shows the basis, and --lens adds a lens to it"
     val closed = MeasureGroup.entries.filter { g -> g.lens != null && g.lens !in lenses && columns.any { it.measures == g } }
-    if (closed.isEmpty()) return "All lenses shown; $FULL_VIEW, is --view full"
-    return "Lenses not shown: ${closed.joinToString { it.title }}${sym.dash}open one with --lens; $FULL_VIEW, is --view full"
+    if (closed.isEmpty()) return "All lenses shown; --view full also shows every interval"
+    return "Lenses not shown: ${closed.joinToString { it.title }}${sym.dash}open one with --lens; --view full shows $FULL_VIEW"
 }
 
 /** The own table's columns, in the same order of groups as [WALL_COLUMNS]. */

@@ -242,6 +242,6 @@ internal class Pauses internal constructor(
 internal fun wallLine(wall: Estimate, active: Estimate, paused: Estimate, pauses: Long, longestNanos: Long, view: View = View.FULL): String {
     val head = "${durationWithInterval(wall, view)} = ${durationWithInterval(active, view)} active + "
     if (paused.mean == 0.0) return head + "0 paused"
-    val counts = if (longestNanos <= paused.mean) " in ${Run.plural(pauses, "pause")}, longest ${duration(longestNanos.toDouble())}" else ""
-    return "$head${durationWithInterval(paused, view)} paused (${percent(paused.mean * 100 / wall.mean)})$counts"
+    val counts = if (longestNanos <= paused.mean) ", in ${Run.plural(pauses, "pause")}, the longest ${duration(longestNanos.toDouble())}" else ""
+    return "$head${durationWithInterval(paused, view)} paused (${percent(paused.mean * 100 / wall.mean)} of the wall time$counts)"
 }

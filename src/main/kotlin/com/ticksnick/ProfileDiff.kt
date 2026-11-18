@@ -71,12 +71,12 @@ internal class ProfileDiff(
         abs(time(r.after) - time(r.before))
     }
 
-    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, "Operation", WALL_NAME_WIDTH, WALL, view, lenses)
-    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), "Operation", OWN_NAME_WIDTH, THREAD_TIME, view, lenses)
+    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, OP_HEAD, WALL_NAME_WIDTH, WALL, view, lenses)
+    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), OP_HEAD, OWN_NAME_WIDTH, THREAD_TIME, view, lenses)
     private val width = maxOf(wallText.width, ownText.width)
 
     // Only with both sides over runs: a side of one run leaves the change no interval, and fewRunsLines says so instead.
-    private val overRuns = if (before.runs.size > 1 && after.runs.size > 1) "; each side the mean of its runs, the change its 95% interval" else ""
+    private val overRuns = if (before.runs.size > 1 && after.runs.size > 1) ". Each side is the mean of its runs, and each change has its 95% interval" else ""
     private val fewRuns = fewRunsLines(before.runs.size, after.runs.size)
 
     /** The brief view's keys to its figures and changes, under each table: not with a side of one run, see [briefKeys]. */
@@ -138,7 +138,7 @@ internal class ProfileDiff(
         appendLine(row("Diff", "${before.name} (${before.described()}) ${sym.arrow} ${after.name} (${after.described()})"))
         warningsSection(warnings())
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
-        if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change judged on its 95% interval (Welch's t)"))
+        if (overRuns.isNotEmpty()) appendLine(row("", "Each side is the mean of its runs, each run in its own JVM. Each change is judged by its 95% interval (Welch's t)"))
         with(before) { runList("before") }
         with(after) { runList("after", header = false) }
         headerLines(buildList {
@@ -153,7 +153,10 @@ internal class ProfileDiff(
         // The tree first, as in the report: the shape, then the own-time detail.
         if (before.runs.any { it.coarseTree.isNotEmpty() } || after.runs.any { it.coarseTree.isNotEmpty() }) {
             appendLine()
-            appendLine("NESTED WALL TIME${sym.dash}each row its whole span, matched by path$overRuns")
+            appendLine(
+                "NESTED WALL TIME${sym.dash}$WALL_TIMED. An op is matched between the sides by its place in the tree: its parent op," +
+                        " that op's parent op, up to the root op$overRuns"
+            )
             fewRuns.forEach { appendLine(it) }
             appendLine(lensesLine(view, wallText.allColumns, lenses))
             with(wallText) { rows() }
@@ -165,7 +168,7 @@ internal class ProfileDiff(
             perSide(before.coarseKeys(view, lenses), after.coarseKeys(view, lenses))
         }
         appendLine()
-        appendLine("OWN THREAD-TIME${sym.dash}outside the operations inside, matched by name, sorted by the change$overRuns")
+        appendLine("OWN THREAD-TIME${sym.dash}$OWN_TIMED. An op is matched between the sides by its name, and the rows are sorted by the change$overRuns")
         fewRuns.forEach { appendLine(it) }
         appendLine(lensesLine(view, ownText.allColumns, lenses))
         with(ownText) { rows() }
@@ -174,7 +177,7 @@ internal class ProfileDiff(
         appendLine()
         bothSides("Sampled", before.sampledText(), after.sampledText())
         appendLine("-".repeat(width))
-        with(after.runs[0]) { renderLegend(false) }
+        with(after.runs[0]) { renderLegend() }
         appendLine("=".repeat(width))
     }
 
@@ -202,7 +205,7 @@ internal class ProfileDiff(
         val b = clockMean(before)
         val a = clockMean(after)
         if (b.isNaN() && a.isNaN()) return
-        appendLine(row("CPU clock", "${before.runs[0].clock.format(b)} ${sym.arrow} ${after.runs[0].clock.format(a)}, the mean of each side's runs"))
+        appendLine(row("CPU clock", "${before.runs[0].clock.format(b)} ${sym.arrow} ${after.runs[0].clock.format(a)} (the mean of each side's runs)"))
     }
 
     /**

@@ -235,7 +235,7 @@ class PauseTest {
     fun `wall time is active plus paused, with the pauses counted on the line`() {
         val p = pause(5_780_000_000, 22, 1_850_000_000, gc = 5_790_000_000)
         val line = wallOf(p, 66 * second)
-        assertTrue("66.0s = 60.2s active + 5.78s paused (8.76%) in 22 pauses, longest 1.85s" in line, line)
+        assertTrue("66.0s = 60.2s active + 5.78s paused (8.76% of the wall time, in 22 pauses, the longest 1.85s)" in line, line)
         assertTrue(p.said().isEmpty(), "a healthy split printed a warning: ${p.said()}")
     }
 
@@ -255,19 +255,19 @@ class PauseTest {
     fun `paused time the JVM did not count as collection stays in active time and is called out`() {
         val p = pause(5 * second, 10, 1 * second, gc = 1 * second)
         assertTrue("60.0s = 59.0s active + 1.00s paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
-        assertEquals(listOf("Paused: 4.00s of pauses, 6.67% of the run, is counted as work in the times below"), p.said())
+        assertEquals(listOf("Paused: 4.00s of pauses, 6.67% of the run, are counted as work in the times below"), p.said())
     }
 
     @Test
     fun `collection the sampler could not see is called out`() {
         assertEquals(
-            listOf("Paused: 2.00s of pauses, 3.33% of the run, is counted as work in the times below"),
+            listOf("Paused: 2.00s of pauses, 3.33% of the run, are counted as work in the times below"),
             pause(1 * second, 10, 200 * ms, gc = 3 * second).said(),
         )
         // And when every pause was under a step, so the sampler saw none at all.
         val none = pause(0, 0, 0, gc = 300 * ms)
         assertTrue("+ 0 paused" in wallOf(none, 60 * second), wallOf(none, 60 * second))
-        assertEquals(listOf("Paused: 300ms of pauses, 0.500% of the run, is counted as work in the times below"), none.said())
+        assertEquals(listOf("Paused: 300ms of pauses, 0.500% of the run, are counted as work in the times below"), none.said())
     }
 
     /** Never a number where the evidence is missing: the same rule the bound follows. */
@@ -275,7 +275,7 @@ class PauseTest {
     fun `an unreadable collector subtracts nothing and says what the sampler saw`() {
         val p = pause(5 * second, 10, 1 * second, gc = -1)
         assertTrue("60.0s = 60.0s active + 0 paused" in wallOf(p, 60 * second), wallOf(p, 60 * second))
-        assertEquals(listOf("Paused: 5.00s of pauses, 8.33% of the run, is counted as work in the times below"), p.said())
+        assertEquals(listOf("Paused: 5.00s of pauses, 8.33% of the run, are counted as work in the times below"), p.said())
     }
 
     /**

@@ -221,7 +221,7 @@ class OwnTimeTest {
         assertNull(stray, "own.last in the request's own time: share ${stray?.share}, calls ${stray?.calls}")
     }
 
-    /** A plain thread does not carry the context: its fine label is under no coarse row at all. */
+    /** A plain thread does not carry the context: its fine label ran inside no coarse op at all. */
     @Test
     fun `a fine label on a thread that does not carry the context is not under the request`() {
         val request = Profiler.registerCoarse(JOB)

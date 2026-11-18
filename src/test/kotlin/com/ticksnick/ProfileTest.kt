@@ -181,11 +181,11 @@ class ProfileTest {
             val lines = TickSnick.load(dir.resolve("naive")).render().lines()
             val heading = lines.indexOf("WARNINGS")
             assertTrue(heading in 1..lines.indexOfFirst { it.startsWith("Wall time") }, "the warnings are not above the numbers:\n" + lines.joinToString("\n"))
-            assertEquals("  Runs: 1 in 'naive', no interval - run at least 3 times", lines[heading + 1])
-            assertTrue(lines.any { "NESTED WALL TIME - each row" in it }, "not a profile report")
+            assertEquals("  Runs: only 1 in 'naive', so no figure has an interval - run at least 3 times", lines[heading + 1])
+            assertTrue(lines.any { "NESTED WALL TIME - Each execution" in it }, "not a profile report")
             // A figure of one run prints plain, as a certain one does: right over each table, a line says it is not.
             for (table in listOf("NESTED WALL TIME", "OWN THREAD-TIME")) assertEquals(
-                "1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell",
+                "1 run: the figures below have no interval, so any of them may be loose or unknown - run at least 3 times to find out",
                 lines[lines.indexOfFirst { it.startsWith(table) } + 1], "right under $table:\n" + lines.joinToString("\n"),
             )
         } finally {

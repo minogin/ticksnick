@@ -34,9 +34,9 @@ class CoresTest {
         sink = s
     }
 
-    /** "profiled threads 1.97" -> 1.97. */
+    /** "1.97 ran the profiled threads" -> 1.97. */
     private fun figure(line: String, name: String): Double =
-        Regex("$name (\\d+\\.\\d+)").find(line)?.groupValues?.get(1)?.toDouble() ?: error("no '$name' in: $line")
+        Regex("(\\d+\\.\\d+) ran $name").find(line)?.groupValues?.get(1)?.toDouble() ?: error("no '$name' in: $line")
 
     /**
      * Two labelled threads spinning for 2.5 s, each started inside the session and gone before it
@@ -71,7 +71,7 @@ class CoresTest {
         )
         val line = assertNotNull(coresOf(p.duty), "no Cores line on a 3s session")
         val processors = Runtime.getRuntime().availableProcessors()
-        assertTrue(figure(line, "profiled threads") + figure(line, "the rest") <= processors + 0.3, "more cores than the JVM has: $line")
+        assertTrue(figure(line, "the profiled threads") + figure(line, "everything else") <= processors + 0.3, "more cores than the JVM has: $line")
     }
 
     /**

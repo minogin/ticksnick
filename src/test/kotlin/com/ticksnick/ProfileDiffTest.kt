@@ -108,7 +108,7 @@ class ProfileDiffTest {
             assertTrue(same.split("|")[1].trim() == "=" && "could be noise" !in text, text)
             assertTrue("WARNINGS" !in text, text)
             assertTrue("no interval, so any" !in text, "runs on each side have their intervals: $text")
-            assertTrue(text.lines().first { it.startsWith("NESTED WALL TIME") }.endsWith("the change its 95% interval"), text)
+            assertTrue(text.lines().first { it.startsWith("NESTED WALL TIME") }.endsWith("each change has its 95% interval"), text)
         } finally {
             dir.toFile().deleteRecursively()
         }
@@ -124,7 +124,7 @@ class ProfileDiffTest {
             listOf(700_000_000L, 800_000_000L).forEachIndexed { i, t -> save(after, i, listOf(node("runBatch", listOf(7L, 8L))), span = t) }
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             val lines = text.lines()
-            assertTrue(lines[2].isEmpty() && lines[3] == "WARNINGS" && lines[4].startsWith("  Runs: 1 in 'before', no interval") && lines[5].isEmpty(), "a section of its own, right under the title: $text")
+            assertTrue(lines[2].isEmpty() && lines[3] == "WARNINGS" && lines[4].startsWith("  Runs: only 1 in 'before', so no figure has an interval") && lines[5].isEmpty(), "a section of its own, right under the title: $text")
             val header = text.lines().first { it.startsWith("Wall time ") }
             assertTrue("-25%" in header && "?" !in header && "+-" !in header.substringAfter("-25%"), header)
             assertTrue("NaN" !in text, text)
@@ -132,7 +132,7 @@ class ProfileDiffTest {
             for (table in listOf("NESTED WALL TIME", "OWN THREAD-TIME")) {
                 val at = lines.indexOfFirst { it.startsWith(table) }
                 assertEquals(
-                    "1 run before: no interval, so any change below may be loose or unknown - run at least 3 times on each side to tell",
+                    "1 run before: the changes below have no interval, so any of them may be loose or unknown - run at least 3 times on each side to find out",
                     lines[at + 1], "right under $table: $text",
                 )
                 assertTrue("95% interval" !in lines[at], lines[at])
@@ -144,13 +144,13 @@ class ProfileDiffTest {
 
     @Test
     fun `the few-runs line names the side, one run before two, and is absent with three runs on each side`() {
-        assertEquals(listOf("1 run: no interval, so any figure below may be loose or unknown - run at least 3 times to tell"), fewRunsLines(1))
-        assertEquals(listOf("2 runs: the interval is too wide to say much - run at least 3 times to tell"), fewRunsLines(2))
+        assertEquals(listOf("1 run: the figures below have no interval, so any of them may be loose or unknown - run at least 3 times to find out"), fewRunsLines(1))
+        assertEquals(listOf("2 runs: the intervals from two runs are too wide to say much - run at least 3 times"), fewRunsLines(2))
         assertEquals(emptyList(), fewRunsLines(3))
-        assertTrue(fewRunsLines(1, 3).single().startsWith("1 run before: no interval, so any change below"))
+        assertTrue(fewRunsLines(1, 3).single().startsWith("1 run before: the changes below have no interval, so any of them"))
         assertTrue(fewRunsLines(3, 1).single().startsWith("1 run after: "))
         assertTrue(fewRunsLines(1, 1).single().startsWith("1 run on each side: "))
-        assertEquals(listOf("2 runs after: the interval is too wide to say much - run at least 3 times on each side to tell"), fewRunsLines(3, 2))
+        assertEquals(listOf("2 runs after: the intervals from two runs are too wide to say much - run at least 3 times on each side"), fewRunsLines(3, 2))
         assertTrue(fewRunsLines(2, 2).single().startsWith("2 runs on each side: "))
         // One line: with a side of one run no change has an interval, which says more than the other side's two.
         assertTrue(fewRunsLines(2, 1).single().startsWith("1 run after: "))
@@ -266,7 +266,7 @@ class ProfileDiffTest {
 
     /** A report's lines by what each is, for comparing their order and not their figures. */
     private fun shape(report: String): List<String> {
-        val keys = listOf("Runs", "Wall time", "runBatch", "NESTED WALL TIME", "OWN THREAD-TIME", "Operation", "Sampled", "HOW TO READ THIS")
+        val keys = listOf("Runs", "Wall time", "runBatch", "NESTED WALL TIME", "OWN THREAD-TIME", "Op ", "Sampled", "HOW TO READ THIS")
         return report.lines().mapNotNull { line -> keys.firstOrNull { line.startsWith("$it ") || line == it } }
     }
 
@@ -282,7 +282,7 @@ class ProfileDiffTest {
             val alone = Profile.load(one).render()
             val many = Profile.load(two).render()
             assertEquals(shape(alone), shape(many))
-            assertTrue("1 run of 'one', one JVM: no interval" in alone, alone)
+            assertTrue("1 run of 'one'. A single run gives no figure an interval" in alone, alone)
             assertTrue("runBatch" in alone.lines().first { it.startsWith("runBatch ") }, alone)
         } finally {
             dir.toFile().deleteRecursively()
@@ -439,10 +439,10 @@ class ProfileDiffTest {
             assertEquals(line(mixed, "Wall time").indexOf("->"), line(mixed, "  Paused").indexOf("->"), mixed)
             // The own table's heading quotes the active time, the header's `Active`: by the same rule.
             val report = Profile.load(dir.resolve("loose"))
-            assertTrue("out of 0.85..1.3s active time" in line(report.render(view = View.FULL), "OWN THREAD-TIME"), report.render(view = View.FULL))
+            assertTrue("out of 0.85..1.3s of active time" in line(report.render(view = View.FULL), "OWN THREAD-TIME"), report.render(view = View.FULL))
             val certain = Profile.load(dir.resolve("certain"))
-            assertTrue("out of 1.11s +-11% active time" in line(certain.render(view = View.FULL), "OWN THREAD-TIME"))
-            assertTrue("out of 1.11s active time" in line(certain.render(view = View.BRIEF), "OWN THREAD-TIME"))
+            assertTrue("out of 1.11s +-11% of active time" in line(certain.render(view = View.FULL), "OWN THREAD-TIME"))
+            assertTrue("out of 1.11s of active time" in line(certain.render(view = View.BRIEF), "OWN THREAD-TIME"))
         } finally {
             dir.toFile().deleteRecursively()
         }

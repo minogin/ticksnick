@@ -10,6 +10,15 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   operation's is. Gone with them: the warning that a diff's root operation ran a different number of times
   on each side, and a mixed folder by how many times it ran. Runs that differ in their batches still show
   as mixed when they are tagged (`tags = mapOf("batches" to 3)`).
+- **Every text in the report is rewritten in plain words**: headings, notes under the tables, keys,
+  header lines and warnings. Each sentence has a verb, and each `it` points to one thing. The report
+  says **op**, not operation, and always with its noun: **root op**, **parent op**, **child op**. The
+  column head `Operation` is `Op`, and the row of time under no label is `(no op)`. The tables' headings
+  say what they show: `NESTED WALL TIME - Each execution is timed from its start to its end, with the
+  child ops that ran in it. An op is placed under its parent op`, and `OWN THREAD-TIME - Each op's own
+  time, in thread-time`. The warning about mixed runs no longer says the run list shows which run has
+  what, which it never did.
+- **The README ends with Words**: every term the report uses, with its one meaning.
 
 ## 0.7.0 - 2026-11-17
 

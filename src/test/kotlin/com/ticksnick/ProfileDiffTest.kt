@@ -314,20 +314,6 @@ class ProfileDiffTest {
         }
     }
 
-    /** More own rows than are drawn are one row in the same columns, paired by a diff however many it stands for. */
-    @Test
-    fun `the rows not drawn are one row, on both sides of a diff`() {
-        val folded = { n: Int ->
-            Row(
-                FOLDED_ROWS, mapOf(PARENT_SHARE to Estimate(listOf(0.3))), 1, own = true, foldedRows = n,
-            )
-        }
-        val pairedRows = paired(listOf(folded(3)), listOf(folded(5)))
-        assertEquals(1, pairedRows.size)
-        assertEquals(3, pairedRows[0].before?.foldedRows)
-        assertEquals(5, pairedRows[0].after?.foldedRows)
-    }
-
     /** What a run alone could say about itself reaches a profile of several, and so a diff. */
     @Test
     fun `a warning about one run reaches a profile of several`() {

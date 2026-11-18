@@ -261,7 +261,7 @@ batch                          |  1.14s |          |          1              |  
     - rule                     |  682ms |      69% |      3,400          340 |  201us |             |         |        |
     - visit (2 parents)        |  205ms |      21% |      1,000          100 |  205us |             |         |        |
     - rare (2 parents)         | 97.2ms |      10% |        500           50 |  194us |             |         |        |
-    - and 1 more               | 2.00ms |      <1% |                         |        |             |         |        |
+    - tiny                     | 2.00ms |      <1% |         20            2 |  100us |             |         |        |
   cleanup                      |  150ms |      13% |         10           10 | 15.0ms |             |         |        | 15.0ms   15.0ms     ?   15.1ms
     - visit (2 parents)        | 97.2ms |      65% |        100           10 |  972us |             |         |        |
     - unlabelled               | 51.1ms |      34% |                         |        |             |         |        |
@@ -292,9 +292,9 @@ Op                             | Wall v |   % root | Executions              |  
   heading names only what it shows, in the same places, and `% root` stands where `% parent` does: the share
   of its root op's Wall, `batch` here (of all root ops together when there are several), since an op over all
   its parent ops has no one parent op to be a share of.
-- `and 1 more` folds the small rows into one row, with their time in the same columns: only what adds up,
-  so not their calls, which are of different ops. Small rows with calls are drawn while they
-  fit within six rows.
+- **Every op you labelled has its row**, however small: `tiny` at under 1% of `plan` too. TickSnick does not
+  decide which ops matter - a row that is missing would read as never called. For fewer rows, use a filter
+  ("Filtering the rows", below).
 
 A diff has these same columns, names and forms. It shows `Allocated` when a side counted it, and warns
 when only one did.
@@ -537,6 +537,35 @@ and a note under a table that only one side has names it.
   runs is known exactly: one value, with its arrow.
 - **`CPU clock`** under the header is each side's mean. When the two differ, a warning says by how
   much: times are then not comparable, while shares still are.
+
+## Filtering the rows
+
+A report shows every op. A **filter** shows only the rows you ask for: conditions, each a key, a comparison and a
+bound, every one of which must hold.
+
+```
+--filter "wall >= 100ms"                  # the CLI, once for each condition
+render(filter = Filter.of("wall >= 100ms"))           # the API; TickSnick.diff takes the same
+TickSnick.diff(before, after, filter = Filter.of("change(wall) <= -5%"))
+```
+
+- **The keys so far:** `wall`, the Wall column, a time in `ns`, `us`, `ms` or `s`; and in a diff `change(wall)`,
+  its change in % of before.
+- **A row is shown when it may pass.** A figure passes when either end of its interval does: `wall >= 5ms`
+  shows `2..6ms` and hides `2..4ms` (`>=` and `>` test the upper end, `<=` and `<` the lower one, whatever
+  order the range is printed in). In a diff a row passes when either side does: `2ms -> 6ms` is shown,
+  `2ms -> 4ms` is not. `change(wall)` tests the change's own interval, so a change that may be under -5% is
+  shown; an op on one side only has no change, and does not pass.
+- **A parent op stays while one of its child ops passes**, so the tree still reads; a note under the table says
+  so when it happens.
+- **Nothing goes unseen.** Under each table's heading a line says the filter and how many rows it left out:
+  `Filter: wall >= 100ms. 6 rows are not shown; each is named under its parent op`. Each parent op ends with
+  the rows it hides, `not shown: dependencies`, and a hidden op's own rows go with it,
+  `not shown: via (with 5 rows below it)`. A condition a table cannot test leaves that table as it is, and its
+  line says why: `Filter: wall >= 100ms is not applied here: this table has no Wall` for the own table,
+  `a profile has no change` for `change(wall)` in a report.
+- **A loose filter keeps an uncertain change.** A `?` change's interval is wide, so one of its ends passes almost
+  any bound: `change(wall) <= -5%` keeps it.
 
 ## The foot
 

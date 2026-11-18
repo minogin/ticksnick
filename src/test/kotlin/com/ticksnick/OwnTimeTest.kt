@@ -73,11 +73,11 @@ class OwnTimeTest {
         assertTrue(kotlin.math.abs(actual - expected) <= tolerance, "$what: expected $expected +/- $tolerance, was $actual")
 
     /**
-     * A row that groups others shows only what adds up: `and N more` has the time of the labels it
-     * folds, and not their calls, which are of different operations and total nothing.
+     * Every fine op under a coarse one is a row, however many and however small: TickSnick does not decide which
+     * ops matter, and a row that is missing reads as never called. A filter is the reader's way to fewer rows.
      */
     @Test
-    fun `the folded row has the time of what it folds and not their calls`() {
+    fun `every fine op under a coarse one is a row, however small`() {
         val job = Profiler.registerCoarse(JOB)
         val big = Profiler.registerFine("own.big")
         val tiny = (0 until 9).map { Profiler.registerFine("own.tiny$it") }
@@ -90,9 +90,8 @@ class OwnTimeTest {
         }
         val p = Profiler.stop()
         val profile = Profile("p", listOf(java.nio.file.Path.of("0.tsr")), listOf(p))
-        val folded = assertNotNull(profile.wallTable.rows.flatMap { it.children }.firstOrNull { it.foldedRows > 0 }, "nothing was folded: ${p.render()}")
-        assertTrue(EXECUTIONS !in folded.figures, "the folded row added up calls of different operations")
-        assertTrue(WALL in folded.figures)
+        val names = profile.wallTable.rows.flatMap { it.children }.map { it.name }
+        for (name in listOf("own.big") + (0 until 9).map { "own.tiny$it" }) assertTrue(name in names, "$name is not a row: $names")
     }
 
     /**

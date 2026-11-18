@@ -19,6 +19,15 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   time, in thread-time`. The warning about mixed runs no longer says the run list shows which run has
   what, which it never did.
 - **The README ends with Words**: every term the report uses, with its one meaning.
+- **A filter for the rows**: `render(filter = Filter.of("wall >= 100ms"))`, the same on `TickSnick.diff`, and the
+  CLI's `--filter "wall >= 100ms"`, once for each condition. The keys so far are `wall`, a time, and in a diff
+  `change(wall)`, in % of before. A row is shown when it may pass - either end of its interval, either side of a
+  diff -, a parent op stays while a child op of it passes, and every row left out is named under its parent op:
+  `not shown: dependencies`. A line under each table's heading says the filter and how many rows it left out.
+- **Every op is a row.** The fold of small fine ops into `and N more` (under 0.5% of their parent op, or past six
+  rows) is gone: a row that is missing reads as never called. A filter is the way to fewer rows.
+- **Kotlin code compiled against 0.7.0 must be recompiled:** `render` and `TickSnick.diff` take a new parameter,
+  `filter`. Java callers are unaffected.
 
 ## 0.7.0 - 2026-11-17
 

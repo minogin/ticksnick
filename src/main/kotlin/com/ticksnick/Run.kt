@@ -7,9 +7,6 @@ import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.sqrt
 
-/** How many fine operations a coarse leaf lists as rows under it; the rest are one line. */
-internal const val FINE_ROWS_SHOWN = 6
-
 /** What marks a row of a leaf's split by innermost label, so it does not read as a child. ASCII, as everything printed is. */
 internal const val SPLIT_MARK = "-"
 
@@ -19,9 +16,6 @@ internal const val SPLIT_MARK = "-"
  * parent's. Sampled figures, so a tenth is the row repeating its parent rather than a fork of its own.
  */
 internal const val PARALLEL_SHOWN = 1.1
-
-/** Below this share of its row, a fine row under a coarse one is counted in "and N more" rather than drawn. */
-internal const val OWN_ROW_MIN = 0.005
 
 /** How far the achieved step may be from the one asked before the `Sampling` line names both. */
 internal const val ASKED_STEP_TOLERANCE = 0.05
@@ -1270,18 +1264,6 @@ class Run internal constructor(
             .filter { it.second > 0 }
             .sortedByDescending { it.second }
             .map { (name, hits) -> (hits.toDouble() / n.inclusiveHits).let { OwnRow(name, if (n.count > 0) wall * it else 0.0, Double.NaN, it) } }
-    }
-
-    /**
-     * Which of [own] are drawn as rows, the rest being one `and N more` line: the heaviest, up to
-     * [FINE_ROWS_SHOWN], from [OWN_ROW_MIN] of the row up; and the smaller ones with calls as well
-     * when they all fit, so a label run a few times here - the one that would otherwise look as if it
-     * had a single parent - is a row while there are few of them.
-     */
-    internal fun drawnOwnRows(own: List<OwnRow>): List<OwnRow> {
-        val big = own.filter { !(it.share < OWN_ROW_MIN) }.take(FINE_ROWS_SHOWN)
-        val small = own.filter { it !in big && it.calls > 0 }
-        return if (big.size + small.size <= FINE_ROWS_SHOWN) big + small.sortedByDescending { it.calls } else big
     }
 
     /**

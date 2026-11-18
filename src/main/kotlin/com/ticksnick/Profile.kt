@@ -56,9 +56,6 @@ internal const val WALL_TIMED = "Each execution is timed from its start to its e
 /** What the own table shows, right after its title, in a report and in a diff. */
 internal const val OWN_TIMED = "Each op's own time, in thread-time"
 
-/** The name that pairs the row of a row's own rows not drawn, on the two sides of a diff: how many it stands for can differ. */
-internal const val FOLDED_ROWS = "and more"
-
 /** The name column's narrowest width, in the wall and in the own table. */
 internal const val WALL_NAME_WIDTH = 30
 internal const val OWN_NAME_WIDTH = 26
@@ -232,14 +229,15 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * the library cannot tell where it goes.
      *
      * [view] is what the tables show: [View.BRIEF] by default, the basis and the [lenses] opened; [View.FULL]
-     * every lens and every interval.
+     * every lens and every interval. [filter] is which rows: every op by default, see [Filter].
      */
     @JvmOverloads
-    fun render(unicode: Boolean = false, view: View = View.BRIEF, lenses: Set<Lens> = emptySet()): String = withSymbols(unicode) {
-        Logo.once()
-        if (runs.isEmpty()) failedBanner()
-        else report(warnings(), view, lenses)
-    }
+    fun render(unicode: Boolean = false, view: View = View.BRIEF, lenses: Set<Lens> = emptySet(), filter: Filter = Filter.NONE): String =
+        withSymbols(unicode) {
+            Logo.once()
+            if (runs.isEmpty()) failedBanner()
+            else report(warnings(), view, lenses, filter)
+        }
 
     /**
      * The banner over a profile whose runs failed, in part or all: how many, and each one's file and
@@ -336,13 +334,15 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * @param warnings the warnings, in the `WARNINGS` section: before any number, see [warningsSection].
      * @param view what the tables show, with the [lenses] opened; every other line is the same in every view.
      */
-    internal fun report(warnings: Warnings, view: View = View.FULL, lenses: Set<Lens> = emptySet()): String = buildString {
+    internal fun report(warnings: Warnings, view: View = View.FULL, lenses: Set<Lens> = emptySet(), filter: Filter = Filter.NONE): String = buildString {
         if (runs.isEmpty()) {
             append(failedBanner(width = FAILED_WIDTH))
             return@buildString
         }
-        val wall = wallTextOf(view, lenses)
-        val own = ownTextOf(view, lenses)
+        val wallFiltered = filterRows(filter, wallTable.columns, wallTable.rows, wallTable.shared)
+        val ownFiltered = filterRows(filter, ownTable.columns, ownTable.rows, emptyList())
+        val wall = wallTextOf(view, lenses, wallFiltered)
+        val own = ownTextOf(view, lenses, ownFiltered)
         val pageWidth = maxOf(wall.width, own.width)
         append(failedBanner(width = pageWidth))
         val n = runs.size
@@ -372,9 +372,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         // The tree first: the overview - what ran inside what, how often, what part of its parent - and
         // the own-time table after it for the detail. The tree is what a reader reads; the table is
         // what they look up.
-        if (runs.any { r -> r.coarse.any { it.count > 0 || it.inclusiveHits > 0 } }) wallSection(view, wall, lenses)
+        if (runs.any { r -> r.coarse.any { it.count > 0 || it.inclusiveHits > 0 } }) wallSection(view, wall, lenses, wallFiltered)
         appendLine()
-        ownSection(view, own, lenses)
+        ownSection(view, own, lenses, ownFiltered)
         // After the tables: how much evidence there is says nothing a reader acts on before the numbers,
         // and something after them, when a share looks too close to call. "mean (jittered)": the interval
         // is drawn +/-25% around the step so the sampler cannot lock onto a workload with a rhythm of its
@@ -391,16 +391,12 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     /** One run's fine rows in the coarse row [n]'s own time. */
     private fun ownOf(i: Int, n: CoarseNode): List<Run.OwnRow> = runs[i].ownRowsOf(n) ?: runs[i].splitRowsOf(n)
 
-    /** Which of [rows], those of [n], the run draws. */
-    private fun drawnOf(i: Int, n: CoarseNode, rows: List<Run.OwnRow>): List<Run.OwnRow> =
-        if (runs[i].ownRowsOf(n) != null) runs[i].drawnOwnRows(rows) else rows.take(FINE_ROWS_SHOWN)
-
     /** The coarse row [m], and under it its children and the fine labels in its own time. [counted] collects every own row. */
     private fun coarseRow(m: Matched, parents: List<CoarseNode?>, counted: MutableList<Row>): Row {
         val nodes = m.nodes.indices.filter { m.nodes[it] != null }
         fun overAll(f: (Int, CoarseNode) -> Double) = Estimate(nodes.map { f(it, m.nodes[it]!!) }.filter { !it.isNaN() })
         fun timed(f: (CoarseNode) -> Double) = estimateOf(m) { _, n -> f(n) }
-        val (drawn, folded) = ownRows(m, nodes, counted)
+        val drawn = ownRows(m, nodes, counted)
         val children = childrenOf(m.nodes.map { it?.children ?: emptyList() }).map { coarseRow(it, m.nodes, counted) }
         return Row(
             m.name,
@@ -424,7 +420,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 WALL_WAITING to overAll { i, n -> waiting(runs[i], n.inclusiveHits, n.runningInclusiveHits) },
             ).filterKeys { (it != PARENT_SHARE || parents.any { p -> p != null }) && counted(it) },  // a root has no parent to be a share of
             nodes.size,
-            children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 } + listOfNotNull(folded),
+            children = (children + drawn).sortedByDescending { r -> r.figures[WALL]?.mean?.takeIf { !it.isNaN() } ?: 0.0 },
             slowest = m.nodes.flatMap { it?.slowest.orEmpty() }.sortedByDescending { it.nanos }.take(m.nodes.maxOf { it?.slowest?.size ?: 0 }),
         )
     }
@@ -437,13 +433,12 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         if (!run.stateSampled || inclusive == 0L) Double.NaN else (inclusive - running).toDouble() / inclusive
 
     /**
-     * The fine labels in the own time of the row [m], in the runs [nodes]: those drawn in any run, and
-     * one line for the rest. A run with the coarse row and not the label counts at 0.
+     * The fine labels in the own time of the row [m], in the runs [nodes]: every one any run has, none left out. A
+     * run with the coarse row and not the label counts at 0.
      */
-    private fun ownRows(m: Matched, nodes: List<Int>, counted: MutableList<Row>): kotlin.Pair<List<Row>, Row?> {
+    private fun ownRows(m: Matched, nodes: List<Int>, counted: MutableList<Row>): List<Row> {
         val rows = nodes.associateWith { ownOf(it, m.nodes[it]!!) }
-        val drawn = nodes.flatMap { i -> drawnOf(i, m.nodes[i]!!, rows[i]!!).map { it.name } }.distinct()
-        val all = (drawn + nodes.flatMap { i -> rows[i]!!.map { it.name } }).distinct().map { name ->
+        return nodes.flatMap { i -> rows[i]!!.map { it.name } }.distinct().map { name ->
             val of = nodes.associateWith { i -> rows[i]!!.firstOrNull { it.name == name } }
             fun anyOver0(v: List<Double>) = Estimate(v.takeIf { it.any { x -> x > 0 } } ?: emptyList())
             val calls = nodes.mapNotNull { i ->
@@ -474,22 +469,6 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             if (name != "unlabelled" && nodes.any { runs[it].ownRowsOf(m.nodes[it]!!) != null }) counted += row
             row
         }
-        val rest = all.filter { it.name !in drawn }.map { it.name }
-        fun overRest(f: (Run.OwnRow) -> Double) =
-            nodes.map { i -> rows[i]!!.filter { it.name in rest }.sumOf { r -> f(r).takeIf { !it.isNaN() } ?: 0.0 } }
-                .let { v -> Estimate(v.takeIf { it.any { x -> x > 0 } } ?: emptyList()) }
-        // Only what adds up: the folded rows' calls are of different operations, a total of nothing.
-        val folded = if (rest.isEmpty()) null else Row(
-            FOLDED_ROWS,
-            mapOf(
-                WALL to overRest { it.wallNanos },
-                PARENT_SHARE to overRest { it.share * 100 },
-            ),
-            nodes.size,
-            own = true,
-            foldedRows = rest.size,
-        )
-        return all.filter { it.name in drawn } to folded
     }
 
     /** Each node under [roots] with no ancestor of its own name: a recursive operation's whole, once. */
@@ -642,9 +621,14 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     internal val ownText: TableText get() = TableText(ownTable, OP_HEAD, OWN_NAME_WIDTH)
 
     /** The wall table as [view] writes it, with [lenses]. */
-    private fun wallTextOf(view: View, lenses: Set<Lens>): TableText = TableText(wallTable, OP_HEAD, WALL_NAME_WIDTH, view, lenses)
+    private fun wallTextOf(view: View, lenses: Set<Lens>, f: Filtered<Row>): TableText =
+        TableText(wallTable.with(f), OP_HEAD, WALL_NAME_WIDTH, view, lenses, f.notShown, f.sharedNotShown)
 
-    private fun ownTextOf(view: View, lenses: Set<Lens>): TableText = TableText(ownTable, OP_HEAD, OWN_NAME_WIDTH, view, lenses)
+    private fun ownTextOf(view: View, lenses: Set<Lens>, f: Filtered<Row>): TableText =
+        TableText(ownTable.with(f), OP_HEAD, OWN_NAME_WIDTH, view, lenses, f.notShown, f.sharedNotShown)
+
+    /** This table with the rows [f] leaves it. */
+    private fun Table.with(f: Filtered<Row>): Table = Table(columns, f.rows, runs, sortedBy, f.shared, splitLeaves, contained, folded)
 
     /** The widest table, for the rules around a report. */
     internal val pageWidth: Int get() = maxOf(wallText.width, ownText.width)
@@ -663,7 +647,9 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * The table is the tree, with no separate flat ranking. Inclusive time is monotone up a path, so
      * the heaviest operation anywhere is at the end of the first branch - the ranking holds.
      */
-    internal fun StringBuilder.wallSection(view: View = View.FULL, text: TableText = wallText, lenses: Set<Lens> = emptySet()) {
+    internal fun StringBuilder.wallSection(
+        view: View = View.FULL, text: TableText = wallText, lenses: Set<Lens> = emptySet(), filtered: Filtered<Row>? = null,
+    ) {
         val paused = runs.any { it.pause.confirmedPausedIn(it.samplingSpanNanos) > 0 }
         appendLine()
         appendLine(
@@ -675,6 +661,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         )
         fewRunsLines(runs.size).forEach { appendLine(it) }
         appendLine(lensesLine(view, wallTable.columns, lenses))
+        filtered?.let { filterLine(it, diff = false) }?.let { appendLine(it) }
         with(text) { rows() }
         // An operation with more than one caller is a row under each, and those rows are its figures
         // under that caller alone. Its percentiles over everything are a different question - "how long
@@ -685,6 +672,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
             with(text) { shared() }
         }
         briefKeys(view, runs.size).forEach { appendLine(it) }
+        if (filtered?.context == true) appendLine(FILTER_CONTEXT_NOTE)
         coarseKeys(view, lenses).forEach { appendLine(it) }
     }
 
@@ -712,7 +700,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                     (if (view.shows(Lens.PARALLELISM, lenses)) "Its Parallel is how many threads ran it at once in one execution of the parent op. " else "") +
                     "A fine op with child ops shows only its own time"
         )
-        if (all.any { it.own && it.foldedRows == 0 && (it.figures[EXECUTIONS]?.n ?: 0) != 0 }) add(
+        if (all.any { it.own && (it.figures[EXECUTIONS]?.n ?: 0) != 0 }) add(
             "  On a row marked $SPLIT_MARK, Executions is the op's calls at that place in the tree, and Per parent is its calls per" +
                     " execution of its parent op; both are counted. Mean is its thread-time per call, which is sampled. $UNKNOWN means" +
                     " the op was called there but never sampled"
@@ -747,13 +735,16 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
      * It also says the clock the table is over: a thread-time is a sum over threads and `active` is the
      * span it was summed in, and on one thread the two figures match.
      */
-    internal fun StringBuilder.ownSection(view: View = View.FULL, text: TableText = ownText, lenses: Set<Lens> = emptySet()) {
+    internal fun StringBuilder.ownSection(
+        view: View = View.FULL, text: TableText = ownText, lenses: Set<Lens> = emptySet(), filtered: Filtered<Row>? = null,
+    ) {
         val fine = ownTable
         // The active time is the header's `Active`, a figure with an interval: written by its rule, as everywhere.
         appendLine("OWN THREAD-TIME${sym.dash}$OWN_TIMED, out of ${durationWithInterval(over { it.activeNanos.toDouble() }, view)} of active time$overRuns")
         if (fine.rows.isNotEmpty()) {
             fewRunsLines(runs.size).forEach { appendLine(it) }
             appendLine(lensesLine(view, fine.columns, lenses))
+            filtered?.let { filterLine(it, diff = false) }?.let { appendLine(it) }
             with(text) { rows() }
         }
         // A table with no rows is two rules around nothing. Say what happened instead: an empty

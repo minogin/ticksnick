@@ -17,10 +17,13 @@ object TickSnick {
 
     /**
      * [before] -> [after]: each side the mean of its runs, each change judged on its 95% interval once both have two.
-     * [unicode], [view] and [lenses] as in [Profile.render]: brief by default, one line a row.
+     * [unicode], [view], [lenses] and [filter] as in [Profile.render]: brief by default, one line a row, every op shown.
+     * A row passes [filter] when either side may, or its change may: `Filter.of("change(wall) <= -5%")`.
      */
     @JvmStatic
     @JvmOverloads
-    fun diff(before: Profile, after: Profile, unicode: Boolean = false, view: View = View.BRIEF, lenses: Set<Lens> = emptySet()): String =
-        withSymbols(unicode) { diffText(before, after, view, lenses) }.also { Logo.once() }
+    fun diff(
+        before: Profile, after: Profile, unicode: Boolean = false, view: View = View.BRIEF, lenses: Set<Lens> = emptySet(),
+        filter: Filter = Filter.NONE,
+    ): String = withSymbols(unicode) { diffText(before, after, view, lenses, filter) }.also { Logo.once() }
 }

@@ -159,7 +159,7 @@ internal class Unsampled(val name: String, val coarse: Boolean, val calls: Long)
  * @param own a fine label in a coarse row's own time.
  * @param coarse in the own table, a coarse operation's own work: the rest of it is in the wall table.
  * @param children the rows under it, heaviest first, coarse and [own] sorted together.
- * @param foldedRows how many of a row's own rows this one stands for, over 0 for the row of those not drawn.
+ * @param notShown the rows under it a [Filter] left out, by name, each with how many went with it.
  */
 internal class Row(
     val name: String,
@@ -168,9 +168,13 @@ internal class Row(
     val own: Boolean = false,
     val coarse: Boolean = false,
     val children: List<Row> = emptyList(),
-    val foldedRows: Int = 0,
     val slowest: List<SlowExecution> = emptyList(),
+    val notShown: List<String> = emptyList(),
 ) {
+    /** This row with [children] in place of its own and [notShown] under them, its [parents] kept. */
+    fun with(children: List<Row>, notShown: List<String>): Row =
+        Row(name, figures, present, own, coarse, children, slowest, notShown).also { it.parents = parents }
+
     /**
      * How many rows of the tree the operation is on, each its part under that parent: over 1 for one
      * under several parents, whose whole is in [Table.shared].
@@ -364,8 +368,7 @@ private fun StringBuilder.slowestLines(indent: String, label: String, slowest: L
 private fun cell(value: String, interval: String): String = if (interval.isEmpty()) value else "$value $interval"
 
 /** The text of [c] on [r], a row's own rows having no `own` to say. */
-private fun cellText(c: Column, r: Row?, own: Boolean): String =
-    if (r != null && r.foldedRows > 0 && r.figures[c].let { it == null || it.n == 0 }) "" else figureText(c, r?.figures?.get(c), own)
+private fun cellText(c: Column, r: Row?, own: Boolean): String = figureText(c, r?.figures?.get(c), own)
 
 /**
  * Where a table's columns fall in text, shared by a report and a diff so that they read the same. Each cell
@@ -486,6 +489,7 @@ private class Layout(
  */
 internal class TableText(
     private val table: Table, heading: String, minName: Int, private val view: View = View.FULL, private val lenses: Set<Lens> = emptySet(),
+    private val notShown: List<String> = emptyList(), private val sharedNotShown: List<String> = emptyList(),
 ) {
     private val brief = view == View.BRIEF
 
@@ -503,7 +507,6 @@ internal class TableText(
      */
     private fun nameOf(r: Row, depth: Int, shared: Boolean = false): String {
         val indent = "  ".repeat(depth) + if (r.own) "$SPLIT_MARK " else ""
-        if (r.foldedRows > 0) return indent + "and ${r.foldedRows} more"
         val facts = listOfNotNull(
             "${r.parents} parents".takeIf { !shared && r.parents > 1 },
             "${r.present} of ${table.runs} runs".takeIf { r.present < table.runs },
@@ -545,14 +548,16 @@ internal class TableText(
     fun StringBuilder.rows() {
         with(layout) { heading() }
         for (r in table.rows) row(r, 0)
+        if (notShown.isNotEmpty()) appendLine(notShownLine(0, notShown))
         appendLine(layout.rule())
     }
 
-    /** [r], what is attached to it, and the rows under it. */
+    /** [r], what is attached to it, the rows under it, and what a filter left out under it. */
     private fun StringBuilder.row(r: Row, depth: Int) {
         appendLine(layout.line(cells(nameOf(r, depth), r)))
         if (view.shows(Lens.LATENCY, lenses)) slowestLines("  ".repeat(depth), "slowest: ", r.slowest)
         r.children.forEach { row(it, depth + 1) }
+        if (r.notShown.isNotEmpty()) appendLine(notShownLine(depth + 1, r.notShown))
     }
 
     private fun cells(name: String, r: Row): List<String> =
@@ -562,12 +567,13 @@ internal class TableText(
     fun StringBuilder.shared() {
         appendLine(layout.sharedHeading(columns.filter { c -> table.shared.any { cellText(c, it, it.own).isNotEmpty() } }.toSet()))
         for (r in table.shared) appendLine(layout.line(cells(nameOf(r, 1, shared = true), r)))
+        if (sharedNotShown.isNotEmpty()) appendLine(notShownLine(1, sharedNotShown))
         appendLine(layout.rule())
     }
 }
 
-/** One row of a diff: the row on each side, null on a side without it, and the rows under it. */
-internal class DiffRow(val before: Row?, val after: Row?, val children: List<DiffRow>) {
+/** One row of a diff: the row on each side, null on a side without it, the rows under it, and what a filter left out there. */
+internal class DiffRow(val before: Row?, val after: Row?, val children: List<DiffRow>, val notShown: List<String> = emptyList()) {
     val name: String get() = (after ?: before)!!.name
     val own: Boolean get() = (after ?: before)!!.own
     val coarse: Boolean get() = (after ?: before)!!.coarse
@@ -603,6 +609,7 @@ internal class DiffText(
     private val before: Table, private val after: Table, private val rows: List<DiffRow>, private val shared: List<DiffRow>,
     heading: String, minName: Int, private val sortedBy: Column?, private val view: View = View.FULL,
     private val lenses: Set<Lens> = emptySet(),
+    private val notShown: List<String> = emptyList(), private val sharedNotShown: List<String> = emptyList(),
 ) {
     private val brief = view == View.BRIEF
 
@@ -614,9 +621,6 @@ internal class DiffText(
     /** As in a report, `->` where the sides differ: `onCentral (3 parents, 3 -> 0 runs)`. */
     private fun nameOf(r: DiffRow, depth: Int, shared: Boolean = false): String {
         val indent = "  ".repeat(depth) + if (r.own) "$SPLIT_MARK " else ""
-        val b = r.before?.foldedRows ?: 0
-        val a = r.after?.foldedRows ?: 0
-        if (a > 0 || b > 0) return indent + if (a == b) "and $a more" else "and $b ${sym.arrow} $a more"
         val pb = r.before?.parents?.coerceAtLeast(1)
         val pa = r.after?.parents?.coerceAtLeast(1)
         val inB = r.before?.present ?: 0
@@ -699,6 +703,7 @@ internal class DiffText(
     fun StringBuilder.rows() {
         with(layout) { heading() }
         for (r in rows) row(r, 0)
+        if (notShown.isNotEmpty()) appendLine(notShownLine(0, notShown))
         appendLine(layout.rule())
     }
 
@@ -706,6 +711,7 @@ internal class DiffText(
     fun StringBuilder.shared() {
         appendLine(layout.sharedHeading(columns.filter { c -> shared.any { r -> listOf(r.before, r.after).any { cellText(c, it, r.own).isNotEmpty() } } }.toSet()))
         for (r in shared) row(r, 1, shared = true)
+        if (sharedNotShown.isNotEmpty()) appendLine(notShownLine(1, sharedNotShown))
         appendLine(layout.rule())
     }
 
@@ -758,6 +764,7 @@ internal class DiffText(
                 slowestLines("  ".repeat(depth), "slowest after:  ", r.after?.slowest.orEmpty())
             }
             r.children.forEach { row(it, depth + 1) }
+            if (r.notShown.isNotEmpty()) appendLine(notShownLine(depth + 1, r.notShown))
             return
         }
         fun side(name: String, row: Row?, other: Row?) = layout.line(listOf(name) + columns.map { c -> fullSide(c, row, other, r.own) })
@@ -768,6 +775,7 @@ internal class DiffText(
         slowestLines(indent, "slowest before: ", r.before?.slowest.orEmpty())
         slowestLines(indent, "slowest after:  ", r.after?.slowest.orEmpty())
         r.children.forEach { row(it, depth + 1) }
+        if (r.notShown.isNotEmpty()) appendLine(notShownLine(depth + 1, r.notShown))
     }
 
     /**

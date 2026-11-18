@@ -208,6 +208,11 @@ Memory, Latency - opened one by one: `render(lenses = setOf(Lens.LATENCY))`, the
 `--lens latency`. `render(view = View.FULL)` and `diff(before, after, view = View.FULL)` show every lens
 with every interval; the CLI takes `--view full`. [docs/output.md](docs/output.md), "Two views".
 
+**A report shows every op you labelled.** For fewer rows, give it a filter: `render(filter =
+Filter.of("wall >= 100ms"))`, `diff(before, after, filter = Filter.of("change(wall) <= -5%"))`, the CLI's
+`--filter "wall >= 100ms"`. A row is shown when it may pass - either end of its interval, either side of a diff -
+and every row left out is named under its parent op. [docs/output.md](docs/output.md), "Filtering the rows".
+
 Reports are ASCII. `render(unicode = true)` and `diff(before, after, unicode = true)` print `±`, `µs`,
 `→`, `—`, `…` and `×` instead, for output that is read as Unicode; the CLI takes `--unicode`. On Windows,
 output through a pipe (Gradle, a script) is written in the platform's charset unless the JVM has
@@ -328,6 +333,7 @@ The words the report and the API use, each with one meaning. Every column is exp
   **full** shows everything.
 - **basis** - what every view shows: time, share, how many times, the cost of one.
 - **lens** - a group of columns you open when it is the problem: Parallelism, Waiting, Memory, Latency.
+- **filter** - which rows a report shows, by conditions you give, `wall >= 100ms`. Without one, every op is shown.
 - **wall table** - `NESTED WALL TIME`: the tree of ops, in wall time.
 - **own table** - `OWN THREAD-TIME`: each op's own time, in thread-time.
 - **warning** - how to read a result: a figure that may be off, a limit on the whole run, a label in

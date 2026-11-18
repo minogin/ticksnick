@@ -43,9 +43,9 @@ internal fun signedPercent(f: Double): String = if (f.isNaN()) "" else unjudgedC
  * [before] -> [after] as text. The banner of each side's failed runs leads; a side whose runs all failed
  * has no profile, so the diff is the banners and nothing else.
  */
-internal fun diffText(before: Profile, after: Profile, view: View = View.FULL, lenses: Set<Lens> = emptySet()): String =
+internal fun diffText(before: Profile, after: Profile, view: View = View.FULL, lenses: Set<Lens> = emptySet(), filter: Filter = Filter.NONE): String =
     if (before.runs.isEmpty() || after.runs.isEmpty()) before.failedBanner(named = true) + after.failedBanner(named = true)
-    else ProfileDiff(before, after, view, lenses).render()
+    else ProfileDiff(before, after, view, lenses, filter).render()
 
 /**
  * **Two profiles compared**: each side a folder of runs (see [Profile]), each figure the mean of its
@@ -57,22 +57,34 @@ internal fun diffText(before: Profile, after: Profile, view: View = View.FULL, l
  * so that the exception stands out.
  *
  * [view] is what the two tables show, with the [lenses] opened, as in [Profile.render]; every other line is the same
- * in every view.
+ * in every view. [filter] is which rows, as in [Profile.render]: a row passes when either side may, or its change may.
  */
 internal class ProfileDiff(
     val before: Profile, val after: Profile, private val view: View = View.FULL, private val lenses: Set<Lens> = emptySet(),
+    filter: Filter = Filter.NONE,
 ) {
-    private val wallRows = paired(before.wallTable.rows, after.wallTable.rows)
-    private val sharedRows = paired(before.wallTable.shared, after.wallTable.shared)
+    private val wallFiltered = filterDiffRows(
+        filter, (before.wallTable.columns + after.wallTable.columns).distinct(),
+        paired(before.wallTable.rows, after.wallTable.rows), paired(before.wallTable.shared, after.wallTable.shared),
+    )
 
     /** What moved most on top, whether it went up or down. */
-    private val ownRows = paired(before.ownTable.rows, after.ownTable.rows).sortedByDescending { r ->
-        fun time(row: Row?) = row?.figures?.get(THREAD_TIME)?.mean?.takeIf { !it.isNaN() } ?: 0.0
-        abs(time(r.after) - time(r.before))
-    }
+    private val ownFiltered = filterDiffRows(
+        filter, (before.ownTable.columns + after.ownTable.columns).distinct(),
+        paired(before.ownTable.rows, after.ownTable.rows).sortedByDescending { r ->
+            fun time(row: Row?) = row?.figures?.get(THREAD_TIME)?.mean?.takeIf { !it.isNaN() } ?: 0.0
+            abs(time(r.after) - time(r.before))
+        },
+        emptyList(),
+    )
 
-    private val wallText = DiffText(before.wallTable, after.wallTable, wallRows, sharedRows, OP_HEAD, WALL_NAME_WIDTH, WALL, view, lenses)
-    private val ownText = DiffText(before.ownTable, after.ownTable, ownRows, emptyList(), OP_HEAD, OWN_NAME_WIDTH, THREAD_TIME, view, lenses)
+    private val wallText = DiffText(
+        before.wallTable, after.wallTable, wallFiltered.rows, wallFiltered.shared, OP_HEAD, WALL_NAME_WIDTH, WALL, view, lenses,
+        wallFiltered.notShown, wallFiltered.sharedNotShown,
+    )
+    private val ownText = DiffText(
+        before.ownTable, after.ownTable, ownFiltered.rows, emptyList(), OP_HEAD, OWN_NAME_WIDTH, THREAD_TIME, view, lenses, ownFiltered.notShown,
+    )
     private val width = maxOf(wallText.width, ownText.width)
 
     // Only with both sides over runs: a side of one run leaves the change no interval, and fewRunsLines says so instead.
@@ -159,20 +171,24 @@ internal class ProfileDiff(
             )
             fewRuns.forEach { appendLine(it) }
             appendLine(lensesLine(view, wallText.allColumns, lenses))
+            filterLine(wallFiltered, diff = true)?.let { appendLine(it) }
             with(wallText) { rows() }
-            if (sharedRows.isNotEmpty()) {
+            if (wallFiltered.shared.isNotEmpty() || wallFiltered.sharedNotShown.isNotEmpty()) {
                 appendLine(SHARED_HEADING)
                 with(wallText) { shared() }
             }
             keys.forEach { appendLine(it) }
+            if (wallFiltered.context) appendLine(FILTER_CONTEXT_NOTE)
             perSide(before.coarseKeys(view, lenses), after.coarseKeys(view, lenses))
         }
         appendLine()
         appendLine("OWN THREAD-TIME${sym.dash}$OWN_TIMED. An op is matched between the sides by its name, and the rows are sorted by the change$overRuns")
         fewRuns.forEach { appendLine(it) }
         appendLine(lensesLine(view, ownText.allColumns, lenses))
+        filterLine(ownFiltered, diff = true)?.let { appendLine(it) }
         with(ownText) { rows() }
         keys.forEach { appendLine(it) }
+        if (ownFiltered.context) appendLine(FILTER_CONTEXT_NOTE)
         perSide(before.fineNotes(view, lenses), after.fineNotes(view, lenses))
         appendLine()
         bothSides("Sampled", before.sampledText(), after.sampledText())

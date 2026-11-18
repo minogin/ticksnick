@@ -220,13 +220,23 @@ class BriefViewTest {
 
     /** The header lines take brief's figure rule too: a certain figure without its `±`, a certain change its middle. */
     @Test
-    fun `brief writes the header lines by its rule too`() = folders { before, after ->
-        val b = Profile.load(before)
-        fun line(text: String, key: String) = text.lines().first { it.startsWith(key) }
-        assertEquals("runBatch      10.1s per execution", line(b.render(), "runBatch "))
-        assertEquals("runBatch      10.1s +-2.5% per execution", line(b.render(view = View.FULL), "runBatch "))
-        val diff = line(TickSnick.diff(b, Profile.load(after)), "runBatch ")
-        assertTrue(Regex("""10\.1s -> 8\.10s\s+-2\.00s\s+-20%\s+per execution""").containsMatchIn(diff), diff)
+    fun `brief writes the header lines by its rule too`() {
+        val dir = Files.createTempDirectory("ticksnick")
+        try {
+            val before = dir.resolve("before").also { Files.createDirectories(it) }
+            val after = dir.resolve("after").also { Files.createDirectories(it) }
+            // Each run's wall time its batch: 10.1 s ±2.5% against 8.10 s, certain on both sides, the change -20%.
+            beforeBatches.forEachIndexed { i, t -> save(before, i, listOf(node("runBatch", listOf(t))), span = t) }
+            afterBatches.forEachIndexed { i, t -> save(after, i, listOf(node("runBatch", listOf(t))), span = t) }
+            val b = Profile.load(before)
+            fun line(text: String) = text.lines().first { it.startsWith("Wall time ") }
+            assertTrue(line(b.render()).startsWith("Wall time     10.1s = "), line(b.render()))
+            assertTrue(line(b.render(view = View.FULL)).startsWith("Wall time     10.1s +-2.5% = "), line(b.render(view = View.FULL)))
+            val diff = line(TickSnick.diff(b, Profile.load(after)))
+            assertTrue(Regex("""10\.1s -> 8\.10s\s+-2\.00s\s+-20%""").containsMatchIn(diff), diff)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
     }
 
     /** Each brief table ends with the key to its forms; a diff's with one to its changes too; the full view has none. */
@@ -340,12 +350,12 @@ class BriefViewTest {
             val before = dir.resolve("before").also { Files.createDirectories(it) }
             val after = dir.resolve("after").also { Files.createDirectories(it) }
             for (i in 0..2) {
-                save(before, i, listOf(node("runBatch", listOf(10_000_000L))))
-                save(after, i, listOf(node("runBatch", listOf(8_000_000L))))
+                save(before, i, listOf(node("runBatch", listOf(10_000_000L))), span = 10_000_000L)
+                save(after, i, listOf(node("runBatch", listOf(8_000_000L))), span = 8_000_000L)
             }
             for (view in View.entries) {
                 val text = TickSnick.diff(Profile.load(before), Profile.load(after), unicode = true, view = view)
-                val header = text.lines().first { it.startsWith("runBatch ") && "per execution" in it }
+                val header = text.lines().first { it.startsWith("Wall time ") }
                 assertTrue("↓-2.00ms" in header && "↓-20%" in header, header)
             }
         } finally {
@@ -372,8 +382,8 @@ class BriefViewTest {
         }
     }
 
-    private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
-        RunStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+    private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10)), span: Long = 1_000_000_000) =
+        RunStore.save(profile(tree, ops, span), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
 
     private fun stat(name: String, hits: Long, calls: Long) = OperationStat(0, name, hits, calls, 0, 0, 0, 0, hits)
 

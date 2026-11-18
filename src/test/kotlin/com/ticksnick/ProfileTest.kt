@@ -131,7 +131,7 @@ class ProfileTest {
     }
 
     @Test
-    fun `a folder of runs renders with intervals, its batches listed, and a row some runs lack`() {
+    fun `a folder of runs renders with intervals, and a row some runs lack`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             val batches = listOf(
@@ -145,14 +145,13 @@ class ProfileTest {
             }
             val text = Profile.load(dir).render()
             assertTrue("3 runs of '${dir.fileName}'" in text, text)
-            assertTrue("runBatch, each execution" in text, text)
-            assertTrue("6.22s  5.96s  5.90s" in text, "the first run's batches, in order: $text")
+            // No label is singled out: the run list has no column of a root row's executions, the header no line of it.
+            assertTrue("each execution" !in text && text.lines().none { it.startsWith("runBatch ") && "|" !in it }, text)
             val row = text.lines().first { it.startsWith("runBatch") }
-            // The runs' mean batches are 6.03, 6.50 and 7.16 s: 6.56 s, ±1.41 s with three runs, 21%: a range.
-            assertTrue("5.2..8.0s" in row, row)
+            // The runs' mean batches are 6.03, 6.50 and 7.16 s: 6.56 s, ±1.41 s with three runs, 21%: a range, the
+            // interval's own ends.
+            assertTrue("|" in row && "5.2..8.0s" in row, row)
             assertTrue(text.lines().any { it.trim().startsWith("rare (1 of 3 runs)") }, text)
-            // Over 20% of the figure with three runs: the interval's own ends.
-            assertTrue(Regex("""runBatch +[0-9.]+\.\.[0-9.]+s per execution""").containsMatchIn(text), "the batch, quotable: $text")
             assertTrue("WARNINGS" !in text, "nothing to warn about: $text")
             assertTrue("no interval, so any" !in text, "three runs have their intervals: $text")
         } finally {
@@ -161,15 +160,14 @@ class ProfileTest {
     }
 
     @Test
-    fun `runs that did not run the root row the same number of times are called out`() {
+    fun `runs that ran a label a different number of times are not a mixed folder`() {
         val dir = Files.createTempDirectory("ticksnick")
         try {
             RunStore.save(profile(listOf(node("runBatch", listOf(6L, 6L, 6L)))), dir.resolve("a$RUN_EXTENSION"))
             RunStore.save(profile(listOf(node("runBatch", listOf(7L)))), dir.resolve("b$RUN_EXTENSION"))
             val text = Profile.load(dir).render()
-            // The same workload ran the root the same number of times, so a count that differs is a mixed folder.
-            assertTrue(text.lines()[3] == "WARNINGS", text)
-            assertTrue(text.lines().any { it.startsWith("  Runs: they differ in `runBatch` executions, so each mean mixes them") }, text)
+            // No label is singled out as the program's batch: its count differs as any figure may, and has its interval.
+            assertTrue(text.lines().none { it.startsWith("  Runs: they differ") }, text)
         } finally {
             dir.toFile().deleteRecursively()
         }

@@ -136,8 +136,7 @@ internal class ProfileDiff(
         append(after.failedBanner(named = true, width = width))
         appendLine("=".repeat(width))
         appendLine(row("Diff", "${before.name} (${before.described()}) ${sym.arrow} ${after.name} (${after.described()})"))
-        val rootName = (after.root() ?: before.root())?.name
-        warningsSection(warnings(rootName))
+        warningsSection(warnings())
         factDiffLines(before.tagMaps, after.tagMaps, before.setupMaps, after.setupMaps)
         if (overRuns.isNotEmpty()) appendLine(row("", "each side the mean of its runs, one JVM each; the change judged on its 95% interval (Welch's t)"))
         with(before) { runList("before") }
@@ -147,12 +146,6 @@ internal class ProfileDiff(
             add(header("  Active", before.active(), after.active()))
             // No pause on either side is the default, nothing to look at: `Paused 0.00ns -> 0.00ns +0.00ns` said nothing.
             if (before.paused().mean > 0 || after.paused().mean > 0) add(header("  Paused", before.paused(), after.paused()))
-            if (rootName != null) {
-                val b = before.matched(before.tree(), rootName)
-                val a = after.matched(after.tree(), rootName)
-                if (b.present.isNotEmpty() && a.present.isNotEmpty())
-                    add(header(rootName, before.meanSpan(b), after.meanSpan(a), "per execution"))
-            }
         })
         clock()
         bothSides("Cores", before.coresText(), after.coresText())
@@ -216,7 +209,7 @@ internal class ProfileDiff(
      * What makes the change mean something other than the code's: printed on top, see [warningsSection].
      * The diff's own first, then each side's, which name their side: one run on a side is one of them.
      */
-    private fun warnings(rootName: String?): Warnings {
+    private fun warnings(): Warnings {
         val own = mutableListOf<Warning>()
         val b = clockMean(before)
         val a = clockMean(after)
@@ -226,13 +219,6 @@ internal class ProfileDiff(
                 Kind.CLOCK_BETWEEN_SIDES, words(before.runs[0].clock.format(b)), words(after.runs[0].clock.format(a)),
                 figure(maxOf(a, b) / minOf(a, b) - 1, ::shareText),
             )
-        if (rootName != null) {
-            fun countsOf(side: Profile) = side.matched(side.tree(), rootName).let { m -> m.present.map { m.nodes[it]!!.count } }.distinct()
-            val cb = countsOf(before)
-            val ca = countsOf(after)
-            if (cb.size == 1 && ca.size == 1 && ca != cb)
-                own += Warning(Kind.ROOT_COUNT_SIDES, words(code(rootName)), words(countText(cb[0].toDouble())), words(countText(ca[0].toDouble())))
-        }
         own += allocationsWarnings(before.runs, after.runs)
         val sides = before.warnings(named = true) + after.warnings(named = true)
         return Warnings(own.map { it.text() } + sides.ranked, sides.always)

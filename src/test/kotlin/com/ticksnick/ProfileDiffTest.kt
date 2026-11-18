@@ -88,18 +88,19 @@ class ProfileDiffTest {
             val before = dir.resolve("before").also { Files.createDirectories(it) }
             val after = dir.resolve("after").also { Files.createDirectories(it) }
             listOf(10_000_000_000L, 11_000_000_000L, 12_000_000_000L).forEachIndexed { i, t ->
-                save(before, i, listOf(node("runBatch", listOf(t, t), listOf(node("gone", listOf(t / 2)), node("same", listOf(1_000_000L + i))))))
+                save(before, i, listOf(node("runBatch", listOf(t, t), listOf(node("gone", listOf(t / 2)), node("same", listOf(1_000_000L + i))))), span = t)
             }
             listOf(7_000_000_000L, 8_000_000_000L, 9_000_000_000L).forEachIndexed { i, t ->
-                save(after, i, listOf(node("runBatch", listOf(t, t), listOf(node("same", listOf(1_000_001L - i))))))
+                save(after, i, listOf(node("runBatch", listOf(t, t), listOf(node("same", listOf(1_000_001L - i))))), span = t)
             }
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             assertTrue("before (3 runs) -> after (3 runs)" in text, text)
-            val header = text.lines().first { it.startsWith("runBatch ") }
+            val header = text.lines().first { it.startsWith("Wall time ") }
             // The interval is all that is said about how sure the change is: no mark beside it. A change that moved is,
             // in the full view, its interval's ends, by their real values, in time and in percent. Each side is a figure
             // and written by its rule: 11.0 s ±2.5 s and 8.00 s ±2.5 s are loose, their ranges.
-            assertTrue("8.5..13s -> 5.5..10s" in header && Regex("""-[0-9.]+\.\.-[0-9.]+%""").containsMatchIn(header) && "per execution" in header, header)
+            assertTrue("8.5..13s -> 5.5..10s" in header && Regex("""-[0-9.]+\.\.-[0-9.]+%""").containsMatchIn(header), header)
+            assertTrue(text.lines().none { it.startsWith("runBatch ") && "|" !in it }, "no label singled out on the header: $text")
             assertTrue(text.lines().any { it.trim().startsWith("gone (3 -> 0 runs)") }, "a row only before had: $text")
             // `same` moved by a nanosecond either way: no direction, and small against before, so it did not move, `=`.
             val same = diffRow(text, "same")[2]
@@ -119,12 +120,12 @@ class ProfileDiffTest {
         try {
             val before = dir.resolve("before").also { Files.createDirectories(it) }
             val after = dir.resolve("after").also { Files.createDirectories(it) }
-            save(before, 0, listOf(node("runBatch", listOf(10L, 10L))))
-            listOf(7L, 8L).forEachIndexed { i, t -> save(after, i, listOf(node("runBatch", listOf(t, t)))) }
+            save(before, 0, listOf(node("runBatch", listOf(10L, 10L))), span = 1_000_000_000)
+            listOf(700_000_000L, 800_000_000L).forEachIndexed { i, t -> save(after, i, listOf(node("runBatch", listOf(7L, 8L))), span = t) }
             val text = ProfileDiff(Profile.load(before), Profile.load(after)).render()
             val lines = text.lines()
             assertTrue(lines[2].isEmpty() && lines[3] == "WARNINGS" && lines[4].startsWith("  Runs: 1 in 'before', no interval") && lines[5].isEmpty(), "a section of its own, right under the title: $text")
-            val header = text.lines().first { it.startsWith("runBatch ") }
+            val header = text.lines().first { it.startsWith("Wall time ") }
             assertTrue("-25%" in header && "?" !in header && "+-" !in header.substringAfter("-25%"), header)
             assertTrue("NaN" !in text, text)
             // Right over each table, the side named; and no heading claims an interval the change does not have.
@@ -422,19 +423,20 @@ class ProfileDiffTest {
             val brief = diff("loose", "certain", View.BRIEF)
             assertTrue(Regex("""0\.85\.\.1\.3s -> 1\.11s\s""").containsMatchIn(line(brief, "Wall time")) && "+-" !in line(brief, "Wall time"), line(brief, "Wall time"))
             assertTrue(Regex("""^Wall time\s+\? -> 1\.11s \+-11%""").containsMatchIn(line(diff("unknown", "certain", View.FULL), "Wall time")))
-            // A wider side widens the column for every line, so the arrows stay one under another: the root's sides,
+            // A wider side widens the column for every line, so the arrows stay one under another: the pauses' sides,
             // the same each run, are plain and short, the wall time's a range and a `+-`.
-            listOf("rootB" to listOf(1_000_000_000L, 1_100_000_000L, 1_200_000_000L), "rootA" to listOf(1_060_000_000L, 1_160_000_000L, 1_110_000_000L))
+            listOf("pausedB" to listOf(1_000_000_000L, 1_100_000_000L, 1_200_000_000L), "pausedA" to listOf(1_060_000_000L, 1_160_000_000L, 1_110_000_000L))
                 .forEach { (name, spans) ->
                     val folder = dir.resolve(name).also { Files.createDirectories(it) }
-                    val batch = if (name == "rootB") 500_000_000L else 400_000_000L
+                    val paused = if (name == "pausedB") 50_000_000L else 40_000_000L
+                    val pause = Pauses(true, paused, 1, paused, gcNanos = paused, confirmedNanos = paused)
                     spans.forEachIndexed { i, span ->
-                        RunStore.save(profile(listOf(node("runBatch", listOf(batch))), emptyList(), span = span), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+                        RunStore.save(profile(emptyList(), emptyList(), span = span, pause = pause), folder.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
                     }
                 }
-            val mixed = diff("rootB", "rootA", View.FULL)
-            assertTrue("500ms -> 400ms" in line(mixed, "runBatch "), mixed)
-            assertEquals(line(mixed, "Wall time").indexOf("->"), line(mixed, "runBatch ").indexOf("->"), mixed)
+            val mixed = diff("pausedB", "pausedA", View.FULL)
+            assertTrue("50.0ms -> 40.0ms" in line(mixed, "  Paused"), mixed)
+            assertEquals(line(mixed, "Wall time").indexOf("->"), line(mixed, "  Paused").indexOf("->"), mixed)
             // The own table's heading quotes the active time, the header's `Active`: by the same rule.
             val report = Profile.load(dir.resolve("loose"))
             assertTrue("out of 0.85..1.3s active time" in line(report.render(view = View.FULL), "OWN THREAD-TIME"), report.render(view = View.FULL))
@@ -446,8 +448,8 @@ class ProfileDiffTest {
         }
     }
 
-    private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10))) =
-        RunStore.save(profile(tree, ops), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
+    private fun save(dir: Path, i: Int, tree: List<CoarseNode>, ops: List<OperationStat> = listOf(stat("work", 10, 10)), span: Long = 1_000_000_000) =
+        RunStore.save(profile(tree, ops, span), dir.resolve("2026-10-25T16-1$i-00$RUN_EXTENSION"))
 
     private fun stat(name: String, hits: Long, calls: Long) = OperationStat(0, name, hits, calls, 0, 0, 0, 0, hits)
 
@@ -456,9 +458,9 @@ class ProfileDiffTest {
         10, 10, LongArray(MAX_OPERATIONS + 1), 0, children,
     )
 
-    private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>, span: Long = 1_000_000_000, stale: Long = 0) = Run(
+    private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>, span: Long = 1_000_000_000, stale: Long = 0, pause: Pauses = Pauses.NONE) = Run(
         operations = ops, idleHits = 0, ticks = 1_001,
-        samplingSpanNanos = span, durationNanos = span, threads = 1,
+        samplingSpanNanos = span, durationNanos = span, threads = 1, pause = pause,
         staleContextHits = stale, coarseSampleHits = 10,
         duty = Duty(
             labelledDuty = 0.999, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,

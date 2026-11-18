@@ -19,9 +19,6 @@ private val T95 = doubleArrayOf(
 /** The normal distribution's two-sided 95% point: where t goes as the degrees of freedom grow. */
 private const val Z95 = 1.959964
 
-/** The most executions of a run's root row listed one by one beside it: its batches, not its requests. */
-internal const val RUN_EXECUTIONS_LISTED = 10
-
 /**
  * How far apart the runs' mean clocks may be, as a fraction of the slowest, before the report says
  * the interval includes a clock change: 205% against 159% of base is 29%, and a run's time follows
@@ -360,10 +357,6 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
                 )
             )
         )
-        root()?.let { root ->
-            val mean = meanSpan(root)
-            if (mean.n > 0) appendLine(row(root.name, durationWithInterval(mean, view) + " per execution"))
-        }
         // Always, under the wall time: who had the cores, the program's threads being only some of it.
         coresText()?.let { appendLine(row("Cores", it)) }
         // The one mechanism shown: whether the sampler held a processor, which the reader can change.
@@ -386,9 +379,6 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         with(runs[0]) { renderLegend(legend) }
         appendLine("=".repeat(pageWidth))
     }
-
-    /** The heaviest root row, a benchmark's batch: the number an article quotes. */
-    internal fun root(): Matched? = childrenOf(runs.map { it.coarseTree }).firstOrNull()
 
     /** One run's fine rows in the coarse row [n]'s own time. */
     private fun ownOf(i: Int, n: CoarseNode): List<Run.OwnRow> = runs[i].ownRowsOf(n) ?: runs[i].splitRowsOf(n)
@@ -837,10 +827,7 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
         // A profile whose runs all failed has none: its banner says so, and nothing else is printed.
         if (runs.isEmpty()) return Warnings()
         val where = if (named) " in '$name'" else ""
-        val root = root()
-        val mixed = mixedNames(tagMaps) + mixedNames(setupMaps) + listOfNotNull(
-            root?.takeIf { r -> runs.indices.map { r.nodes[it]?.count ?: 0L }.distinct().size > 1 }?.let { "${code(it.name)} executions" }
-        )
+        val mixed = mixedNames(tagMaps) + mixedNames(setupMaps)
         return Warnings(
             intervalWarnings(where).map { it.text() } + mergeWarnings(runs.map { it.warnings() }, where).map { it.second },
             if (mixed.isEmpty()) emptyList() else listOf(Warning(Kind.RUNS_MIXED, words(where), words(mixed.joinToString(", "))).text()),
@@ -868,30 +855,23 @@ class Profile internal constructor(internal val name: String, allFiles: List<Pat
     }
 
     /**
-     * The runs one by one: file, wall time, clock, and the executions of the heaviest root row while
-     * they are few - the batches of a benchmark, exactly. The table a reader checks first: a run that
-     * stands out, and whether its clock says why.
+     * The runs one by one: file, wall time, clock. The table a reader checks first: a run that stands
+     * out, and whether its clock says why.
      */
     internal fun StringBuilder.runList(side: String = "", header: Boolean = true) {
-        val root = root()
-        val listed = root != null && root.present.all { i ->
-            val node = root.nodes[i]!!
-            node.count <= RUN_EXECUTIONS_LISTED && node.spans.isExact
-        }
         // A diff lists both sides' runs in one table, each line saying whose run it is.
         val indent = "              " + if (side.isEmpty()) "" else String.format(Locale.ROOT, "%-7s", side)
         if (header) appendLine(
             String.format(
-                Locale.ROOT, "              %s%-4s %-28s %10s %11s   %s", if (side.isEmpty()) "" else " ".repeat(7),
-                "run", "file", "wall", "CPU clock", if (root != null && listed) "${root.name}, each execution" else ""
+                Locale.ROOT, "              %s%-4s %-28s %10s %11s", if (side.isEmpty()) "" else " ".repeat(7),
+                "run", "file", "wall", "CPU clock"
             ).trimEnd()
         )
         runs.forEachIndexed { i, p ->
-            val each = if (root != null && listed) root.nodes[i]?.spans?.exactDurations()?.joinToString("  ") { duration(it.toDouble()) } ?: UNKNOWN else ""
             appendLine(
                 String.format(
-                    Locale.ROOT, "%s%-4d %-28s %10s %11s   %s", indent, i + 1, files[i].fileName.toString(),
-                    duration(p.samplingSpanNanos.toDouble()), p.clock.format(p.clock.mean), each
+                    Locale.ROOT, "%s%-4d %-28s %10s %11s", indent, i + 1, files[i].fileName.toString(),
+                    duration(p.samplingSpanNanos.toDouble()), p.clock.format(p.clock.mean)
                 ).trimEnd()
             )
         }

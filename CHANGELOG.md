@@ -2,6 +2,15 @@
 
 Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
 
+## Unreleased
+
+- **No label is singled out as the program's batch.** The run list shows each run's file, wall time and
+  clock, without a column of the heaviest root operation's executions; the header has no `runBatch 6.34s
+  per execution` line, in a report or a diff. That operation's `Mean` is in the wall table, as every
+  operation's is. Gone with them: the warning that a diff's root operation ran a different number of times
+  on each side, and a mixed folder by how many times it ran. Runs that differ in their batches still show
+  as mixed when they are tagged (`tags = mapOf("batches" to 3)`).
+
 ## 0.7.0 - 2026-11-17
 
 ### Two views: brief by default

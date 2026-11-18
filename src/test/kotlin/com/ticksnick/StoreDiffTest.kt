@@ -219,16 +219,12 @@ class StoreDiffTest {
     }
 
     @Test
-    fun `a diff names a clock that moved between the sides, and a root run a different number of times`() {
-        fun root(count: Long) = CoarseNode(
-            0, "root", count, count * 1_000_000, 1_000_000, 1_000_000, Spans(), 10, 10, LongArray(MAX_OPERATIONS + 1), 0, emptyList(),
-        )
-        val before = profile(listOf(stat("a", 100, 1_000)), tree = listOf(root(3)), clock = steadyAt(200.0))
-        val after = profile(listOf(stat("a", 100, 1_000)), tree = listOf(root(4)), clock = steadyAt(150.0))
+    fun `a diff names a clock that moved between the sides`() {
+        val before = profile(listOf(stat("a", 100, 1_000)), clock = steadyAt(200.0))
+        val after = profile(listOf(stat("a", 100, 1_000)), clock = steadyAt(150.0))
         val text = diffOf(before, after)
         assertTrue("CPU clock     200% -> 150%, the mean of each side's runs" in text, text)
         assertTrue("CPU clock: 200% -> 150% between the sides" in text, text)
-        assertTrue("`root`: ran 3 times before, 4 after" in text, text)
     }
 
     @Test

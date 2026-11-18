@@ -134,7 +134,6 @@ internal enum class Kind(val text: (List<String>) -> String) {
     CLOCK_BETWEEN_SIDES({ g ->
         "CPU clock: ${g[0]} ${sym.arrow} ${g[1]} between the sides${sym.dash}a change in time of up to ${g[2]} may be the machine, not the code; shares hold"
     }),
-    ROOT_COUNT_SIDES({ g -> "${g[0]}: ran ${g[1]} times before, ${g[2]} after${sym.dash}compare its time per execution, not in total" }),
     ALLOCATIONS_ONE_SIDE({ g ->
         "Allocated: counted on one side only${sym.dash}it adds about ${g[0]} to each coarse execution there; count it on both sides or neither"
     }),

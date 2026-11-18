@@ -65,7 +65,7 @@ runBatch                           |      6.34s |             |          1      
   `This is the full view, ...`, with the way back. In both views each group is named over its columns,
   and the groups come in this order, the basis first.
 - **A certain figure is written without its interval:** `6.34s`, where the full view writes `6.34s
-  +-5.0%`, in the tables and on the header lines alike: `runBatch 6.34s per execution`. It is usable as
+  +-5.0%`, in the tables and on the header lines alike: `Wall time 6.34s = ...`. It is usable as
   one value. A loose figure keeps its range, `370..560ms`, and an unknown one is `?`, as in the full view.
   So the form alone says how sure a figure is: plain is certain, a range loose, `?` unknown, and each table
   ends with that key. One run prints plain too, so the line over each table says it may not be, and the
@@ -114,10 +114,9 @@ WARNINGS
 
 Tags          warmups: 2; batches: 3; roots: org.apache.*
 Setup         Java: 21.0.4; JVM: OpenJDK 64-Bit Server VM; OS: Windows 11 amd64; CPU: Intel64 Family 6 Model 197 Stepping 2, GenuineIntel; Processors: 14; Heap: 18.0 GB; GC: G1; Flags: -Xmx18g; Sampling: 1.00ms; Wait: SPIN
-              run  file                               wall   CPU clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s  27.4s  27.0s
+              run  file                               wall   CPU clock
+              1    2026-10-26T18-16-43.tsr            117s         99%
 Wall time     117s = 104s active + 13.0s paused (11.1%) in 57 pauses, longest 1.98s
-runBatch      27.3s per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.67: GC 1.73 (1.20 in pauses), sampler 0.88, JIT 0.07
 Sampling      every 1.0ms: the sampler keeps one of the 14 processors busy to hold the tick
 ```
@@ -157,7 +156,7 @@ The common ones:
 - `Paused: 1.85s of pauses, 2.10% of the run, is counted as work in the times below` - GC pauses
   TickSnick could not tell from work.
 - `Runs: they differ in Heap, so each mean mixes them` - the runs of a folder disagree on a tag, the
-  setup, or how many times the root operation ran, so they are not one profile. Split the folder. It is
+  or the setup, so they are not one profile. Split the folder. It is
   always the last warning.
 - `Runs: 2 of 4 shared a JVM` - two sessions of one JVM are not independent, so every interval is too narrow.
 
@@ -396,13 +395,12 @@ With two runs or more, each figure is the mean of the runs, with its 95% interva
 
 ```
 Runs          4 runs of 'naive', one JVM each: every figure below is their mean, with its 95% interval from how much the runs differ (Student's t, 3 degrees of freedom)
-              run  file                               wall   CPU clock   runBatch, each execution
-              1    2026-10-26T18-16-43.tsr            117s         99%   27.6s  27.4s  27.0s
-              2    2026-10-26T18-23-49.tsr            117s         99%   27.4s  27.1s  27.5s
-              3    2026-10-26T18-30-57.tsr            117s         99%   27.8s  27.1s  28.1s
-              4    2026-10-26T18-38-06.tsr            117s         99%   27.5s  27.4s  27.6s
+              run  file                               wall   CPU clock
+              1    2026-10-26T18-16-43.tsr            117s         99%
+              2    2026-10-26T18-23-49.tsr            117s         99%
+              3    2026-10-26T18-30-57.tsr            117s         99%
+              4    2026-10-26T18-38-06.tsr            117s         99%
 Wall time     117s +-0.4% = 104s +-0.3% active + 13.2s +-2.4% paused (11.3%) in 59 pauses, longest 2.01s
-runBatch      27.5s +-0.9% per execution
 Cores         14 processors: profiled threads 2.85, the rest 2.70: GC 1.75 (1.22 in pauses), sampler 0.88, JIT 0.06
 
 NESTED WALL TIME - each row its whole span, under its parent as it ran; a pause is charged to every operation it interrupted; each figure the mean of the runs, with its 95% interval
@@ -420,9 +418,8 @@ runBatch                           | 82.4s +-0.9% |                |          3 
 clock of the moment, so they are not independent. The interval comes from how much whole runs
 differ. With three runs t is 4.30, with four 3.18: few runs give a wide interval.
 
-- **The run list** shows each run's wall time, its clock, and each execution of the root operation,
-  while it ran at most ten times.
-  A run that stands out is visible here before it widens every interval below.
+- **The run list** shows each run's wall time and its clock. A run that stands out is visible here
+  before it widens every interval below.
 - **% parent** is each run's share of its own parent, with its interval in percentage points. The
   run's speed cancels out, so it shows whether the structure held while the whole run got faster or
   slower.
@@ -473,7 +470,6 @@ Diff          naive (4 runs) -> centralEdges (4 runs)
 Wall time      117s +-0.4% -> 91.6s +-1.8%  -24..-27s              -20..-23%
   Active       104s +-0.3% -> 79.2s +-1.9%  -23..-26s              -22..-25%
   Paused      13.2s +-2.4% -> 12.4s +-2.3%  -0.46..-1.1s           -3.5..-8.7%
-runBatch      27.5s +-0.9% -> 19.4s +-1.9%  -7.7..-8.4s            -28..-31%        per execution
 
 NESTED WALL TIME - each row its whole span, matched by path; each side the mean of its runs, the change its 95% interval
 This is the full view, every lens and every interval; the brief view, the basis with lenses opened by --lens, is --view brief

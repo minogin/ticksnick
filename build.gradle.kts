@@ -31,7 +31,7 @@ tasks.named<Jar>("jar") {
 // `./gradlew cli --args="render profiles/after"`, `--args="diff profiles/before profiles/after"`.
 tasks.register<JavaExec>("cli") {
     group = "application"
-    description = "render a folder of runs, or diff two: --args=\"[options] render <folder>\" | --args=\"[options] diff <before> <after>\"; options: --unicode, --view brief|full, --lens <name>"
+    description = "render a folder of runs, or diff two: --args=\"[options] render <folder>\" | --args=\"[options] diff <before> <after>\"; options: --unicode, --view brief|full, --lens <name>, --filter '<condition>' (repeatable)"
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("com.ticksnick.Cli")
     // Gradle reads the program's output as UTF-8; without this, Java writes the platform's charset and

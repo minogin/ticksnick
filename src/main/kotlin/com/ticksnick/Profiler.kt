@@ -270,7 +270,9 @@ internal class OpSlot(
 
     /**
      * The context on this thread now: [own], or one put on it by `within`, `using` or `mount`. The
-     * executions it opens belong to it, and only it closes them. Written by the owner only.
+     * executions it opens belong to it, and only it closes them; its innermost is what the thread is
+     * inside (see [executionOpaque]). Written by the owner, after raising [executionChanges]; read by
+     * the sampler.
      */
     @JvmField
     var context: Context = own
@@ -278,33 +280,19 @@ internal class OpSlot(
     /**
      * The contexts put on this thread over [own], innermost last, [frameCount] of them, each with what
      * its mount saved; [context] is the last. Kept on the thread, not on the context: a coroutine's
-     * context can go onto a second thread before the first has taken it off, and each thread puts back
+     * context can be on a second thread before the first has taken it off, and each thread puts back
      * its own. Written by the owner; a thread taking a context over reads the top one.
      */
     @JvmField
     var frames = arrayOfNulls<Frame>(MOUNT_FRAMES)
 
+    /** How many of [frames] are in use. Written with a release store, read by a taking thread with an acquire. */
     @JvmField
     var frameCount: Int = 0
 
     /**
-     * The innermost coarse execution of [context], or null: what the thread is inside right now.
-     *
-     * Where the two tiers meet. The sampler reads this and [current] in the same visit, so every
-     * sample carries the pair *(which physical operation, under which logical one)* — which is the
-     * cross-tabulation, and neither tier can produce it alone.
-     *
-     * Accessed opaquely for the identical reason [current] is: no fence on either side, and the
-     * publication safety comes from [Execution]'s final fields rather than from ordering here.
-     * A stack is not needed beside it — the execution chains to its parent, so restoring on exit is
-     * one field write.
-     */
-    @JvmField
-    var execution: Execution? = null
-
-    /**
-     * How many times [execution] has changed, so the sampler can take [current] and [execution] as one
-     * instant.
+     * How many times the execution the thread is inside has changed - its context's innermost, or its
+     * context - so the sampler can take [current] and that execution as one instant.
      *
      * The sampler reads the two one after the other, and the thread does not wait for it: caught in a
      * fine label inside a coarse child, it can close the label and the child before the second read,
@@ -428,12 +416,17 @@ internal class OpSlot(
         @JvmStatic
         val COUNTS: VarHandle = MethodHandles.arrayElementVarHandle(LongArray::class.java)
 
-        /** The coarse half of the pair. Static final for the same constant-folding reason as [CURRENT]. */
+        /** [context], read by the sampler. Static final for the same constant-folding reason as [CURRENT]. */
         @JvmStatic
-        val EXECUTION: VarHandle =
-            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "execution", Execution::class.java)
+        val CONTEXT: VarHandle =
+            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "context", Context::class.java)
 
-        /** The count of [execution]'s changes. Static final for the same constant-folding reason as [CURRENT]. */
+        /** [frameCount], read by a thread taking a context over. */
+        @JvmStatic
+        val FRAME_COUNT: VarHandle =
+            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "frameCount", Int::class.javaPrimitiveType)
+
+        /** The count of execution changes. Static final for the same constant-folding reason as [CURRENT]. */
         @JvmStatic
         val CHANGES: VarHandle =
             MethodHandles.lookup().findVarHandle(OpSlot::class.java, "executionChanges", Int::class.javaPrimitiveType)
@@ -451,13 +444,25 @@ internal fun OpSlot.getOpaque(): Int = OpSlot.CURRENT.getOpaque(this) as Int
 /** How many times this thread has entered [id], read from another thread. See [OpSlot.COUNTS]. */
 internal fun OpSlot.countOpaque(id: Int): Long = OpSlot.COUNTS.getOpaque(counts, id + OpSlot.COUNT_PAD) as Long
 
-/** The coarse execution this thread is inside, or null. No fence — see [OpSlot.execution]. */
+/**
+ * The coarse execution this thread is inside, or null: the innermost of the context on it.
+ *
+ * Where the two tiers meet. The sampler reads this and [OpSlot.current] in the same visit, so every
+ * sample carries the pair *(which physical operation, under which logical one)* — which is the
+ * cross-tabulation, and neither tier can produce it alone.
+ *
+ * Kept in the context, not copied onto the thread: a context comes onto a thread and off it by one
+ * field, and a coroutine's context on two threads for a moment - resumed on one before the other has
+ * let it go - has one innermost, not two. Opaque reads for the reason [OpSlot.current]'s are: no fence
+ * on either side, and the publication safety comes from [Execution]'s final fields.
+ */
 @PublishedApi
-internal fun OpSlot.executionOpaque(): Execution? = OpSlot.EXECUTION.getOpaque(this) as Execution?
+internal fun OpSlot.executionOpaque(): Execution? =
+    Context.INNERMOST.getOpaque(OpSlot.CONTEXT.getOpaque(this) as Context) as Execution?
 
 /**
- * Publishes [ctx] as this thread's current coarse execution, counting the change first. See
- * [OpSlot.execution] and [OpSlot.executionChanges].
+ * Publishes [ctx] as this thread's current coarse execution, its context's innermost, counting the
+ * change first. See [executionOpaque] and [OpSlot.executionChanges].
  *
  * The count is raised with a release store, so a sampler that sees it raised also sees every fine
  * label closed before it, and the fence keeps the execution from being seen before the count. On x86
@@ -467,7 +472,14 @@ internal fun OpSlot.executionOpaque(): Execution? = OpSlot.EXECUTION.getOpaque(t
 internal fun OpSlot.setExecutionOpaque(ctx: Execution?) {
     OpSlot.CHANGES.setRelease(this, executionChanges + 1)
     VarHandle.storeStoreFence()
-    OpSlot.EXECUTION.setOpaque(this, ctx)
+    Context.INNERMOST.setOpaque(context, ctx)
+}
+
+/** Puts [c] on this thread, counting the change first, as [setExecutionOpaque] does: its innermost is now the thread's. */
+internal fun OpSlot.setContextOpaque(c: Context) {
+    OpSlot.CHANGES.setRelease(this, executionChanges + 1)
+    VarHandle.storeStoreFence()
+    OpSlot.CONTEXT.setOpaque(this, c)
 }
 
 /** The count of execution changes, read by the sampler before the pair. See [OpSlot.executionChanges]. */
@@ -874,14 +886,14 @@ object Profiler {
     /** Threads inside a coarse execution right now, which at the end of a session is a leak. */
     internal fun openExecutions(): Int {
         var n = 0
-        forEachSlot { if (it.execution != null) n++ }
+        forEachSlot { if (it.executionOpaque() != null) n++ }
         return n
     }
 
     /** [openExecutions] by coarse label, each with how many threads are inside one. */
     internal fun openExecutionsByName(): Map<String, Int> {
         val byName = java.util.TreeMap<String, Int>()
-        forEachSlot { s -> s.execution?.let { byName.merge(coarseNameOf(it.type), 1, Int::plus) } }
+        forEachSlot { s -> s.executionOpaque()?.let { byName.merge(coarseNameOf(it.type), 1, Int::plus) } }
         return byName
     }
 
@@ -1202,7 +1214,7 @@ object Profiler {
 
     /** Fails the run for [c] put on [slot]'s thread while it is on a thread already. */
     internal fun failInUse(c: Context, slot: OpSlot) {
-        val other = c.on as? OpSlot
+        val other = c.on
         fail(inUseMessage(c.describe(), slot.own.describe(), other?.own?.describe() ?: "another thread"))
     }
 

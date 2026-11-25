@@ -22,12 +22,6 @@ internal const val WITHIN = 1
 internal const val NEW = 2
 
 /**
- * What [Context.on] holds while the thread taking the context off writes its innermost back: a mount
- * that finds it waits for those two stores.
- */
-private val LEAVING = Any()
-
-/**
  * Everything one line of work has open: its coarse executions, the innermost and its parents, down
  * to the one it borrowed, if any, which it never closes.
  *
@@ -53,15 +47,19 @@ class Context @PublishedApi internal constructor(
     /** For a thread's own context, its thread's slot, to name the thread by. */
     @JvmField @field:JvmSynthetic internal val slot: OpSlot? = null,
 ) {
-    /** Its innermost open execution while it is on no thread. While it is on one, that slot's is the one. */
+    /**
+     * Its innermost open execution. Always here, on a thread or off: a thread it is on reads and writes
+     * it here (see [OpSlot.executionOpaque]), so nothing is copied when it comes on or goes off.
+     */
     @JvmField @field:JvmSynthetic internal var innermost: Execution? = bottom
 
     /**
-     * The slot it is on; null for none; [LEAVING] while its thread writes [innermost] back. Taken by
-     * compare-and-set, so it is on one thread at a time, but for the hand-over of [mount]. What a
+     * The slot it is on, or null. `using` takes it by compare-and-set, so a context is never on two
+     * threads by hand. `mount()` marks it with plain stores, a mark for the failure only: a coroutine's
+     * context is for a moment on the thread it resumes on and on the one still letting it go. What a
      * thread saved when the context came on is in that thread's frames, not here.
      */
-    @JvmField @field:JvmSynthetic internal var on: Any? = null
+    @JvmField @field:JvmSynthetic internal var on: OpSlot? = null
 
     /** What [mount] returns, made on the first. */
     private var handle: Mount? = null
@@ -87,12 +85,14 @@ class Context @PublishedApi internal constructor(
      * line of work is over, off every thread.
      */
     fun end() {
-        val slot = Profiler.slot()
-        val top = if (on === slot && slot.context === this) slot.executionOpaque() else innermost
-        val left = Profiler.leftOpen(top, bottom) ?: return
+        val left = Profiler.leftOpen(innermost, bottom) ?: return
         Profiler.failLeftOpen(left, "`end()` of ${describe()}")
-        innermost = bottom
-        if (on === slot && slot.context === this) slot.unwindTo(bottom)
+        val slot = Profiler.slot()
+        if (slot.context === this) slot.unwindTo(bottom)
+        else {
+            markAllClosed(innermost, bottom)
+            innermost = bottom
+        }
     }
 
     /** Takes a context off the thread that closes it, the thread it was put on. */
@@ -110,16 +110,17 @@ class Context @PublishedApi internal constructor(
 
     internal companion object {
         @JvmStatic
-        val ON: VarHandle = MethodHandles.lookup().findVarHandle(Context::class.java, "on", Any::class.java)
+        val ON: VarHandle = MethodHandles.lookup().findVarHandle(Context::class.java, "on", OpSlot::class.java)
+
+        /** [innermost], for the thread it is on and for the sampler. */
+        @JvmStatic
+        val INNERMOST: VarHandle = MethodHandles.lookup().findVarHandle(Context::class.java, "innermost", Execution::class.java)
     }
 }
 
 /** A context put on a thread, with what its mount saved, put back when it comes off. Made once per depth, reused. */
 internal class Frame {
     @JvmField var context: Context? = null
-
-    /** The execution the thread was inside. */
-    @JvmField var savedExecution: Execution? = null
 
     /** The thread's hand-placed fine labels: one entered after and still open when the context comes off crossed it. */
     @JvmField var savedDepth: Int = 0
@@ -176,56 +177,47 @@ inline fun <T> using(context: Context, body: () -> T): T {
 }
 
 /**
- * Puts [c] on this thread: saves what the thread was inside in a frame, and shows [c]'s innermost
- * execution. False, and the run fails, when [c] is on another thread already: a context is one line
- * of work, on one thread at a time - but for the hand-over a `mount()` [byMount] may make, see
+ * Puts [c] on this thread: saves the thread's fine depth in a frame, and makes [c]'s innermost what the
+ * thread is inside. False, and the run fails, when [c] is on another thread already: a context is one
+ * line of work, on one thread at a time - but for the hand-over a `mount()` [byMount] may make, see
  * [Context.mount].
  */
 @PublishedApi
 internal fun OpSlot.mount(c: Context, byMount: Boolean = false): Boolean {
-    if (context === c && c.on === this) {
+    if (context === c && frameCount > 0) {
         frames[frameCount - 1]!!.remounts++
         return true
     }
-    var inner = c.innermost
-    if (c.kind == WITHIN) c.on = this
-    else while (true) {
-        val o = Context.ON.getAcquire(c)
-        if (o == null) {
-            if (Context.ON.compareAndSet(c, null, this)) {
-                inner = c.innermost
-                break
-            }
-        } else if (o === LEAVING) {
-            Thread.onSpinWait()
-        } else {
-            // On another thread. Taken over only from a `mount()` on top there: that thread has stopped
-            // running the work, and its slot holds the innermost until it takes the context off, which
-            // begins by claiming `on` - so the compare-and-set below fails if that began first.
-            val from = o as OpSlot
-            if (!byMount || from === this) {
-                Profiler.failInUse(c, this)
-                return false
-            }
-            if (!from.onTopByMount(c)) {
-                // That thread may have taken it off since `on` was read: look again.
-                if (Context.ON.getAcquire(c) !== from) continue
-                Profiler.failInUse(c, this)
-                return false
-            }
-            val e = from.executionOpaque()
-            if (Context.ON.compareAndSet(c, from, this)) {
-                inner = e
-                break
-            }
-        }
+    val taken = when {
+        c.kind == WITHIN -> true.also { c.on = this }
+        byMount -> c.markOn(this)
+        else -> Context.ON.compareAndSet(c, null, this)
     }
-    val e = executionOpaque()
+    if (!taken) {
+        Profiler.failInUse(c, this)
+        return false
+    }
     // The calls and bytes so far belong to what the thread was inside.
-    flushCounts(e)
-    pushFrame(c, e, byMount)
-    context = c
-    setExecutionOpaque(inner)
+    flushCounts(executionOpaque())
+    pushFrame(c, byMount)
+    setContextOpaque(c)
+    return true
+}
+
+/**
+ * Marks [c] on this thread for a `mount()`. Refused when it is on another thread by `using`, or by a
+ * `mount()` not on top there: two lines of work in one context. On top there by `mount()`, it is a
+ * coroutine resumed here before that thread has let it go, which runs none of its work by now: taken.
+ */
+private fun Context.markOn(slot: OpSlot): Boolean {
+    while (true) {
+        val o = Context.ON.getAcquire(this) as OpSlot?
+        if (o == null || o.onTopByMount(this)) break
+        if (o === slot) return false
+        // That thread may have let it go since `on` was read, its mark off before its frame: look again.
+        if (Context.ON.getAcquire(this) === o) return false
+    }
+    Context.ON.setRelease(this, slot)
     return true
 }
 
@@ -241,17 +233,17 @@ internal fun OpSlot.unmount(c: Context) {
 }
 
 /**
- * Takes [c] off this thread, the calling one, and puts back what the thread was inside before. A
- * `within` context ends here, so whatever it opened must be closed; a fine label entered while [c]
- * was on must be closed by now. If another thread's `mount()` took [c] over meanwhile, only this
- * thread is put back: [c] is that thread's now.
+ * Takes [c] off this thread, the calling one, and puts back the context below it. A `within` context
+ * ends here, so whatever it opened must be closed; a fine label entered while [c] was on must be closed
+ * by now. [c] keeps its innermost; nothing of it is written but its mark, and that only while the mark
+ * is this thread's: another thread's `mount()` may have taken it meanwhile.
  */
 internal fun OpSlot.takeOff(c: Context, byMount: Boolean) {
     val f = frameOf(c)
     if (f < 0) {
         // Not on this thread: taken off already, or a `mount()` closed on a thread it was not put on.
         val o = c.on
-        if (byMount && o is OpSlot) Profiler.failMoved(c, o)
+        if (byMount && o != null) Profiler.failMoved(c, o)
         return
     }
     val top = frameCount - 1
@@ -267,50 +259,42 @@ internal fun OpSlot.takeOff(c: Context, byMount: Boolean) {
         setOpaque(stack[frame.savedDepth])
         depth = frame.savedDepth
     }
-    var inner = executionOpaque()
-    flushCounts(inner)
+    flushCounts(executionOpaque())
     for (i in top downTo f) {
         val fi = frames[i]!!
-        release(fi.context!!, inner)
-        inner = fi.savedExecution
+        fi.context!!.letGo(this)
         fi.context = null
-        fi.savedExecution = null
     }
-    frameCount = f
-    context = if (f == 0) own else frames[f - 1]!!.context!!
-    setExecutionOpaque(inner)
+    val below = if (f == 0) own else frames[f - 1]!!.context!!
+    // After the marks come off: a thread that finds the frame gone finds the mark gone too.
+    OpSlot.FRAME_COUNT.setRelease(this, f)
+    setContextOpaque(below)
 }
 
-/**
- * Lets [c] go from this thread with [inner] its innermost execution. Claims [Context.on] first: if
- * another thread's `mount()` took [c] over, [c] is that thread's, and nothing of it is written here.
- */
-private fun OpSlot.release(c: Context, inner: Execution?) {
-    if (c.kind == WITHIN) {
-        val left = Profiler.leftOpen(inner, c.bottom)
+/** Lets this context go from [slot]'s thread: a `within` context ends, and the mark comes off if it is that thread's. */
+private fun Context.letGo(slot: OpSlot) {
+    if (kind == WITHIN) {
+        val left = Profiler.leftOpen(innermost, bottom)
         if (left != null) {
             Profiler.failLeftOpen(left, "the end of `within`")
-            markAllClosed(inner, c.bottom)
+            markAllClosed(innermost, bottom)
         }
-        c.innermost = c.bottom
-        c.on = null
-        return
+        innermost = bottom
+        on = null
+    } else if (Context.ON.getAcquire(this) === slot) {
+        Context.ON.setRelease(this, null)
     }
-    if (!Context.ON.compareAndSet(c, this, LEAVING)) return
-    c.innermost = inner
-    Context.ON.setRelease(c, null)
 }
 
-/** Saves what this thread was inside, [saved], as [c] comes on. */
-private fun OpSlot.pushFrame(c: Context, saved: Execution?, byMount: Boolean) {
+/** Saves this thread's fine depth as [c] comes on. */
+private fun OpSlot.pushFrame(c: Context, byMount: Boolean) {
     if (frameCount == frames.size) frames = frames.copyOf(frameCount * 2)
     val f = frames[frameCount] ?: Frame().also { frames[frameCount] = it }
     f.context = c
-    f.savedExecution = saved
     f.savedDepth = depth
     f.remounts = 0
     f.byMount = byMount
-    frameCount++
+    OpSlot.FRAME_COUNT.setRelease(this, frameCount + 1)
 }
 
 /** The frame [c] is in on this thread, or -1. */
@@ -320,21 +304,10 @@ private fun OpSlot.frameOf(c: Context): Int {
     return i
 }
 
-/**
- * Whether this thread is letting go of a context another thread's `mount()` took over: a coroutine
- * resumed elsewhere before this thread finished suspending it. The thread runs none of its work, but
- * shows its labels until it takes the context off, and the other thread may close them meanwhile. Read
- * by the sampler, which bills that moment as it bills any suspension's, not as work under a label ended.
- */
-internal fun OpSlot.lettingGo(): Boolean {
-    val c = context
-    return c.kind == NEW && Context.ON.getOpaque(c) !== this
-}
-
 /** Whether [c] is on top of this thread, put there by `mount()`. Read by another thread, to take [c] over. */
 private fun OpSlot.onTopByMount(c: Context): Boolean {
+    val n = OpSlot.FRAME_COUNT.getAcquire(this) as Int
     val fs = frames
-    val n = frameCount
     if (n <= 0 || n > fs.size) return false
     val f = fs[n - 1] ?: return false
     return f.context === c && f.byMount

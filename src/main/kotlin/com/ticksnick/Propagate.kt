@@ -9,22 +9,22 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * Carrying a coarse execution across a thread boundary.
+ * Work handed to a pool, run within the execution that handed it over.
  *
- * A [CoarseContext] lives in the slot of the thread that made it, so work handed to a pool leaves it
- * behind: the helper threads run under no context at all, and the caller's span reports the time
+ * An [Execution] lives in the slot of the thread that made it, so work handed to a pool leaves it
+ * behind: the helper threads run under no execution at all, and the caller's span reports the time
  * they spent as *waiting*. A search fanned across eight threads can leave close to 90% of its
  * labelled thread-time outside every span, and a request's own span can account for well under 1%
  * of the work that request did.
  *
- * **The whole mechanism is save the reference and restore it.** [captureCoarse] on the forking
- * thread, [withCoarse] on the receiving one. Everything else in this file is a wrapper that puts
- * those two calls in the right places for you.
+ * **The whole mechanism is [Profiler.currentExecution] on the thread that hands the work over, and
+ * [within] on the one that runs it.** Everything in this file is a wrapper that puts those two calls
+ * in the right places for you.
  *
- * **A hand-off never creates an execution.** [withCoarse] mounts a context that already exists; it
- * allocates nothing, records no span, and counts no execution. Only [coarse] and [enterCoarse] open
- * one, and only the thread that opened it closes it. That is what keeps four helpers on one request
- * reading as one execution occupied by four threads rather than as four executions.
+ * **A hand-off never creates an execution.** The task borrows one that already exists; it records no
+ * span of it, and counts no execution. Only `op` and `enter` open one, and only the context that
+ * opened it closes it. That is what keeps four helpers on one request reading as one execution
+ * occupied by four threads rather than as four executions.
  *
  * **Opt in, deliberately.** Nothing here happens unless you ask for it, and a hand-off you forget to
  * wrap fails in the recoverable direction: the work loses its attribution and shows up in the
@@ -32,67 +32,37 @@ import java.util.concurrent.TimeUnit
  * The alternative — decorating pools behind your back — fails the other way, silently billing work
  * to whichever execution happened to be open, and losing attribution is recoverable where inventing
  * it is not.
+ *
+ * These read the thread, so inside a coroutine they hand over what the thread is inside, which
+ * TickSnick does not follow yet.
  */
 
 /**
- * The coarse execution the calling thread is inside, or null.
+ * This task, to run within the coarse execution the **calling** thread is inside right now.
  *
- * Call it on the thread that is *forking*, and hold what it gives you until the work is running
- * somewhere else. Capturing on the receiving thread instead captures nothing, which is the one way
- * to get this wrong that still compiles.
- */
-fun captureCoarse(): CoarseContext? = Profiler.slot().contextOpaque()
-
-/**
- * Runs [body] on this thread as part of [ctx], restoring whatever this thread was inside before.
- *
- * The `finally` is written by the compiler and cannot leak, which is why this is the form to reach
- * for rather than a pair of calls. Passing null is meaningful and means *run this under no coarse
- * execution* — useful for a pool thread that should not inherit anything.
- *
- * **The span is not touched.** [ctx] keeps running on the thread that opened it, and its duration is
- * still the interval that thread bracketed. What changes is only what the sampler sees: while this
- * body runs, a sample that catches this thread is credited to [ctx] as well.
- */
-inline fun <T> withCoarse(ctx: CoarseContext?, body: () -> T): T {
-    val slot = Profiler.slot()
-    val prev = slot.contextOpaque()
-    slot.flushCounts(prev)
-    slot.setContextOpaque(ctx)
-    try {
-        return body()
-    } finally {
-        slot.flushCounts(ctx)
-        slot.setContextOpaque(prev)
-    }
-}
-
-/**
- * This task, bound to the coarse execution the **calling** thread is inside right now.
- *
- * Capture happens here, when you wrap, not later when the task runs — by then the wrapping thread's
- * context is not reachable and the pool thread's is empty. So wrap where you fork.
+ * Read here, when you wrap, not later when the task runs — by then the wrapping thread's execution
+ * is not reachable and the pool thread's is empty. So wrap where you fork.
  */
 fun Runnable.propagating(): Runnable {
-    val ctx = captureCoarse()
-    return Runnable { withCoarse(ctx) { run() } }
+    val parent = Profiler.currentExecution()
+    return Runnable { within(parent) { run() } }
 }
 
-/** As [Runnable.propagating]. Captured on the thread that wraps. */
+/** As [Runnable.propagating]. Read on the thread that wraps. */
 fun <T> Callable<T>.propagating(): Callable<T> {
-    val ctx = captureCoarse()
-    return Callable { withCoarse(ctx) { call() } }
+    val parent = Profiler.currentExecution()
+    return Callable { within(parent) { call() } }
 }
 
 /**
- * This executor, with every task it is given bound to the execution its submitter was inside.
+ * This executor, with every task it is given run within the execution its submitter was inside.
  *
  * **Prefer this to wrapping tasks one at a time.** Wrapping the pool once cannot be forgotten;
  * wrapping tasks means every new call site is another chance to forget, and a forgotten hand-off is
  * silent at the call site and only visible much later in the report's outside-every-span line.
  *
- * Capture happens inside `execute`, which runs on the submitting thread, so the context is whatever
- * that thread was inside at the moment it handed the work over.
+ * The execution is read inside `execute`, which runs on the submitting thread, so it is whatever that
+ * thread was inside at the moment it handed the work over.
  */
 fun Executor.propagating(): Executor = Executor { command -> execute(command.propagating()) }
 

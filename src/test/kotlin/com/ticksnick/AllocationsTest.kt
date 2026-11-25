@@ -74,8 +74,8 @@ class AllocationsTest {
     }
 
     private fun fork() = op(outer) {
-        val ctx = captureCoarse()
-        thread { withCoarse(ctx) { sink = ByteArray(MB) } }.join()
+        val ctx = Profiler.currentExecution()
+        thread { within(ctx) { sink = ByteArray(MB) } }.join()
     }
 
     @Test
@@ -96,8 +96,8 @@ class AllocationsTest {
     fun `an execution that allocates nothing reads no bytes, TickSnick's own left out`() {
         Profiler.start(allocations = true)
         op(outer) {
-            val ctx = captureCoarse()
-            thread { withCoarse(ctx) { repeat(100_000) { op(inner) { } } }; Profiler.release() }.join()
+            val ctx = Profiler.currentExecution()
+            thread { within(ctx) { repeat(100_000) { op(inner) { } } }; Profiler.release() }.join()
         }
         repeat(100_000) { op(inner) { } }
         val p = Profiler.stop()
@@ -115,9 +115,9 @@ class AllocationsTest {
         Profiler.start(allocations = true)
         repeat(3) {
             op(outer) {
-                val ctx = captureCoarse()
+                val ctx = Profiler.currentExecution()
                 Thread.ofVirtual().start {
-                    withCoarse(ctx) { op(inner) { sink = ByteArray(MB) } }
+                    within(ctx) { op(inner) { sink = ByteArray(MB) } }
                     Profiler.release()
                 }.join()
             }
@@ -382,7 +382,7 @@ class AllocationsTest {
         val p = Profiler.stop()
         Profiler.exit(outer)
 
-        assertEquals(1, p.openContextsAtEnd)
+        assertEquals(1, p.openExecutionsAtEnd)
         assertBytes(MB.toDouble(), p.allocatedPerExecution(p.node("alloc.outer")), "the one that closed")
 
         Profiler.start(allocations = true)
@@ -422,11 +422,11 @@ class AllocationsTest {
         Profiler.start(allocations = true)
         repeat(3) {
             op(outer) {
-                val ctx = captureCoarse()
+                val ctx = Profiler.currentExecution()
                 val gate = CountDownLatch(forks)
                 List(forks) {
                     thread {
-                        withCoarse(ctx) {
+                        within(ctx) {
                             gate.countDown()
                             gate.await()
                             sink = ByteArray(MB)
@@ -550,7 +550,7 @@ class AllocationsTest {
 
     @Test
     fun `counting them raises the coarse floor`() {
-        assertEquals(COARSE_ALLOCATIONS_BODIES, coarseContextBodies(0, true) - coarseContextBodies(0, false), 1e-12)
+        assertEquals(COARSE_ALLOCATIONS_BODIES, coarseExecutionBodies(0, true) - coarseExecutionBodies(0, false), 1e-12)
         assertTrue(Run.load(emptySave(true)).allocations)
         assertFalse(Run.load(emptySave(false)).allocations)
     }

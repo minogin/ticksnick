@@ -74,6 +74,36 @@ public final class JavaCaller {
         return Profiler.stop();
     }
 
+    /**
+     * Work handed to other threads by hand: {@code within} for a task working within the plan, a
+     * context and {@code using} for a label entered on one thread and exited on another.
+     */
+    static Run handOff() throws Exception {
+        Profiler.start(1.0, WaitStrategy.PARK);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            try (var plan = Profiler.coarse(PLAN)) {
+                Execution parent = Profiler.currentExecution();
+                pool.submit(() -> Profiler.within(parent, () -> {
+                    try (var level = Profiler.coarse(LEVEL.get(0))) {
+                        sink++;
+                    }
+                })).get();
+                sink += pool.submit(() -> Profiler.within(parent, () -> 42)).get();
+                Context request = Profiler.newContext(parent);
+                Profiler.using(request, () -> Profiler.enterCoarse(PHASE.get(Kind.PARSE)));
+                pool.submit(() -> Profiler.using(request, () -> Profiler.exitCoarse(PHASE.get(Kind.PARSE)))).get();
+                try (var mounted = request.mount()) {
+                    sink++;
+                }
+                request.end();
+            }
+        } finally {
+            pool.shutdown();
+        }
+        return Profiler.stop();
+    }
+
     /** Saves {@code profile} into {@code folder} and renders the folder, alone and against itself. */
     static String report(Run profile, Path folder) {
         profile.save(folder);

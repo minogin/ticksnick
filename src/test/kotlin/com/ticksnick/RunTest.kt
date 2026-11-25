@@ -49,12 +49,21 @@ class RunTest {
         // The message builders, each of which is a path the render only reaches under a fault.
         // Every kind of warning, its gaps filled with words, ASCII outside them.
         for (kind in Kind.entries) check(kind.name, kind.text(List(6) { "x" }))
-        check("leak", leakMessage("op", "worker-1"))
-        check("mismatch", mismatchMessage("a", "b"))
-        check("stale", staleContextMessage("req", 0.42))
+        check("leak", leftOpenMessage("op", "`expectBalanced()` on thread `worker-1`"))
+        check("missed exit", missedExitMessage("a", "b"))
+        check("suspended", suspendedMessage("a", "b"))
+        check("moved", movedMessage("a", "thread `x`", "thread `y`"))
+        check("crossed", crossedMessage("a", "b") + crossedMessage("a", "a"))
+        check("not open", notOpenMessage("a", "thread `x`", "b"))
+        check("borrowed", borrowedMessage("a", "thread `x`", "a task working within `a`"))
+        check("stray", strayExitMessage("a", 3, "thread `x`"))
+        check("in use", inUseMessage("the context made by `newContext`", "thread `x`", "thread `y`"))
+        check("block moved", blockMovedMessage("`within`", "thread `x`", "thread `y`"))
+        check("mount left", blockMountLeftMessage("`using`", "the context made by `newContext`") + mountLeftMessage("a", "x", "y"))
+        check("stale", staleExecutionMessage("req", 0.42))
         // And a report carrying as many of the optional blocks at once as one can.
         check("render", loadedRun().render())
-        check("render, failed", loadedRun(failure = leakMessage("op", "worker-1")).render())
+        check("render, failed", loadedRun(failure = leftOpenMessage("op", "`expectBalanced()` on thread `worker-1`")).render())
         assertTrue(
             offenders.isEmpty(),
             "non-ASCII in printed output:\n" + offenders.joinToString("\n")
@@ -79,8 +88,8 @@ class RunTest {
             ),
             failure = failure, imbalances = if (failure == null) 0 else 2, openAtEnd = 1,
             untrackedSlots = 3, reclaimedSlots = 4, idleWaitingHits = 5,
-            coarse = listOf(c), openContextsAtEnd = 1, labelledOutsideCoarse = 60,
-            staleContextHits = 20, coarseSampleHits = 100,
+            coarse = listOf(c), openExecutionsAtEnd = 1, labelledOutsideCoarse = 60,
+            staleExecutionHits = 20, coarseSampleHits = 100,
             pause = Pauses(true, 90_000_000, 3, 60_000_000, gcNanos = 10_000_000),
         )
     }
@@ -381,7 +390,7 @@ class RunTest {
      */
     @Test
     fun `a failed run renders as its failure and nothing else`() {
-        val r = report(listOf(stat("a", hits = 100, calls = 1000)), failure = leakMessage("leaked", "worker-1"))
+        val r = report(listOf(stat("a", hits = 100, calls = 1000)), failure = leftOpenMessage("leaked", "`expectBalanced()` on thread `worker-1`"))
         assertFalse(r.ok)
         val text = r.render()
         assertTrue(text.contains("FAILED: the run failed, so there is no profile"), text)

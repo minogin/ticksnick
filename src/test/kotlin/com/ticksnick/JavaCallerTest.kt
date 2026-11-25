@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -45,6 +46,15 @@ class JavaCallerTest {
         val plan = profile.coarseTree.single { it.name == "java:plan" }
         val mb = (1 shl 20).toDouble()
         assertTrue(profile.allocatedPerExecution(plan) in 3 * mb..3 * mb + 4096, "${profile.allocatedPerExecution(plan)}")
+    }
+
+    @Test
+    fun `Java hands work to other threads by hand`() {
+        val profile = JavaCaller.handOff()
+        assertNull(profile.failure, profile.failure)
+        val level = profile.coarseTree.single { it.name == "java:plan" }.children.single { it.name == "java:level[0]" }
+        assertEquals(1, level.count, "the task's op was not placed under the plan")
+        assertEquals(1, profile.coarse.single { it.name == "java:phase[PARSE]" }.count, "the request entered and exited across threads was not recorded")
     }
 
     @Test

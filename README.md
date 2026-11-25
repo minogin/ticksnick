@@ -100,8 +100,8 @@ list.op(FILTER) { filter { it.valid } }
 
 ### Threads
 
-A coarse op that hands work to other threads keeps it as its own when the tasks carry its
-context:
+A coarse op that hands work to other threads keeps it as its own when each task runs within the op's
+execution:
 
 ```kotlin
 val pool = Executors.newFixedThreadPool(8).propagating()
@@ -111,8 +111,35 @@ op(BATCH) {
 }
 ```
 
-`Runnable.propagating()` and `Callable.propagating()` wrap a single task. `captureCoarse()` and
-`withCoarse(ctx) { }` do the same by hand, for threads you start yourself.
+`Runnable.propagating()` and `Callable.propagating()` wrap a single task. By hand, for threads you start
+yourself:
+
+```kotlin
+val batch = Profiler.currentExecution()   // on the thread that hands the work over
+thread { within(batch) { op(RESOLVE) { resolve(root) } } }
+```
+
+A task opens its ops under the execution it runs within, and never closes that execution: the op that
+opened it does. So the op waits for its tasks inside its block.
+
+Work that moves from thread to thread, as an async request whose stages run on different pools, gets a
+context of its own, and each stage takes it onto its thread:
+
+```kotlin
+val request = Profiler.newContext(Profiler.currentExecution())
+parsers.execute { using(request) { Profiler.enter(REQUEST); parse() } }
+// later, on another thread
+renderers.execute { using(request) { render(); Profiler.exit(REQUEST) } }
+// when the request is over
+request.end()
+```
+
+For two hooks that are not one block, `request.mount()` puts it on the thread and the `close()` of what it
+returns takes it off.
+
+Every label follows one rule: **a label closes as the last one open in its own context**. A context is
+what one line of work has open: a thread's own, a task's within an execution, or one made by `newContext`.
+A label closed anywhere else, or left open when its context ends, fails the run.
 
 A thread's slot is freed when the thread ends. `Profiler.release()` frees it at once.
 
@@ -127,8 +154,12 @@ Profiler.expectBalanced()   // where no label should be open
 ```
 
 `enter` and `exit` have no `finally`, so an exception between them leaves the label set. TickSnick
-finds such a leak at `expectBalanced()`, or at an `exit` that names another label, and stops the
-session there: every sample after it would be charged to the wrong op. The run has failed: its report says why and shows no figures, and a profile
+finds such a leak when a label around it closes, at an `exit` that names another label, or when its
+context ends: at the end of `within`, at `end()`, and for a thread's own at `expectBalanced()`. It stops
+the session there: every sample after it would be charged to the wrong op. An `exit` with nothing open
+is ignored, as a library's "after" callback without its "before" is harmless; but when its label is
+still open in another thread at `stop()`, it was entered in one thread and exited in another, and the run
+fails: carry it across with `using`. The run has failed: its report says why and shows no figures, and a profile
 leaves it out. TickSnick never reports figures it knows are false, so there is no switch to profile
 anyway. A label still open at `stop()` is a warning instead. Where the labels are in code you cannot
 fix, label one level up, where a `finally` fits.
@@ -177,8 +208,9 @@ System.out.println(TickSnick.diff(before, after, false, View.BRIEF, Set.of(Lens.
   kind instead: `fine` and `coarse`, `enterFine`/`exitFine` and `enterCoarse`/`exitCoarse`. Passing
   one kind to the other's call compiles and reports the wrong op, or throws, for a fine handle
   past the coarse ones.
-- A scope is not allocated: each op has one, made at startup. A coarse execution still makes
-  its context.
+- A scope is not allocated: each op has one, made at startup. A coarse execution is still an object
+  of its own.
+- Hand-offs by hand: `Profiler.within(batch, () -> resolve(root))` and `Profiler.using(request, () -> parse())`.
 - `Profiler.fine(LOOKUP, keys.size())` is `op(LOOKUP, times = keys.size) { }`.
 - Families: `LEVEL.get(depth)`, and `Profiler.registerCoarse("resolve", Kind.class)` for an enum.
 - Settings by position, from the left: `Profiler.start(1.0, WaitStrategy.PARK)`.
@@ -230,11 +262,11 @@ On a fast current machine, where a body (TickSnick's unit of CPU work) takes abo
   every core loses that core. `wait = PARK` frees it and samples less exactly.
 - **A fine label:** about 1 ns a call on its own, at most 2.5 ns by design. In real code it depends on
   the code around it: beside other work it is often hidden altogether, behind a wrapper a few ns. A batch label, `op(X, times = n)`, costs one call for its n.
-- **A coarse label:** about 45-55 ns an execution, at most 100 ns, and 56 bytes for its context, which
+- **A coarse label:** about 45-55 ns an execution, at most 100 ns, and 64 bytes for the execution, which
   `Allocated` leaves out. Most of it is two `System.nanoTime()` calls, so it costs more where
   `nanoTime` is slow, as on some VMs.
   `Allocated` adds about 30 ns, and each registered fine label about 0.5 ns.
-- **A hand-off** (`captureCoarse` and `withCoarse`): about 7 ns.
+- **A hand-off** (`within`, and so `propagating()`): about 11 ns, most of it the task's context.
 - **In the background:** a body timed once a second, under 0.1% of a core; the CPU clock read from the
   OS once a second, on Windows by a `typeperf` process; and a few ms at `stop()`.
 - **On your program** the cost is per label entered, not per second of work: a fine label on a 50 ns
@@ -279,8 +311,10 @@ any order.
 - **A share is not a saving.** An op that takes 40% of the time can be worth far more than
   40% if removing it would also remove work it causes elsewhere. It can also be worth less, if the
   work moves somewhere else.
-- **Coroutines and virtual threads are not tested.** A fine label belongs to the thread that set it.
-  A coroutine that suspends inside a label and resumes on another thread leaves the label behind.
+- **It does not follow coroutines yet.** A coroutine that suspends inside a coarse op and resumes on
+  another thread fails the run; resumed on the same thread, after other coroutines ran there, its time
+  can go to the wrong op unnoticed. A fine label must not contain a suspension, and TickSnick does not
+  catch one that does. Virtual threads are threads like any other.
 - Up to 256 fine and 64 coarse ops, and up to 1024 threads at once. A thread past that is not sampled, and the
   report says so.
 - The CPU clock is recorded on Windows and Linux. On macOS it needs root, so the report says it was
@@ -311,6 +345,8 @@ The words the report and the API use, each with one meaning. Every column is exp
 - **parent op** - of an op, the op it ran in directly.
 - **child op** - of an op, an op that ran in it directly.
 - **root op** - an op with no parent op.
+- **context** - what one line of work has open: its executions, from the innermost out. Every thread has
+  its own; `within` makes one for a task, and `newContext` one that `using` carries from thread to thread.
 
 **Time**
 - **wall time** - time as a clock on the wall measures it.

@@ -41,7 +41,9 @@ tasks.register<JavaExec>("cli") {
 
 // Test classes that each get a JVM of their own: the registry is process-wide, and the other tests
 // fill nearly all of its coarse ids.
-val ownJvm = listOf("com/ticksnick/JavaCallerTest*", "com/ticksnick/CallsPerParentTest*", "com/ticksnick/AllocationsTest*")
+val ownJvm = listOf(
+    "com/ticksnick/JavaCallerTest*", "com/ticksnick/CallsPerParentTest*", "com/ticksnick/AllocationsTest*", "com/ticksnick/ContextTest*",
+)
 
 val ownJvmTest by tasks.registering(Test::class) {
     useJUnitPlatform()

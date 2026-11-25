@@ -93,9 +93,9 @@ class SamplerCoarseTest {
         Profiler.start(tickMillis = 1.0)
 
         // Closed the moment the block ends, and captured on the way out.
-        val ctx = assertNotNull(op(t) { captureCoarse() })
+        val ctx = assertNotNull(op(t) { Profiler.currentExecution() })
         val worker = onThread("stale-worker") {
-            withCoarse(ctx) { op(fine) { spinFor(holdNanos) } }
+            within(ctx) { op(fine) { spinFor(holdNanos) } }
         }
         worker.start()
         worker.join()
@@ -103,7 +103,7 @@ class SamplerCoarseTest {
         val report = Profiler.stop()
         val stat = assertNotNull(report.coarse.firstOrNull { it.name == "sampler-stale" })
 
-        assertTrue(report.staleContextHits > 100, "the sampler saw ${report.staleContextHits} stale samples")
+        assertTrue(report.staleExecutionHits > 100, "the sampler saw ${report.staleExecutionHits} stale samples")
         assertTrue(stat.staleHits > 100, "the type recorded ${stat.staleHits} stale samples")
         // The whole point of counting them separately: they must not reach anything the type
         // reports. Crediting them lets busy/exec exceed the span it sits inside.
@@ -166,7 +166,7 @@ class SamplerCoarseTest {
 
         val report = Profiler.stop()
         assertEquals(
-            0L, report.staleContextHits,
+            0L, report.staleExecutionHits,
             "a thread that closed its own executions was reported as working under a finished one"
         )
     }
@@ -187,16 +187,16 @@ class SamplerCoarseTest {
 
         val stop = AtomicBoolean(false)
         val ctx = assertNotNull(run {
-            var c: CoarseContext? = null
+            var c: Execution? = null
             // Held open for the whole measurement: enter/exit rather than the block form, because
             // the borrowers have to be inside it while it is still live.
             Profiler.enter(t)
-            c = captureCoarse()
+            c = Profiler.currentExecution()
             c
         })
 
         val borrowers = (0 until 2).map { i ->
-            onThread("borrower-$i") { withCoarse(ctx) { op(fine) { spinUntil(stop) } } }
+            onThread("borrower-$i") { within(ctx) { op(fine) { spinUntil(stop) } } }
         }
         borrowers.forEach { it.start() }
         spinFor(holdNanos)
@@ -215,7 +215,7 @@ class SamplerCoarseTest {
             stat.inside in 2.0..3.2,
             "three threads in one execution read inside ${stat.inside}"
         )
-        assertEquals(0L, report.staleContextHits, "a live execution was reported as finished")
+        assertEquals(0L, report.staleExecutionHits, "a live execution was reported as finished")
     }
 
     /**
@@ -234,13 +234,13 @@ class SamplerCoarseTest {
         Profiler.start(tickMillis = 1.0)
 
         Profiler.enter(outer)
-        val ctx = assertNotNull(captureCoarse())
+        val ctx = assertNotNull(Profiler.currentExecution())
         val worker = onThread("nesting-worker") {
-            withCoarse(ctx) {
+            within(ctx) {
                 op(inner) {
                     // Checked here rather than only in the report: the chain is the mechanism, and
                     // a report that happened to look right would not prove the parent was set.
-                    val mounted = assertNotNull(captureCoarse())
+                    val mounted = assertNotNull(Profiler.currentExecution())
                     assertEquals(inner.id, mounted.type)
                     assertEquals(ctx, mounted.parent, "the borrowed context is not the parent")
                     op(fine) { spinFor(holdNanos) }
@@ -262,6 +262,6 @@ class SamplerCoarseTest {
             out.inclusiveHits >= inn.inclusiveHits,
             "the outer execution was credited ${out.inclusiveHits} against the inner's ${inn.inclusiveHits}"
         )
-        assertEquals(0L, report.staleContextHits)
+        assertEquals(0L, report.staleExecutionHits)
     }
 }

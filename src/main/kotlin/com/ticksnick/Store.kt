@@ -64,9 +64,10 @@ internal object RunStore {
         line("openAtEnd", p.openAtEnd)
         line("untrackedSlots", p.untrackedSlots)
         line("reclaimedSlots", p.reclaimedSlots)
-        line("openContextsAtEnd", p.openContextsAtEnd)
+        // A key is never renamed with its field, so a saved run still loads: "Contexts" here are executions.
+        line("openContextsAtEnd", p.openExecutionsAtEnd)
         line("labelledOutsideCoarse", p.labelledOutsideCoarse)
-        line("staleContextHits", p.staleContextHits)
+        line("staleContextHits", p.staleExecutionHits)
         line("coarseSampleHits", p.coarseSampleHits)
 
         val d = p.duty
@@ -145,7 +146,7 @@ internal object RunStore {
             }
         }
         names("openAtEndNames", p.openAtEndNames.associateWith { 1 })
-        names("openContextsAtEndByName", p.openContextsAtEndByName)
+        names("openContextsAtEndByName", p.openExecutionsAtEndByName)
 
         line("operations", p.operations.size)
         p.operations.forEachIndexed { i, o ->
@@ -379,8 +380,8 @@ internal object RunStore {
             threads = int("threads"), duty = duty, failure = text("failure") ?: leftOpenFailure(int("imbalances")), imbalances = int("imbalances"),
             stateSampled = bool("stateSampled"), idleWaitingHits = long("idleWaitingHits"),
             openAtEnd = int("openAtEnd"), untrackedSlots = int("untrackedSlots"), reclaimedSlots = int("reclaimedSlots"),
-            coarse = coarse, openContextsAtEnd = int("openContextsAtEnd"),
-            labelledOutsideCoarse = long("labelledOutsideCoarse"), staleContextHits = long("staleContextHits"),
+            coarse = coarse, openExecutionsAtEnd = int("openContextsAtEnd"),
+            labelledOutsideCoarse = long("labelledOutsideCoarse"), staleExecutionHits = long("staleContextHits"),
             coarseSampleHits = long("coarseSampleHits"), pause = pause, coarseTree = tree, clock = clock,
             wait = m["sampler.wait"]?.let { WaitStrategy.valueOf(it) },
             askedStepNanos = m["sampler.askedStepNanos"]?.toLong() ?: 0L,
@@ -391,7 +392,7 @@ internal object RunStore {
             bodyNanos = m["body.nanos"]?.toDouble() ?: Double.NaN,
             nanoTimeBodies = m["body.nanoTimeBodies"]?.toDouble() ?: Double.NaN,
             openAtEndNames = pairs("openAtEndNames", "openAtEndNames").keys.toList(),
-            openContextsAtEndByName = pairs("openContextsAtEndByName", "openContextsAtEndByName").mapValues { it.value.toIntOrNull() ?: 0 },
+            openExecutionsAtEndByName = pairs("openContextsAtEndByName", "openContextsAtEndByName").mapValues { it.value.toIntOrNull() ?: 0 },
         )
     }
 

@@ -57,9 +57,9 @@ internal const val DEFAULT_BODY_NANOS = 25.0
 
 /**
  * The most one coarse execution may cost with nothing opted into, in bodies: no fine label
- * registered and no allocated bytes counted - the context, two `nanoTime` calls and the accumulate. A
+ * registered and no allocated bytes counted - the execution, two `nanoTime` calls and the accumulate. A
  * budget, not a measurement: a dearer hook has to fit under it. What a session opts into adds its
- * own price. See [coarseContextBodies].
+ * own price. See [coarseExecutionBodies].
  */
 internal const val COARSE_BUDGET_BODIES = 4.0
 
@@ -313,7 +313,7 @@ internal fun coarseHookScale(nanoTimeBodies: Double): Double =
     else (2 * nanoTimeBodies + COARSE_HOOK_REST_BODIES) / (2 * FLOOR_NANOTIME_BODIES + COARSE_HOOK_REST_BODIES)
 
 /** The most one coarse execution may cost, in bodies, with [fineLabels] fine labels registered. */
-internal fun coarseContextBodies(fineLabels: Int, allocations: Boolean = false, hookScale: Double = 1.0): Double =
+internal fun coarseExecutionBodies(fineLabels: Int, allocations: Boolean = false, hookScale: Double = 1.0): Double =
     COARSE_BUDGET_BODIES * hookScale + COARSE_PER_FINE_LABEL_BODIES * fineLabels + if (allocations) COARSE_ALLOCATIONS_BODIES else 0.0
 
 /** The flat coarse floor, in bodies: [COARSE_FLOOR_BODIES] scaled with the hook, and each opt-in's price over [COARSE_MAX_OVERHEAD]. */
@@ -338,7 +338,7 @@ internal fun coarseFloorRaised(fineLabels: Int, allocations: Boolean, bodyNanos:
 
 /**
  * The shortest a coarse operation may be, given how much of the run it holds, the flat floor
- * [flatFloorNanos] and what one execution costs, [contextNanos]. See [Run.coarseTooSmall].
+ * [flatFloorNanos] and what one execution costs, [executionNanos]. See [Run.coarseTooSmall].
  *
  * Two conditions, protecting different things and neither implying the other:
  *
@@ -350,34 +350,97 @@ internal fun coarseFloorRaised(fineLabels: Int, allocations: Boolean, bodyNanos:
  * A short operation called rarely passes the first comfortably and is then reported at twice its
  * length: the program is undisturbed and the measurement is wrong. That is why both are needed.
  */
-internal fun coarseFloorNanos(share: Double, flatFloorNanos: Double, contextNanos: Double): Double =
-    maxOf(flatFloorNanos, contextNanos / COARSE_MAX_RUN_SHARE * share)
+internal fun coarseFloorNanos(share: Double, flatFloorNanos: Double, executionNanos: Double): Double =
+    maxOf(flatFloorNanos, executionNanos / COARSE_MAX_RUN_SHARE * share)
 
 /**
  * The failure of work billed to executions that had already finished (docs `warnings.md`,
  * `stale-failure`). Names the coarse type, because its numbers were about to be wrong and the reader
  * has no other way to know which.
  */
-internal fun staleContextMessage(worst: String, share: Double): String =
-    "${shareText(share)} of the coarse time, mostly ${code(worst)}'s, came from tasks that an execution handed off and that ran on" +
-            " after the execution ended${sym.dash}wait for the tasks inside the block that starts them"
+internal fun staleExecutionMessage(worst: String, share: Double): String =
+    "${shareText(share)} of the coarse time, mostly ${code(worst)}'s, came from tasks still working within it after it ended" +
+            "${sym.dash}wait for them inside the block that starts them"
+
+/** Where a failure says coroutines are the cause: TickSnick does not carry a label across a coroutine's switch. */
+internal const val NO_COROUTINES = "TickSnick does not follow coroutines yet"
+
+// A label closed wrong (`closed-wrong`): it was not the last one open in its own context, so time
+// went to the wrong label. One sentence per cause, since each wants a different fix. Every one names
+// the label closed and what makes the close wrong.
+
+/** Closed while a label `enter` opened after it was still open: an `exit` of that one was missed. */
+internal fun missedExitMessage(closed: String, inner: String): String =
+    "${code(closed)} closed while ${code(inner)} was still open, so time went to the wrong label${sym.dash}" +
+            "an ${code("exit($inner)")} was missed; put `exit` in a `finally`"
+
+/** An `op` block closed while an `op` block opened after it was still open: only a coroutine's suspension does that. */
+internal fun suspendedMessage(closed: String, inner: String): String =
+    "${code(closed)} closed while ${code(inner)} was still open, so time went to the wrong label${sym.dash}" +
+            "a coroutine suspended inside one of them; $NO_COROUTINES"
+
+/** An `op` block that began in one thread and ended in another: only a coroutine's switch does that. */
+internal fun movedMessage(closed: String, opened: String, closedIn: String): String =
+    "${code(closed)} opened in $opened and closed in $closedIn, so time went to the wrong label${sym.dash}" +
+            "a coroutine suspended inside it; $NO_COROUTINES"
+
+/** An `op` block that ended under a context a `mount()` inside it left on the thread. */
+internal fun mountLeftMessage(closed: String, opened: String, closedIn: String): String =
+    "${code(closed)} opened in $opened and closed in $closedIn, so time went to the wrong label${sym.dash}" +
+            "a `mount()` inside it was not closed; close it in a `finally`"
+
+/** An `exit` that closes past a label an `op` block opened, or closes one an `op` block opened. */
+internal fun crossedMessage(closed: String, inner: String): String =
+    if (closed == inner) {
+        "${code("exit($closed)")} found ${code(closed)} opened by an `op` block, so time went to the wrong label${sym.dash}" +
+                "`exit` closes only what `enter` opened, or a coroutine suspended in between; close the innermost first"
+    } else {
+        "${code(closed)} closed while ${code(inner)} was still open, so time went to the wrong label${sym.dash}" +
+                "the `exit` is inside the `op` block of ${code(inner)}, or a coroutine suspended in between; close the innermost first"
+    }
+
+/** An `exit` of a label not open in this thread's context, while another was. */
+internal fun notOpenMessage(closed: String, closedIn: String, open: String): String =
+    "${code(closed)} closed in $closedIn, where it was not open and ${code(open)} was, so time went to the wrong label${sym.dash}" +
+            "it was entered in another thread or coroutine; across threads, carry it with `using`"
+
+/** An `exit` of an execution the context only borrowed: a task closing the op it works within. */
+internal fun borrowedMessage(closed: String, opened: String, closedIn: String): String =
+    "${code(closed)} was opened in $opened and closed in $closedIn, so time went to the wrong label${sym.dash}" +
+            "it is only borrowed there; close it where it was opened"
 
 /**
- * The failure of a label closed while another was open (`exit-mismatch`). Names both, because the
- * pair is the point: one of them covers work that was never inside it.
+ * The failure of a label left open where its context ended (`left-open`): at the end of `within`, at a
+ * context's `end()`, at `expectBalanced()`; and a fine label at the end of `using`, which it must not
+ * cross. Names it, because its share is the one now wrong and the reader has no other way to know which.
  */
-internal fun mismatchMessage(closed: String, open: String): String =
-    "${code("exit($closed)")} while ${code(open)} was open, so time went to the wrong label${sym.dash}" +
-            "an exception skipped an `exit`, or an `exit` names the wrong label; put `exit` in a `finally`"
+internal fun leftOpenMessage(label: String, place: String): String =
+    "${code(label)} was still open at $place, so the time after its missed `exit` went to ${code(label)}${sym.dash}" +
+            "put `exit` in a `finally`"
 
 /**
- * The failure of a label left open (`leak`). Names it, because its share is the one now wrong and the
- * reader has no other way to know which.
+ * The failure of an op exited where it was not open, and still open somewhere when the session stopped
+ * (`exited-elsewhere`): entered in one thread and exited in another, so the first one's later work went to it.
  */
-internal fun leakMessage(open: String, thread: String = Thread.currentThread().name): String =
-    "${code(open)} was still open at `expectBalanced()` on thread ${code(thread)}, so the time after the missed `exit` of " +
-            "${code(open)} went to ${code(open)}" +
-            "${sym.dash}put `exit` in a `finally`"
+internal fun strayExitMessage(label: String, exits: Long, openIn: String): String =
+    "${code(label)} was exited ${Run.plural(exits, "time")} in a thread or coroutine where it was not open, " +
+            "and is still open in $openIn${sym.dash}it was entered in one thread or coroutine and exited in another; " +
+            "carry it across with `using`"
+
+/** The failure of a context put on a thread while on another (`in-use`): one line of work on two threads at once. */
+internal fun inUseMessage(context: String, thread: String, onThread: String): String =
+    "$context was put on $thread while still on $onThread, so time went to the wrong label${sym.dash}" +
+            "a context is one line of work, on one thread at a time; for work in parallel, start each part with `within`"
+
+/** A `within` or `using` block that began in one thread and ended in another. */
+internal fun blockMovedMessage(block: String, began: String, ended: String): String =
+    "$block began in $began and ended in $ended, so time went to the wrong label${sym.dash}" +
+            "a coroutine suspended inside it; $NO_COROUTINES"
+
+/** A `within` or `using` block that ended with a context a `mount()` inside it left on the thread. */
+internal fun blockMountLeftMessage(block: String, stillOn: String): String =
+    "$block ended while $stillOn was still on its thread, so time went to the wrong label${sym.dash}" +
+            "a `mount()` inside it was not closed; close it in a `finally`"
 
 /**
  * The failure of the sampler itself (`sampler-error`): it stopped on [e], so the rest of the session
@@ -644,8 +707,8 @@ internal class CoarseNode internal constructor(
     /** Ticks with a parent execution holding at least one execution on this path open, one per parent per tick. */
     val coveredTicks: Long = 0,
     /**
-     * This path's own time by fine label, last entry no label: samples whose innermost context was an
-     * execution here, and of those, one per execution per tick. Empty in a run saved without
+     * This path's own time by fine label, last entry no label: samples whose innermost execution was
+     * one here, and of those, one per execution per tick. Empty in a run saved without
      * them, which draws a leaf's fine rows from [fine] instead. See [Run.ownRowsOf].
      */
     internal val ownFine: LongArray = LongArray(0),
@@ -762,8 +825,8 @@ internal class CoarseStat internal constructor(
      * consistent with the rest of the report, where `share`, `occupancy` and `in flight` all count a
      * waiting thread in full.
      *
-     * **1.0 by construction when contexts do not cross threads.** Without propagation a context
-     * lives on the thread that made it, so every occupied instance is occupied by exactly one. With
+     * **1.0 by construction when no task works within another thread's execution.** Without one, an
+     * execution lives on the thread that opened it, so every occupied instance is occupied by exactly one. With
      * propagation, a request that keeps 4.24 helpers busy while its driver parks on the join reads
      * 5.24.
      */
@@ -859,15 +922,15 @@ class Run internal constructor(
      * Coarse executions still open when the session ended, which is a leak by definition — nothing
      * can close them now, and their spans are missing from [coarse] for exactly that reason.
      */
-    internal val openContextsAtEnd: Int = 0,
+    internal val openExecutionsAtEnd: Int = 0,
     /**
      * Labelled samples that fell under no coarse span. See [labelledOutsideCoarseShare], and
      * `Sampler.labelledOutsideCoarse` for what it is for.
      */
     internal val labelledOutsideCoarse: Long = 0,
     /** Samples caught under a coarse execution that had already been closed. See [CoarseStat.staleHits]. */
-    internal val staleContextHits: Long = 0,
-    /** Samples caught inside a coarse execution at all — the population [staleContextHits] is part of. */
+    internal val staleExecutionHits: Long = 0,
+    /** Samples caught inside a coarse execution at all — the population [staleExecutionHits] is part of. */
     internal val coarseSampleHits: Long = 0,
     /** How long every thread was stopped, which is what stretches [stepNanos] past the requested step. */
     internal val pause: Pauses = Pauses.NONE,
@@ -893,8 +956,8 @@ class Run internal constructor(
     internal val nanoTimeBodies: Double = Double.NaN,
     /** The labels behind [openAtEnd], by name; empty for a run saved without them. */
     internal val openAtEndNames: List<String> = emptyList(),
-    /** The coarse labels behind [openContextsAtEnd], each with how many were open; empty for a run saved without them. */
-    internal val openContextsAtEndByName: Map<String, Int> = emptyMap(),
+    /** The coarse labels behind [openExecutionsAtEnd], each with how many were open; empty for a run saved without them. */
+    internal val openExecutionsAtEndByName: Map<String, Int> = emptyMap(),
 ) {
     /** Whether this run timed a body of its own; without one its limits are read at [DEFAULT_BODY_NANOS]. */
     internal val bodyTimed: Boolean get() = bodyNanos > 0
@@ -919,7 +982,7 @@ class Run internal constructor(
         if (!(labelled > 0)) return null
         val fine = operations.sumOf { it.hookEntries }
         val executions = coarse.sumOf { it.count }
-        val perExecution = coarseContextBodies(operations.size, allocations, hookScale)
+        val perExecution = coarseExecutionBodies(operations.size, allocations, hookScale)
         val bodies = fine * FINE_BUDGET_BODIES + executions * perExecution
         val top = (operations.map { it.name to it.hookEntries * FINE_BUDGET_BODIES } + coarse.map { it.name to it.count * perExecution })
             .maxByOrNull { it.second }?.takeIf { it.second > 0 }?.first
@@ -1129,7 +1192,7 @@ class Run internal constructor(
      * of thread-time: a 4.01 ms search with `working` 6.32 reports 25.31 ms here.
      *
      * That makes `mean - busy/exec` the waiting **only while `inside` is 1**, that is, while no
-     * context crosses a thread. Use [CoarseStat.waitingHits] as a share for the general answer; the
+     * execution is worked within on another thread. Use [CoarseStat.waitingHits] as a share for the general answer; the
      * subtraction is a shortcut that fan-out invalidates, and the report's legend says so.
      */
     internal fun busyPerExecutionNanos(c: CoarseStat): Double =
@@ -1274,7 +1337,7 @@ class Run internal constructor(
     internal fun spanShareOf(c: CoarseStat): Double = if (observedNanos <= 0.0) 0.0 else c.count * c.meanSpanNanos / observedNanos
 
     /** What timing [c]'s executions cost, as a share of the run's thread-time. See [spanShareOf]. */
-    internal fun timingCostOf(c: CoarseStat): Double = if (observedNanos <= 0.0) 0.0 else c.count * coarseContextNanos / observedNanos
+    internal fun timingCostOf(c: CoarseStat): Double = if (observedNanos <= 0.0) 0.0 else c.count * coarseExecutionNanos / observedNanos
 
     /**
      * The shortest [c] was allowed to be, from the tier boundary. See [coarseFloorNanos].
@@ -1288,12 +1351,12 @@ class Run internal constructor(
      */
     internal fun coarseFloorNanosOf(c: CoarseStat): Double {
         val noise = if (c.inclusiveHits <= 0L) 1.0 else 1.0 / sqrt(c.inclusiveHits.toDouble())
-        return coarseFloorNanos((spanShareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseFlatFloorNanos, coarseContextNanos)
+        return coarseFloorNanos((spanShareOf(c) * (1 - noise)).coerceAtLeast(0.0), coarseFlatFloorNanos, coarseExecutionNanos)
     }
 
-    /** What one coarse execution cost in this run, which rises with the fine labels registered. See [coarseContextNanos]. */
-    internal val coarseContextNanos: Double
-        get() = coarseContextBodies(operations.size, allocations, hookScale) * bodyOrDefaultNanos
+    /** What one coarse execution cost in this run, which rises with the fine labels registered. See [coarseExecutionNanos]. */
+    internal val coarseExecutionNanos: Double
+        get() = coarseExecutionBodies(operations.size, allocations, hookScale) * bodyOrDefaultNanos
 
     /**
      * Bytes allocated per execution of [n], its coarse children included, on every thread that ran
@@ -1312,7 +1375,7 @@ class Run internal constructor(
         n.flatten().let { all -> if (all.any { it.allocatedUnknown }) Double.NaN else all.sumOf { it.allocated }.toDouble() }
 
     /**
-     * Coarse labels on something too small to carry a context.
+     * Coarse labels on something too small to carry an execution.
      *
      * The counterpart of [tooSmall], and it can be strict where that one cannot. The fine floor has
      * to *infer* an operation's duration from hits ÷ calls, so it carries a statistical bound —
@@ -1331,17 +1394,17 @@ class Run internal constructor(
     /**
      * Of the thread-time inside a fine label, the fraction that fell under **no** coarse span.
      *
-     * The one number that can see work escaping its context. A coarse context stays on the thread
-     * that created it, so an operation that hands work to a pool has that work running under the
-     * callers' fine labels with no context — and its own span reports the gap as *waiting*. There is
+     * The one number that can see work escaping its execution. An execution stays on the thread
+     * that opened it, so an operation that hands work to a pool has that work running under the
+     * callers' fine labels with no execution — and its own span reports the gap as *waiting*. There is
      * no other signal for this in a single run: the floor check sees labels that are too small, the
-     * balance check sees contexts left open, and neither sees a context that is simply not where the
+     * balance check sees executions left open, and neither sees an execution that is simply not where the
      * work is.
      *
      * **Two readings, and the report gives both** because it cannot tell them apart:
      *
      * - *you bracketed part of the program and not the rest* — legitimate, and common;
-     * - *work is escaping to threads your context never reached* — silent misattribution, and the
+     * - *work is escaping to threads your execution never reached* — silent misattribution, and the
      *   thing worth knowing.
      *
      * What separates them is whether the operations named are ones you expected to be inside a span.
@@ -1358,8 +1421,8 @@ class Run internal constructor(
      * attribution **invented**, and it is the direction the whole design is built to avoid, which is
      * why it is the one thing the sampler stops a session over on its own.
      */
-    internal val staleContextShare: Double
-        get() = if (coarseSampleHits == 0L) 0.0 else staleContextHits.toDouble() / coarseSampleHits
+    internal val staleExecutionShare: Double
+        get() = if (coarseSampleHits == 0L) 0.0 else staleExecutionHits.toDouble() / coarseSampleHits
 
     /** The fine operations most of that time was in — where to look if it should have been covered. */
     internal fun outsideCoarseSuspects(): List<OperationStat> {
@@ -1521,16 +1584,16 @@ class Run internal constructor(
             // No warning for threads that exited without Profiler.release(): the sampler skips a
             // thread that has exited and the slot is reclaimed within a second, so nothing above is
             // distorted.
-            if (openContextsAtEnd > 0) {
-                if (openContextsAtEndByName.isEmpty())
-                    add(Warning(Kind.COARSE_OPEN_AT_END, words(""), figure(openContextsAtEnd.toDouble(), ::countText)))
-                else for ((name, n) in openContextsAtEndByName)
+            if (openExecutionsAtEnd > 0) {
+                if (openExecutionsAtEndByName.isEmpty())
+                    add(Warning(Kind.COARSE_OPEN_AT_END, words(""), figure(openExecutionsAtEnd.toDouble(), ::countText)))
+                else for ((name, n) in openExecutionsAtEndByName)
                     add(Warning(Kind.COARSE_OPEN_AT_END, words(code(name)), figure(n.toDouble(), ::countText)))
             }
             // Attribution invented, not lost.
-            if (staleContextHits > 0) add(
+            if (staleExecutionHits > 0) add(
                 Warning(
-                    Kind.STALE_TIME, figure(staleContextShare, ::shareText),
+                    Kind.STALE_TIME, figure(staleExecutionShare, ::shareText),
                     words(coarse.maxByOrNull { it.staleHits }?.takeIf { it.staleHits > 0 }?.let { code(it.name) } ?: ""),
                 )
             )
@@ -1552,7 +1615,7 @@ class Run internal constructor(
             hookCost()?.let { h ->
                 add(Warning(Kind.HOOKS_COST, words(h.top?.let(::code) ?: ""), figure(h.share, ::shareText), figure(h.wallShare, ::shareText)))
             }
-            // The one signal for work escaping its context, which neither the floor check nor the
+            // The one signal for work escaping its execution, which neither the floor check nor the
             // balance check can see.
             // Only where a coarse label was used: a run with fine labels alone is all under no coarse row.
             if (coarse.any { it.count > 0 || it.inclusiveHits > 0 } && labelledOutsideCoarseShare >= OUTSIDE_COARSE_MIN_SHARE) add(

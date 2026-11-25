@@ -161,22 +161,22 @@ class CoarseTest {
         val outer = Profiler.registerCoarse("test-outer")
         val inner = Profiler.registerCoarse("test-inner")
         val slot = Profiler.slot()
-        assertNull(slot.contextOpaque())
+        assertNull(slot.executionOpaque())
         op(outer) {
-            val a = assertNotNull(slot.contextOpaque())
+            val a = assertNotNull(slot.executionOpaque())
             assertEquals(outer.id, a.type)
             assertEquals(0, a.depth)
             op(inner) {
-                val b = assertNotNull(slot.contextOpaque())
+                val b = assertNotNull(slot.executionOpaque())
                 assertEquals(inner.id, b.type)
                 assertEquals(1, b.depth)
                 assertEquals(a, b.parent)
             }
             // Restored to the parent, not cleared. Clearing is the bug that would bill the rest of
             // the outer operation to nothing at all.
-            assertEquals(a, slot.contextOpaque())
+            assertEquals(a, slot.executionOpaque())
         }
-        assertNull(slot.contextOpaque())
+        assertNull(slot.executionOpaque())
     }
 
     @Test
@@ -184,7 +184,7 @@ class CoarseTest {
         val t = Profiler.registerCoarse("test-throwing")
         val slot = Profiler.slot()
         runCatching { op<Unit>(t) { throw IllegalStateException("boom") } }
-        assertNull(slot.contextOpaque(), "the finally did not restore the slot")
+        assertNull(slot.executionOpaque(), "the finally did not restore the slot")
     }
 
     /**
@@ -197,9 +197,9 @@ class CoarseTest {
         val t = Profiler.registerCoarse("test-leaked")
         val slot = Profiler.slot()
         Profiler.enter(t)
-        assertNotNull(slot.contextOpaque())
+        assertNotNull(slot.executionOpaque())
         assertTrue(!Profiler.expectBalanced(), "a leaked context reported as balanced")
-        assertNull(slot.contextOpaque(), "the leak was reported but not stopped")
+        assertNull(slot.executionOpaque(), "the leak was reported but not stopped")
         assertTrue(Profiler.expectBalanced(), "the reset did not take")
     }
 
@@ -210,9 +210,9 @@ class CoarseTest {
         // somebody else's process.
         val t = Profiler.registerCoarse("test-unmatched")
         val slot = Profiler.slot()
-        assertNull(slot.contextOpaque())
+        assertNull(slot.executionOpaque())
         Profiler.exit(t)
-        assertNull(slot.contextOpaque())
+        assertNull(slot.executionOpaque())
         assertTrue(Profiler.expectBalanced())
     }
 
@@ -336,15 +336,15 @@ class CoarseTest {
     @Test
     fun `the stale share is of coarse thread-time and cannot exceed all of it`() {
         val c = stat(count = 10, sumNanos = 10_000_000, hits = 0, running = 0, instanceTicks = 1, staleHits = 997)
-        val r = report(listOf(c), labelled = 975, staleContextHits = 997, coarseSampleHits = 1_000)
-        assertEquals(0.997, r.staleContextShare, 1e-9)
-        assertTrue(r.staleContextShare <= 1.0, "a share of thread-time exceeded all of it")
+        val r = report(listOf(c), labelled = 975, staleExecutionHits = 997, coarseSampleHits = 1_000)
+        assertEquals(0.997, r.staleExecutionShare, 1e-9)
+        assertTrue(r.staleExecutionShare <= 1.0, "a share of thread-time exceeded all of it")
     }
 
     @Test
     fun `no coarse samples is a stale share of zero rather than a division by zero`() {
-        val r = report(emptyList(), staleContextHits = 0, coarseSampleHits = 0)
-        assertEquals(0.0, r.staleContextShare)
+        val r = report(emptyList(), staleExecutionHits = 0, coarseSampleHits = 0)
+        assertEquals(0.0, r.staleExecutionShare)
     }
 
     // --- the legend, which is four lines unless you ask -----------------------------
@@ -428,7 +428,7 @@ class CoarseTest {
         labelled: Long = 1_000_000,
         labelledDuty: Double = 0.99,
         dutyAvailable: Boolean = true,
-        staleContextHits: Long = 0,
+        staleExecutionHits: Long = 0,
         coarseSampleHits: Long = 0,
         /** The tree; by default every operation is a root with no children. */
         tree: List<CoarseNode> = coarse.map { node(it) },
@@ -460,7 +460,7 @@ class CoarseTest {
             anomalies = 0, maxSampleNanos = 200_000,
         ),
         coarse = coarse,
-        staleContextHits = staleContextHits,
+        staleExecutionHits = staleExecutionHits,
         coarseSampleHits = coarseSampleHits,
         coarseTree = tree,
         allocations = allocations,
@@ -538,7 +538,7 @@ class CoarseTest {
     @Test
     fun `the floor is 100 bodies with nothing opted into`() {
         assertEquals(100.0, coarseFlatFloorBodies(0), 1e-9)
-        assertEquals(2_500.0, coarseFloorNanos(0.01, coarseFlatFloorBodies(0) * DEFAULT_BODY_NANOS, coarseContextBodies(0) * DEFAULT_BODY_NANOS), 1e-9)
+        assertEquals(2_500.0, coarseFloorNanos(0.01, coarseFlatFloorBodies(0) * DEFAULT_BODY_NANOS, coarseExecutionBodies(0) * DEFAULT_BODY_NANOS), 1e-9)
         assertEquals("", coarseFloorRaised(0, false))
     }
 

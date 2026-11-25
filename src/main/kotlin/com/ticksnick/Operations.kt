@@ -5,7 +5,7 @@ package com.ticksnick
  *
  * **Fine and coarse is a property of the instrument, not of your program.** A fine label is a slot
  * write and a counter, about 2 ns, and it gives a share of time and a call count. A coarse label
- * allocates a context and takes two timestamps, up to 100 ns, and it gives everything the fine one
+ * allocates an execution and takes two timestamps, up to 100 ns, and it gives everything the fine one
  * does *plus* the measured duration of every execution, percentiles over them, and a breakdown of
  * what ran inside. Coarse is strictly more, so the only question is whether the operation is long
  * enough to afford it — `d >= max(2 us, 10 us x share)`, and the report tells you when it is not.

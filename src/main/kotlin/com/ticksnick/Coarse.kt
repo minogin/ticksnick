@@ -13,7 +13,7 @@ internal const val MAX_COARSE_TYPES = 64
 /**
  * How far up the parent chain the sampler walks when crediting inclusive occupancy.
  *
- * A bound and not a limit on nesting: contexts nest as deeply as the caller likes, and past this
+ * A bound and not a limit on nesting: executions nest as deeply as the caller likes, and past this
  * depth only the *inclusive* credit for the outermost ancestors is given up. Sixteen is far past
  * any sane nesting of logical operations, and the walk happens once per occupied slot per tick.
  */
@@ -35,7 +35,7 @@ internal const val EXACT_SPANS = SpanHistogram.BUCKETS
 private const val FIRST_EXACT = 4
 
 /**
- * One execution of a coarse operation.
+ * One execution of a coarse operation: one time it happens, from its open to its close.
  *
  * Allocated on entry, published into the calling thread's slot, and read from the sampling thread
  * with no lock and no fence. That is safe for exactly one reason: every identity field is `val`, so
@@ -44,25 +44,39 @@ private const val FIRST_EXACT = 4
  * stale, and never torn.
  *
  * **Never recycled.** A pool would break that freeze and, worse, would let the sampler credit a
- * sample to a context that had since become a different execution. Silent misattribution is the
+ * sample to an execution that had since become a different one. Silent misattribution is the
  * failure mode this whole design guards against first, and an allocation here costs a
  * fraction of the ~40 ns the tier already spends.
+ *
+ * [Profiler.currentExecution] gives the one a thread is inside, to hand to work that runs within it
+ * on other threads: `within(parent) { }`, `Profiler.newContext(parent)`.
  */
-class CoarseContext @PublishedApi internal constructor(
+class Execution @PublishedApi internal constructor(
     /** Which coarse operation this is an execution of. */
     @JvmField @field:JvmSynthetic @PublishedApi internal val type: Int,
     /** The execution this one is nested inside, or null. The stack, as a chain of few long-lived objects. */
-    @JvmField @field:JvmSynthetic @PublishedApi internal val parent: CoarseContext?,
+    @JvmField @field:JvmSynthetic @PublishedApi internal val parent: Execution?,
     /** `System.nanoTime()` at entry. Half of the only exactly-measured quantity in the report. */
     @JvmField @field:JvmSynthetic @PublishedApi internal val startNanos: Long,
     /**
-     * Where this execution sits in the opening thread's calling-context tree, or null for a
-     * context made outside the hook. Set at entry so that the sampler credits the node with one
+     * Where this execution sits in the opening thread's calling-context tree, or null for an
+     * execution made outside the hook. Set at entry so that the sampler credits the node with one
      * read and exit records the span into it with none. See [CoarsePath].
      */
     @JvmField @field:JvmSynthetic internal val path: CoarsePath? = null,
+    /**
+     * The context that opened it, and so the only one that may close it: a label closes as the last
+     * one open in its own context. Null for an execution made outside the hook.
+     */
+    @JvmField @field:JvmSynthetic @PublishedApi internal val context: Context? = null,
+    /**
+     * Whether `enter` opened it rather than an `op` block. Only `exit` closes it then, and only it can
+     * be left open; and something an `op` block opened, still open on top of a closing label, says a
+     * coroutine suspended in between.
+     */
+    @JvmField @field:JvmSynthetic @PublishedApi internal val byEnter: Boolean = false,
 ) {
-    /** How many ancestors this context has. Kept so the sampler's walk is bounded without counting. */
+    /** How many ancestors this execution has. Kept so the sampler's walk is bounded without counting. */
     @JvmField @field:JvmSynthetic
     internal val depth: Int = if (parent == null) 0 else parent.depth + 1
 
@@ -80,7 +94,7 @@ class CoarseContext @PublishedApi internal constructor(
 
     /**
      * As [tickStamp], for the count per path rather than per type: [tickStamp] is set only for the
-     * first context of a type in a chain, so a type nested in itself would be counted once.
+     * first execution of a type in a chain, so a type nested in itself would be counted once.
      */
     @JvmField @field:JvmSynthetic
     internal var nodeStamp: Long = -1L
@@ -88,14 +102,14 @@ class CoarseContext @PublishedApi internal constructor(
     /**
      * Whether the thread that opened this execution has closed it.
      *
-     * **The one thing a borrowed context cannot tell you by looking at it.** A context that has been
+     * **The one thing a borrowed execution cannot tell you by looking at it.** An execution that has been
      * handed to a pool outlives the slot it came from: the owner closes its span and moves on, and
      * any thread still mounted on it goes on being sampled into an execution that has finished. That
      * is not attribution lost, which the report can already name — it is attribution *invented*, and
      * without this flag nothing in the output would say so.
      *
      * Written once by the owning thread the moment it restores its slot, read by the sampler for
-     * every occupied context it visits. Opaque on both sides for the reason [OpSlot.current] is: a
+     * every occupied execution it visits. Opaque on both sides for the reason [OpSlot.current] is: a
      * plain write here is a dead store from the writer's point of view and the JIT would be within
      * its rights to drop it, while a volatile one buys ordering nothing here needs and costs a fence
      * per coarse execution. A read a few nanoseconds stale is the same bargain every other field in
@@ -107,21 +121,21 @@ class CoarseContext @PublishedApi internal constructor(
     internal companion object {
         @JvmStatic
         val CLOSED: VarHandle = MethodHandles.lookup()
-            .findVarHandle(CoarseContext::class.java, "closed", Boolean::class.javaPrimitiveType)
+            .findVarHandle(Execution::class.java, "closed", Boolean::class.javaPrimitiveType)
     }
 }
 
 /**
  * Marks this execution finished, so a thread still mounted on it can be detected.
  *
- * `@PublishedApi` because [op] is inline and closes the context, through [closeCoarse], in a
+ * `@PublishedApi` because [op] is inline and closes the execution, through [closeCoarse], in a
  * `finally` the compiler writes — the same reason [OpSlot.recordSpan] carries it.
  */
 @PublishedApi
-internal fun CoarseContext.markClosed() = CoarseContext.CLOSED.setOpaque(this, true)
+internal fun Execution.markClosed() = Execution.CLOSED.setOpaque(this, true)
 
-/** Whether the owner has closed this execution. Read by the sampler, once per occupied context. */
-internal fun CoarseContext.isClosed(): Boolean = CoarseContext.CLOSED.getOpaque(this) as Boolean
+/** Whether the owner has closed this execution. Read by the sampler, once per occupied execution. */
+internal fun Execution.isClosed(): Boolean = Execution.CLOSED.getOpaque(this) as Boolean
 
 /**
  * A log-bucket histogram of span durations: fixed memory, any percentile to a known precision.
@@ -329,7 +343,7 @@ internal class Spans internal constructor() {
  * twice. Here every row the report draws is a stat of its own.
  *
  * **One tree per thread, single writer, merged by path when the report is taken.** Entry steps to a child, creating it the first time; exit
- * records the span into the node the context carries. A context borrowed from another thread
+ * records the span into the node the execution carries. An execution borrowed from another thread
  * carries a node of that thread's tree, so the borrowing thread resolves the path in its own tree
  * instead - the rare case, and a walk of at most [MAX_COARSE_DEPTH].
  *
@@ -389,7 +403,7 @@ internal class CoarsePath(
      */
     @JvmField var allocatedUnknown: Boolean = false
     /**
-     * Samples whose innermost context was an execution on this path, by fine label, last entry no
+     * Samples whose innermost execution was one on this path, by fine label, last entry no
      * label: this path's own time, outside its coarse children. Unlabelled samples of a thread parked
      * while other threads work under the same execution - a join - are left out. See `CoarseNode.ownRows`.
      */
@@ -603,7 +617,7 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
     try {
         return body()
     } finally {
-        slot.closeCoarse(ctx)
+        slot.closeOp(ctx)
     }
 }
 
@@ -615,28 +629,43 @@ inline fun <T> op(op: CoarseOp, body: () -> T): T {
  * [OpSlot.pathFor], which is not.
  */
 @PublishedApi
-internal inline fun OpSlot.openCoarse(type: Int): CoarseContext {
-    val parent = contextOpaque()
+internal inline fun OpSlot.openCoarse(type: Int, byEnter: Boolean = false): Execution {
+    val parent = executionOpaque()
     flushCounts(parent)
-    val ctx = CoarseContext(type, parent, System.nanoTime(), pathFor(parent, type))
-    setContextOpaque(ctx)
+    val ctx = Execution(type, parent, System.nanoTime(), pathFor(parent, type), context, byEnter)
+    setExecutionOpaque(ctx)
     return ctx
 }
 
 /**
- * Closes [ctx], the innermost execution on this thread, and records its time: the one way an
- * execution closes, for `op` and [Profiler.exit] alike. [recorded] gets the node and the time before
- * the calls are flushed, for the keyed form to keep the slowest in.
+ * Closes [ctx] at the end of its `op` block, on the slot of the thread the block ends on: the slot it
+ * opened on, unless the block moved to another thread, which only a coroutine does. It closes there
+ * only as the last one open in that thread's context, the context that opened it; otherwise the run
+ * fails, and no other thread's slot is written.
+ *
+ * About a nanosecond: the thread's id against the slot's, and two compares.
  */
 @PublishedApi
-internal inline fun OpSlot.closeCoarse(ctx: CoarseContext, recorded: (CoarsePath?, Long) -> Unit = { _, _ -> }) {
+internal inline fun OpSlot.closeOp(ctx: Execution, recorded: (CoarsePath?, Long) -> Unit = { _, _ -> }) {
+    val s = if (Thread.currentThread().threadId() == threadId) this else Profiler.slot()
+    if (s.executionOpaque() === ctx && ctx.context === s.context) s.closeCoarse(ctx, recorded)
+    else Profiler.opClosedWrong(s, ctx, moved = s !== this)
+}
+
+/**
+ * Closes [ctx], the innermost execution on this thread, and records its time: the one way an
+ * execution closes, for `op` and [Profiler.exit] alike, once they have checked it may. [recorded]
+ * gets the node and the time before the calls are flushed, for the keyed form to keep the slowest in.
+ */
+@PublishedApi
+internal inline fun OpSlot.closeCoarse(ctx: Execution, recorded: (CoarsePath?, Long) -> Unit = { _, _ -> }) {
     // Restored before the span is recorded, so the recording itself is never billed to the
     // execution it is closing.
-    setContextOpaque(ctx.parent)
+    setExecutionOpaque(ctx.parent)
     // Marked the moment this thread leaves it, and before the span is recorded: from here on,
-    // any thread still mounted on this context is working under an execution that is over.
+    // any thread still working within it is working under an execution that is over.
     //
-    // After the slot is restored, deliberately. The sampler treats a closed context as stale
+    // After the slot is restored, deliberately. The sampler treats a closed execution as stale
     // only if the slot still holds it, so marking first would leave a window — one opaque store
     // wide — in which this thread's own exit looks like an escape. **No test covers this**: the
     // window is a nanosecond or two against a 1 ms sampling step, so swapping these two lines
@@ -666,7 +695,7 @@ inline fun <T> op(op: CoarseOp, key: () -> Any?, body: () -> T): T {
         return body()
     } finally {
         // As the plain form, and the one compare.
-        slot.closeCoarse(ctx) { node, nanos ->
+        slot.closeOp(ctx) { node, nanos ->
             if (node != null && nanos > node.slowFloor) node.recordSlow(nanos, keyOf(key))
         }
     }

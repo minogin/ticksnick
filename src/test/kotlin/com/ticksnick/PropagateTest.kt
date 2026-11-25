@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
 class PropagateTest {
 
     /** What the calling thread is inside, read the way the sampler reads it. */
-    private fun current(): CoarseContext? = Profiler.slot().contextOpaque()
+    private fun current(): Execution? = Profiler.slot().executionOpaque()
 
     /**
      * Runs [body] on a thread of its own and hands back what it returned.
@@ -66,18 +66,18 @@ class PropagateTest {
     }
 
     @Test
-    fun `capture on a thread inside nothing is null`() {
-        assertNull(captureCoarse(), "a thread inside no execution captured something")
+    fun `the current execution of a thread inside nothing is null`() {
+        assertNull(Profiler.currentExecution(), "a thread inside no execution captured something")
     }
 
     @Test
-    fun `withCoarse mounts the context and puts back what was there`() {
+    fun `within puts the execution on and puts back what was there`() {
         val outer = Profiler.registerCoarse("prop-outer")
         val other = Profiler.registerCoarse("prop-other")
         op(outer) {
             val a = assertNotNull(current())
-            val borrowed = CoarseContext(other.id, null, System.nanoTime())
-            withCoarse(borrowed) {
+            val borrowed = Execution(other.id, null, System.nanoTime())
+            within(borrowed) {
                 assertSame(borrowed, current(), "the context was not mounted")
             }
             // Restored to what this thread was inside, not cleared. Clearing would bill the rest of
@@ -88,21 +88,21 @@ class PropagateTest {
     }
 
     @Test
-    fun `withCoarse restores even when the body throws`() {
+    fun `within restores even when the body throws`() {
         val t = Profiler.registerCoarse("prop-throwing")
         op(t) {
             val a = assertNotNull(current())
-            runCatching { withCoarse<Unit>(null) { throw IllegalStateException("boom") } }
+            runCatching { within<Unit>(null) { throw IllegalStateException("boom") } }
             assertSame(a, current(), "the finally did not restore the slot")
         }
     }
 
     @Test
-    fun `mounting null means run under no execution`() {
+    fun `within null means run under no execution`() {
         val t = Profiler.registerCoarse("prop-unmount")
         op(t) {
             assertNotNull(current())
-            withCoarse(null) {
+            within(null) {
                 assertNull(current(), "null did not unmount the execution")
             }
             assertNotNull(current())
@@ -202,7 +202,7 @@ class PropagateTest {
         val t = Profiler.registerCoarse("prop-execute")
         val pool = pool(1).propagating()
         try {
-            val seen = java.util.concurrent.atomic.AtomicReference<CoarseContext?>()
+            val seen = java.util.concurrent.atomic.AtomicReference<Execution?>()
             val done = java.util.concurrent.CountDownLatch(1)
             op(t) { pool.execute { seen.set(current()); done.countDown() } }
             assertTrue(done.await(5, TimeUnit.SECONDS))
@@ -234,7 +234,7 @@ class PropagateTest {
         val t = Profiler.registerCoarse("prop-submit-result")
         val pool = pool(1).propagating()
         try {
-            val seen = java.util.concurrent.atomic.AtomicReference<CoarseContext?>()
+            val seen = java.util.concurrent.atomic.AtomicReference<Execution?>()
             val handed = op(t) { pool.submit({ seen.set(current()) }, "done").get() }
             assertEquals("done", handed, "the result value was not passed through")
             val ctx = assertNotNull(seen.get(), "submit(Runnable, result) did not carry the context")
@@ -274,7 +274,7 @@ class PropagateTest {
         // working on a request that ended". Nothing else can distinguish those: the owner's slot is
         // clean either way, so the balance check sees nothing wrong.
         val t = Profiler.registerCoarse("prop-closed")
-        var captured: CoarseContext? = null
+        var captured: Execution? = null
         op(t) { captured = current() }
         assertTrue(assertNotNull(captured).isClosed(), "a finished execution did not mark itself closed")
     }

@@ -164,9 +164,9 @@ Warnings go up. A report over several runs shows each run's own warnings, and th
 several runs is one line ending in `(2 of 4 runs)`, its figures as ranges, `1.04pp..1.29pp`. A diff
 shows the warnings of both its profiles, `(2 of 4 runs in 'naive')`.
 
-A run that **failed** is not a warning: a label left open at `expectBalanced()`, an `exit` that names
-another label, work billed to a closed execution or an error in the sampler stopped it, since its
-figures would be false. It is saved and left out of its profile, and the report opens with a `FAILED`
+A run that **failed** is not a warning: a label closed while it was not the last one open in its own
+context, a label left open when its context ended, work billed to a closed execution or an error in the
+sampler stopped it, since its figures would be false. The README's Threads section has the rule. It is saved and left out of its profile, and the report opens with a `FAILED`
 banner naming it; when no run is left, the banner is the whole report.
 
 ### Tags and Setup
@@ -317,7 +317,7 @@ compares runs of different sizes, as `Mean` does. It is bytes allocated, not mem
 allocate gigabytes and hold none of it. What it measures is the collector's work - a young collection comes
 every time the young generation fills - and not how much memory the program needs. Work on a virtual thread is
 not counted: the ops it ran under, and every op above them, read `?`, and a warning says so. The label's own
-context, one per execution, is left out, so an execution that allocates nothing reads 0; the first execution
+object, one per execution, is left out, so an execution that allocates nothing reads 0; the first execution
 at a place still includes a few KB of the label's own, which matters only for an op that allocates very
 little. A thread counts from its first coarse boundary in the session, so an execution already open at `start`
 misses what it allocates up to there, and one still open at `stop` misses what came after its last.

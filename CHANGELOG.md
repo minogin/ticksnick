@@ -28,6 +28,28 @@ Versions 0.1.0 to 0.4.0 are on Maven Central. This file starts with 0.5.0.
   rows) is gone: a row that is missing reads as never called. A filter is the way to fewer rows.
 - **Kotlin code compiled against 0.7.0 must be recompiled:** `render` and `TickSnick.diff` take a new parameter,
   `filter`. Java callers are unaffected.
+- **One rule for every label: it closes as the last one open in its own context**, what one line of work has
+  open - a thread's own, a task's within an execution, or one made by `newContext`. Every way to break it
+  fails the run, with a sentence that names the labels and the cause. New: an `op` block is checked at its
+  close too - closed while a label opened after it is still open, which is a missed `exit` or a coroutine that
+  suspended in between, or ended on another thread than it began on; a task that closes the execution it
+  works within, or leaves a label open at the end of `within`; a context ended with a label still open; one
+  context on two threads at once. An `exit` with nothing open is still ignored, but when its label is still
+  open in another thread at `stop()`, the run fails: it was entered in one thread and exited in another.
+  `exit(B)` with `A` open on top no longer closes `A`, and `expectBalanced()` in a task checks only what the
+  task opened.
+- **Hand-offs by hand: `within`, `newContext`, `using`.** `Profiler.currentExecution()` gives the execution a
+  thread is inside, and `within(parent) { }` runs a task within it, on any thread; `propagating()` does that for
+  every task. `Profiler.newContext(parent)` makes a context for work that moves from thread to thread,
+  `using(context) { }` puts it on a thread for a block, `context.mount()` for two hooks that are not one block,
+  and `context.end()` ends it. From Java: `Profiler.within(parent, () -> ...)`, `Profiler.using(context, () -> ...)`.
+- **Breaking: `captureCoarse()` and `withCoarse()` are gone, and `CoarseContext` is `Execution`.**
+  `Profiler.currentExecution()` and `within(parent) { }` do what they did. A hand-off costs about 11 ns, was
+  about 7: each task gets a context of its own. An execution takes 64 bytes, was 56: it remembers the context
+  that opened it.
+- **The failure for tasks still running after their execution ended says tasks**, not tasks an execution handed
+  off: `...came from tasks still working within it after it ended - wait for them inside the block that
+  starts them`.
 
 ## 0.7.0 - 2026-11-17
 

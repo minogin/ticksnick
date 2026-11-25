@@ -8,7 +8,7 @@ import java.util.concurrent.locks.LockSupport
 /**
  * How many times the sampler reads a thread's fine label and coarse execution before it gives up on
  * the thread for this tick, when its coarse execution changed during every read. See
- * [OpSlot.contextChanges].
+ * [OpSlot.executionChanges].
  */
 internal const val PAIR_READ_TRIES = 3
 
@@ -267,7 +267,7 @@ internal class Sampler(
      *
      * The denominator of the second factor. `inclusiveHits / instanceTicks` is threads per
      * execution — **parallelism** — and `inclusiveHits / activeTicks` is threads per tick, so the
-     * two divided give executions in flight. Counted by stamping the context object rather than a
+     * two divided give executions in flight. Counted by stamping the execution rather than a
      * table, because the thing being counted is an instance and only the instance can identify
      * itself; three threads inside one execution stamp it once.
      */
@@ -335,12 +335,12 @@ internal class Sampler(
      * Unlabelled samples of a thread waiting inside an execution, held until the walk is over: whether
      * another thread was under the same execution this tick - a join - is known only then.
      */
-    private val pendingCtx = arrayOfNulls<CoarseContext>(MAX_SLOTS)
+    private val pendingCtx = arrayOfNulls<Execution>(MAX_SLOTS)
     private val pendingNode = arrayOfNulls<CoarsePath>(MAX_SLOTS)
     private var pending = 0
 
     /** One sample of fine label [f] in [ctx]'s own time, on its path [node]. See `CoarsePath.ownFine`. */
-    private fun countOwn(ctx: CoarseContext, node: CoarsePath, f: Int) {
+    private fun countOwn(ctx: Execution, node: CoarsePath, f: Int) {
         val own = node.ownFine ?: LongArray(MAX_OPERATIONS + 1).also { node.ownFine = it }
         own[f]++
         if (bump(ctx, FINE_KEY + f) == 1) {
@@ -360,19 +360,19 @@ internal class Sampler(
     private fun firstUnder(parent: Any, type: Int): Boolean = bump(parent, type) == 1
 
     /**
-     * Whether the visited thread is still mounted on its innermost context: -1 not asked yet this
+     * Whether the visited thread is still mounted on its innermost execution: -1 not asked yet this
      * visit, 0 moved on, 1 still there. Reset at each visit; see [stale].
      */
     private var stillMounted = -1
 
     /**
-     * Whether [p], a context in the chain of [ctx], the innermost one this visit found on slot [s], is
-     * stale: closed while [s] still holds [ctx]. The slot is read again on the first closed context of
+     * Whether [p], an execution in the chain of [ctx], the innermost one this visit found on slot [s], is
+     * stale: closed while [s] still holds [ctx]. The slot is read again on the first closed execution of
      * a visit and the answer kept for the rest of it, so a sample is stale for every counter or for none.
      */
-    private fun stale(p: CoarseContext, s: OpSlot, ctx: CoarseContext): Boolean {
+    private fun stale(p: Execution, s: OpSlot, ctx: Execution): Boolean {
         if (!p.isClosed()) return false
-        if (stillMounted < 0) stillMounted = if (s.contextOpaque() === ctx) 1 else 0
+        if (stillMounted < 0) stillMounted = if (s.executionOpaque() === ctx) 1 else 0
         return stillMounted == 1
     }
 
@@ -380,16 +380,16 @@ internal class Sampler(
     private val chain = IntArray(MAX_COARSE_DEPTH)
 
     /**
-     * Samples that caught a thread inside a fine label and inside **no** coarse context.
+     * Samples that caught a thread inside a fine label and inside **no** coarse execution.
      *
      * The one detector for the failure mode neither the floor check nor the balance check can see:
-     * **work escaping its context onto another thread.** A context lives on the thread that made it,
-     * so when an operation hands work to a pool, the pool threads run the callers' fine labels with
-     * no context at all — and the caller's span reports that time as *waiting*. Silent, and in the
+     * **work escaping its execution onto another thread.** An execution lives on the thread that opened
+     * it, so when an operation hands work to a pool, the pool threads run the callers' fine labels
+     * with no execution at all — and the caller's span reports that time as *waiting*. Silent, and in the
      * contaminating direction, which is the class of error this project spends its effort on.
      *
      * A search that fans across a pool shows it: at one thread the search's own busy time fills its
-     * span, and at eight threads most of the work has gone somewhere the context could not follow.
+     * span, and at eight threads most of the work has gone somewhere the execution could not follow.
      * This counter is where it went.
      *
      * **A measurement and not an accusation.** It also reads high for a perfectly good reason: you
@@ -405,19 +405,19 @@ internal class Sampler(
      * Samples that caught a thread inside a coarse execution the owner had already closed, per type.
      *
      * **Attribution invented rather than lost, which is the one direction that cannot be recovered
-     * from.** A context handed to a pool outlives the slot it came from: the thread that opened the
-     * request closes its span and moves on, and anything still mounted on that context goes on being
+     * from.** An execution handed to a pool outlives the slot it came from: the thread that opened the
+     * request closes its span and moves on, and anything still working within that execution goes on being
      * sampled into an execution that has finished. Nothing else here can see it — the balance check
      * looks at a thread's own slot, the floor check at sizes, and [labelledOutsideCoarse] at work
-     * with no context at all. This is work with a context that is no longer real.
+     * with no execution at all. This is work within an execution that is no longer real.
      *
      * These samples are **excluded** from every number the type reports. Crediting them lets
      * `busy/exec` exceed the mean span it is supposed to sit inside, which is arithmetically
      * impossible and reads as a finding rather than as a fault. Counted here instead, and named in
      * the report against the type they would have contaminated.
      *
-     * It is also the failure mode that context propagation makes possible: a context that never
-     * crosses a thread cannot outlive its owner's span.
+     * It is also the failure mode that handing work over makes possible: an execution no task works
+     * within on another thread cannot outlive its owner's span.
      */
     internal val coarseStaleHits = LongArray(MAX_COARSE_TYPES)
 
@@ -429,12 +429,12 @@ internal class Sampler(
      * per-sample count can be divided by anything and give a share; the per-type sum can come out
      * over 100%.
      */
-    internal var staleContextHits: Long = 0; private set
+    internal var staleExecutionHits: Long = 0; private set
 
     /**
      * Samples that caught a thread inside a coarse execution at all, open or closed.
      *
-     * The denominator [staleContextHits] belongs over, and the only one it cannot exceed. Not
+     * The denominator [staleExecutionHits] belongs over, and the only one it cannot exceed. Not
      * *labelled* samples: a thread can be inside a request without being inside a fine label, and
      * that time is just as much the request's.
      */
@@ -443,7 +443,7 @@ internal class Sampler(
     /**
      * Samples whose coarse half was left out because the thread's coarse execution changed during
      * each of [PAIR_READ_TRIES] reads: the fine label still counts, the coarse rows miss one sample,
-     * where a torn read would have put it in the wrong row. See [OpSlot.contextChanges].
+     * where a torn read would have put it in the wrong row. See [OpSlot.executionChanges].
      */
     internal var unpairedSamples: Long = 0; private set
 
@@ -656,17 +656,17 @@ internal class Sampler(
                 if (owner == null || !owner.isAlive) continue
                 live++
                 // The fine label and the coarse execution as one instant: read between two reads of
-                // the slot's count of context changes, and again if a change fell between them. Read
+                // the slot's count of execution changes, and again if a change fell between them. Read
                 // apart, a thread caught in a label could close the label and its coarse execution
                 // before the second read, and the sample would land in the parent's own time, where
-                // the label never ran. See OpSlot.contextChanges.
+                // the label never ran. See OpSlot.executionChanges.
                 var pairedFine = NO_OP
-                var pairedContext: CoarseContext? = null
+                var pairedExecution: Execution? = null
                 var paired = false
                 for (attempt in 0 until PAIR_READ_TRIES) {
                     val before = s.changesAcquire()
                     pairedFine = s.getOpaque()
-                    pairedContext = s.contextOpaque()
+                    pairedExecution = s.executionOpaque()
                     VarHandle.loadLoadFence()
                     if (s.changesOpaque() == before) {
                         paired = true
@@ -709,16 +709,16 @@ internal class Sampler(
                 // The coarse half of the same photograph, read with the fine half above. It costs
                 // nothing at all when nobody has placed a coarse label: the field is null and the
                 // branch is perfectly predicted.
-                val ctx = if (paired) pairedContext else null
+                val ctx = if (paired) pairedExecution else null
                 if (ctx != null) {
                     coarseSampleHits++
                     val t = ctx.type
-                    // Is the thread *still* in this context, now that we have seen it closed?
+                    // Is the thread *still* in this execution, now that we have seen it closed?
                     //
                     // The two reads are not atomic: the slot is read at the top of the visit and the
                     // closed flag some microseconds later, so a thread that legitimately unmounted
                     // just before its execution ended looks stale though it never was. A clean join
-                    // does exactly that — the helper releases the context, and only then does the
+                    // does exactly that — the helper leaves the execution, and only then does the
                     // owner learn it can close — so this benign ordering is the *common* case, not a
                     // rare one. Without this check it can pass 1% of coarse thread-time on a run
                     // where nothing has escaped at all, which is over the threshold that fails the run, and
@@ -727,10 +727,10 @@ internal class Sampler(
                     // Re-reading the slot separates the two. If the thread has moved on, the sample
                     // was taken while the execution was open and is credited normally. If it is
                     // still mounted on an execution that has ended, that is the real thing. One
-                    // extra opaque read, and only on the rare visit that sees a closed context.
+                    // extra opaque read, and only on the rare visit that sees a closed execution.
                     // [stale] asks it, once a visit.
                     stillMounted = -1
-                    // A context confirmed stale is excluded from its own self counters as well as
+                    // An execution confirmed stale is excluded from its own self counters as well as
                     // from the inclusive walk below. Everything about this execution is over; the
                     // only honest thing left to record is that somebody is still working under it.
                     if (!stale(ctx, s, ctx)) {
@@ -748,7 +748,7 @@ internal class Sampler(
                             } else countOwn(ctx, own, if (c < 0) NO_OP_INDEX else c)
                         }
                         // No fine label open, so this sample is the span's own work rather than
-                        // something nested in it. Counted here, where the innermost context and the
+                        // something nested in it. Counted here, where the innermost execution and the
                         // fine label are both already in hand.
                         if (c < 0) {
                             coarseSelfHits[t]++
@@ -770,14 +770,14 @@ internal class Sampler(
                     // Inclusive and not self, because the question a coarse label is asked is *what
                     // was this request made of* — and an answer scoped to the operation's own frame
                     // would leave out everything it delegated, which is most of it.
-                    var p: CoarseContext? = ctx
+                    var p: Execution? = ctx
                     var d = 0
                     var n = 0
                     var anyStale = false
                     while (p != null && d < MAX_COARSE_DEPTH) {
                         val pt = p.type
                         val stale = stale(p, s, ctx)
-                        // The node: every context in the chain is its own path, so each is
+                        // The node: every execution in the chain is its own path, so each is
                         // credited, with no once-per-type rule to apply. Skipped when stale, for
                         // the reason the per-type counters skip it.
                         val node = p.path
@@ -831,7 +831,7 @@ internal class Sampler(
                         p = p.parent
                         d++
                     }
-                    if (anyStale) staleContextHits++
+                    if (anyStale) staleExecutionHits++
                 } else if (paired && c >= 0) {
                     // Labelled work, under no coarse span at all. See labelledOutsideCoarse.
                     labelledOutsideCoarse++
@@ -909,7 +909,7 @@ internal class Sampler(
                 // Once a second and not per tick: it divides two running totals, and the answer
                 // cannot become interesting in a millisecond. This is the second thing that stops a
                 // session, and the only one the sampler decides for itself.
-                if (staleStops) checkStaleContexts()
+                if (staleStops) checkStaleExecutions()
             }
 
             if (prev == 0L) {
@@ -935,7 +935,7 @@ internal class Sampler(
         // Settled here whether or not the duty cycle takes a last window, so that the confirmed
         // total covers the whole session even where there is no CPU clock to correct.
         duty.finish(System.nanoTime(), pause.settle(GcPauseClock.pauseNanos()))
-        // The table holds contexts; let them go with the session.
+        // The table holds executions; let them go with the session.
         pairParent.fill(null)
     }
 
@@ -953,23 +953,23 @@ internal class Sampler(
      * belonging to an execution that had already ended — a plausible number that is simply false.
      * That is the same category as a leaked label, and it gets the same treatment.
      */
-    private fun checkStaleContexts() {
-        if (staleContextHits < STALE_MIN_HITS) return
+    private fun checkStaleExecutions() {
+        if (staleExecutionHits < STALE_MIN_HITS) return
         if (coarseSampleHits <= 0L) return
-        val share = staleContextHits.toDouble() / coarseSampleHits
+        val share = staleExecutionHits.toDouble() / coarseSampleHits
         if (share <= STALE_MAX_SHARE) return
         var worst = -1
         for (t in 0 until MAX_COARSE_TYPES) {
             if (worst < 0 || coarseStaleHits[t] > coarseStaleHits[worst]) worst = t
         }
-        fail(staleContextMessage(Profiler.coarseNameOf(worst), share))
+        fail(staleExecutionMessage(Profiler.coarseNameOf(worst), share))
     }
 
     /**
      * Stops the session and records why. Called from whatever noticed, on whatever thread.
      *
      * Two conditions reach here: a leaked label — see [Profiler.expectBalanced] — and work billed
-     * to finished executions, from [checkStaleContexts]. A label under the timing floor does not:
+     * to finished executions, from [checkStaleExecutions]. A label under the timing floor does not:
      * its number is too imprecise to rank, not false, and it is listed in [Run.tooSmall].
      *
      * Stops sampling rather than the application: this is somebody else's process.
@@ -1075,7 +1075,7 @@ internal class Sampler(
         if (interrupted) Thread.currentThread().interrupt()
         // Once more over the whole session, since the loop checks once a second: a run shorter than
         // that, or stale work in its last second, fails as any other.
-        if (staleStops) checkStaleContexts()
+        if (staleStops) checkStaleExecutions()
     }
 
     /** Total samples taken: one per slot per tick. */

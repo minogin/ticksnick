@@ -15,8 +15,8 @@ private val LOGO = listOf(
  * **Printed to stdout once per JVM, by the first TickSnick call** - registering a label, `start`,
  * `stop`, `save`, `load`, `diff`, `render` - and never part of a returned report. A banner belongs to the program starting, as Spring Boot's and JMH's do, not to the
  * values it hands back: a report is the same String whether it goes to the console or a file, and
- * whatever was rendered before it. The calls on the hot path - `op`, `enter`, `exit`, `withCoarse`,
- * `captureCoarse`, the `propagating` wrappers - do not check.
+ * whatever was rendered before it. The calls on the hot path - `op`, `enter`, `exit`, `within`, `using`,
+ * `currentExecution`, the `propagating` wrappers - do not check.
  */
 internal object Logo {
     private val shown = AtomicBoolean(false)

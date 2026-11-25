@@ -4,6 +4,7 @@ import java.lang.invoke.MethodHandles
 import java.lang.invoke.VarHandle
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.function.Supplier
 import kotlin.math.min
 
 /** Slot value meaning "this thread is not inside any instrumented operation right now". */
@@ -166,7 +167,7 @@ internal class OpSlot(
      * with it: the same bargain the span makes. See `Profiler.resetCoarse`.
      */
     @PublishedApi
-    internal fun flushCounts(ctx: CoarseContext?) {
+    internal fun flushCounts(ctx: Execution?) {
         val n = Profiler.registeredCount()
         val counts = counts
         val last = countsAtBoundary
@@ -250,17 +251,6 @@ internal class OpSlot(
     @JvmField
     var depth: Int = 0
 
-    /**
-     * The coarse executions this thread opened with `enter` and has not closed, innermost last: the
-     * coarse half of what [Profiler.expectBalanced] checks. A context opened by `op` or borrowed by
-     * `withCoarse` is not here, since nothing can leak it. Grows as [stack] does.
-     */
-    @JvmField
-    var coarseEntered = IntArray(MAX_SPAN_DEPTH)
-
-    @JvmField
-    var coarseDepth: Int = 0
-
     /** Pushes the label [id] opens by `enter`, with what the thread was inside before it. */
     fun pushEntered(id: Int) {
         if (depth == stack.size) {
@@ -271,42 +261,50 @@ internal class OpSlot(
         entered[depth++] = id
     }
 
-    /** Pushes the coarse execution of type [type] opened by `enter`. */
-    fun pushCoarseEntered(type: Int) {
-        if (coarseDepth == coarseEntered.size) coarseEntered = coarseEntered.copyOf(coarseDepth * 2)
-        coarseEntered[coarseDepth++] = type
-    }
+    /**
+     * This thread's own context: what it has open when no other context is on it. Made with the slot,
+     * so a thread pays for it once.
+     */
+    @JvmField
+    val own = Context(OWN, null, this)
 
     /**
-     * The coarse execution this thread is currently inside, or null.
+     * The context on this thread now: [own], or one put on it by `within`, `using` or `mount`. The
+     * executions it opens belong to it, and only it closes them. Written and read by the owner only.
+     */
+    @JvmField
+    var context: Context = own
+
+    /**
+     * The innermost coarse execution of [context], or null: what the thread is inside right now.
      *
      * Where the two tiers meet. The sampler reads this and [current] in the same visit, so every
      * sample carries the pair *(which physical operation, under which logical one)* — which is the
      * cross-tabulation, and neither tier can produce it alone.
      *
      * Accessed opaquely for the identical reason [current] is: no fence on either side, and the
-     * publication safety comes from [CoarseContext]'s final fields rather than from ordering here.
-     * A stack is not needed beside it — the context chains to its parent, so restoring on exit is
+     * publication safety comes from [Execution]'s final fields rather than from ordering here.
+     * A stack is not needed beside it — the execution chains to its parent, so restoring on exit is
      * one field write.
      */
     @JvmField
-    var context: CoarseContext? = null
+    var execution: Execution? = null
 
     /**
-     * How many times [context] has changed, so the sampler can take [current] and [context] as one
+     * How many times [execution] has changed, so the sampler can take [current] and [execution] as one
      * instant.
      *
      * The sampler reads the two one after the other, and the thread does not wait for it: caught in a
      * fine label inside a coarse child, it can close the label and the child before the second read,
      * and the sample would land as that label in the parent's own time, where it never ran. So the
-     * owner raises this before it publishes a new context, and the sampler reads it before and after
-     * the pair: equal, and no context changed while it read. See [setContextOpaque] and
+     * owner raises this before it publishes a new execution, and the sampler reads it before and after
+     * the pair: equal, and no execution changed while it read. See [setExecutionOpaque] and
      * `Sampler.readPair`.
      *
      * Written by the owner only, so the increment needs no atomic. The fine hook does not touch it.
      */
     @JvmField
-    var contextChanges: Int = 0
+    var executionChanges: Int = 0
 
     /**
      * This thread's calling-context tree of coarse executions, or null if it has entered none.
@@ -327,7 +325,7 @@ internal class OpSlot(
      * small.
      */
     @PublishedApi
-    internal fun pathFor(parent: CoarseContext?, type: Int): CoarsePath? {
+    internal fun pathFor(parent: Execution?, type: Int): CoarsePath? {
         if (type < 0 || type >= MAX_COARSE_TYPES) return null
         val root = coarseRoot ?: CoarsePath(CoarsePath.ROOT, null, this).also { coarseRoot = it }
         val under = if (parent == null) root else {
@@ -343,20 +341,20 @@ internal class OpSlot(
 
     /**
      * [resolve]'s scratch, one per thread: made on every call, it was 80 bytes an execution under a
-     * borrowed context, billed to the execution's `Allocated` as if the user's code had allocated it.
+     * borrowed one, billed to the execution's `Allocated` as if the user's code had allocated it.
      */
     private val resolveTypes = IntArray(MAX_COARSE_DEPTH)
 
     /**
-     * The node for [ctx]'s path in this thread's own tree, when the context was made on another
-     * thread: a context borrowed from a pool's caller, or closed by a thread that did not open it.
+     * The node for [ctx]'s path in this thread's own tree, when the execution was opened on another
+     * thread: one borrowed from a pool's caller, or closed by a thread that did not open it.
      * Walks the chain and creates the path, bounded by [MAX_COARSE_DEPTH]: on every execution directly
-     * under a borrowed context, about 2 ns, allocating nothing.
+     * under a borrowed one, about 2 ns, allocating nothing.
      */
-    private fun resolve(root: CoarsePath, ctx: CoarseContext): CoarsePath {
+    private fun resolve(root: CoarsePath, ctx: Execution): CoarsePath {
         val types = resolveTypes
         var n = 0
-        var c: CoarseContext? = ctx
+        var c: Execution? = ctx
         while (c != null && n < MAX_COARSE_DEPTH) {
             types[n++] = c.type
             c = c.parent
@@ -369,22 +367,22 @@ internal class OpSlot(
 
     /**
      * Records one completed coarse execution [ctx] lasting [nanos] into its node, and returns the
-     * node, for the keyed form to keep the slowest in; null for a context made outside the hook.
+     * node, for the keyed form to keep the slowest in; null for an execution made outside the hook.
      *
      * Not inline, for the reason [pathFor] is not. A handful of plain writes with a single writer.
      */
     @PublishedApi
-    internal fun recordSpan(ctx: CoarseContext, nanos: Long): CoarsePath? {
+    internal fun recordSpan(ctx: Execution, nanos: Long): CoarsePath? {
         val node = nodeOf(ctx) ?: return null
         node.record(nanos)
-        // TickSnick's own context, made at this execution's start, is not the user's bytes: taken out when
+        // TickSnick's own object, this execution, made at its start, is not the user's bytes: taken out when
         // it was made inside the session, as its bytes were then counted. 0 without `Allocated`.
-        if (ctx.startNanos >= Profiler.startedAt) node.allocated -= Profiler.contextBytes
+        if (ctx.startNanos >= Profiler.startedAt) node.allocated -= Profiler.executionBytes
         return node
     }
 
-    /** This thread's node for [ctx]'s path; null for a context made outside the hook. */
-    private fun nodeOf(ctx: CoarseContext): CoarsePath? {
+    /** This thread's node for [ctx]'s path; null for an execution made outside the hook. */
+    private fun nodeOf(ctx: Execution): CoarsePath? {
         val p = ctx.path ?: return null
         return if (p.owner === this) p else {
             val root = coarseRoot ?: CoarsePath(CoarsePath.ROOT, null, this).also { coarseRoot = it }
@@ -420,13 +418,13 @@ internal class OpSlot(
 
         /** The coarse half of the pair. Static final for the same constant-folding reason as [CURRENT]. */
         @JvmStatic
-        val CONTEXT: VarHandle =
-            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "context", CoarseContext::class.java)
+        val EXECUTION: VarHandle =
+            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "execution", Execution::class.java)
 
-        /** The count of [context]'s changes. Static final for the same constant-folding reason as [CURRENT]. */
+        /** The count of [execution]'s changes. Static final for the same constant-folding reason as [CURRENT]. */
         @JvmStatic
         val CHANGES: VarHandle =
-            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "contextChanges", Int::class.javaPrimitiveType)
+            MethodHandles.lookup().findVarHandle(OpSlot::class.java, "executionChanges", Int::class.javaPrimitiveType)
     }
 }
 
@@ -441,29 +439,29 @@ internal fun OpSlot.getOpaque(): Int = OpSlot.CURRENT.getOpaque(this) as Int
 /** How many times this thread has entered [id], read from another thread. See [OpSlot.COUNTS]. */
 internal fun OpSlot.countOpaque(id: Int): Long = OpSlot.COUNTS.getOpaque(counts, id + OpSlot.COUNT_PAD) as Long
 
-/** The coarse execution this thread is inside, or null. No fence — see [OpSlot.context]. */
+/** The coarse execution this thread is inside, or null. No fence — see [OpSlot.execution]. */
 @PublishedApi
-internal fun OpSlot.contextOpaque(): CoarseContext? = OpSlot.CONTEXT.getOpaque(this) as CoarseContext?
+internal fun OpSlot.executionOpaque(): Execution? = OpSlot.EXECUTION.getOpaque(this) as Execution?
 
 /**
  * Publishes [ctx] as this thread's current coarse execution, counting the change first. See
- * [OpSlot.context] and [OpSlot.contextChanges].
+ * [OpSlot.execution] and [OpSlot.executionChanges].
  *
  * The count is raised with a release store, so a sampler that sees it raised also sees every fine
- * label closed before it, and the fence keeps the context from being seen before the count. On x86
+ * label closed before it, and the fence keeps the execution from being seen before the count. On x86
  * both compile to an ordinary store and no fence instruction.
  */
 @PublishedApi
-internal fun OpSlot.setContextOpaque(ctx: CoarseContext?) {
-    OpSlot.CHANGES.setRelease(this, contextChanges + 1)
+internal fun OpSlot.setExecutionOpaque(ctx: Execution?) {
+    OpSlot.CHANGES.setRelease(this, executionChanges + 1)
     VarHandle.storeStoreFence()
-    OpSlot.CONTEXT.setOpaque(this, ctx)
+    OpSlot.EXECUTION.setOpaque(this, ctx)
 }
 
-/** The count of context changes, read by the sampler before the pair. See [OpSlot.contextChanges]. */
+/** The count of execution changes, read by the sampler before the pair. See [OpSlot.executionChanges]. */
 internal fun OpSlot.changesAcquire(): Int = OpSlot.CHANGES.getAcquire(this) as Int
 
-/** The count of context changes, read by the sampler after the pair. See [OpSlot.contextChanges]. */
+/** The count of execution changes, read by the sampler after the pair. See [OpSlot.executionChanges]. */
 internal fun OpSlot.changesOpaque(): Int = OpSlot.CHANGES.getOpaque(this) as Int
 
 /**
@@ -571,9 +569,9 @@ object Profiler {
 
     private var sessions = 0
 
-    /** One coarse context's bytes on this JVM, measured at [start], 0 without `Allocated`. See [OpSlot.recordSpan]. */
+    /** One coarse execution's bytes on this JVM, measured at [start], 0 without `Allocated`. See [OpSlot.recordSpan]. */
     @JvmField @field:JvmSynthetic
-    internal var contextBytes = 0L
+    internal var executionBytes = 0L
 
     private var allocationsMissing = false
 
@@ -581,7 +579,7 @@ object Profiler {
     @JvmField @field:JvmSynthetic
     internal var allocationsAvailable = AllocationClock.available
 
-    /** When the session started: an execution opened before it made its context outside `Allocated`. */
+    /** When the session started: an execution opened before it was made outside `Allocated`. */
     @JvmField @field:JvmSynthetic
     internal var startedAt: Long = 0
 
@@ -862,16 +860,16 @@ object Profiler {
         }
 
     /** Threads inside a coarse execution right now, which at the end of a session is a leak. */
-    internal fun openContexts(): Int {
+    internal fun openExecutions(): Int {
         var n = 0
-        forEachSlot { if (it.context != null) n++ }
+        forEachSlot { if (it.execution != null) n++ }
         return n
     }
 
-    /** [openContexts] by coarse label, each with how many threads are inside one. */
-    internal fun openContextsByName(): Map<String, Int> {
+    /** [openExecutions] by coarse label, each with how many threads are inside one. */
+    internal fun openExecutionsByName(): Map<String, Int> {
         val byName = java.util.TreeMap<String, Int>()
-        forEachSlot { s -> s.context?.let { byName.merge(coarseNameOf(it.type), 1, Int::plus) } }
+        forEachSlot { s -> s.execution?.let { byName.merge(coarseNameOf(it.type), 1, Int::plus) } }
         return byName
     }
 
@@ -921,18 +919,24 @@ object Profiler {
      * label ends up covering work that was never inside it, and the number that comes out is
      * plausible rather than obviously wrong.
      *
-     * A mismatch is reported and counted, never thrown — throwing would turn a measurement problem
+     * A mismatch fails the run, and is never thrown — throwing would turn a measurement problem
      * into a crash in somebody else's process — and it still unwinds, so one mistake does not
      * cascade into every label after it.
+     *
+     * With nothing open, it is ignored: the slot is empty before and after, so no time goes to a
+     * wrong label. It is counted, though, and if [op] is still open somewhere when the session
+     * stops, it was entered in one thread and exited in another, and the run fails then.
      */
     @JvmStatic
     @JvmName("exitFine")
     fun exit(op: FineOp) {
         val s = local.get()
         val current = s.getOpaque()
-        // With nothing open the slot is empty before and after: no time goes to a wrong label.
-        if (current < 0) return
-        if (current != op.id) mismatch(nameOf(op), nameOf(current))
+        if (current < 0) {
+            stray(strayFine, op.id)
+            return
+        }
+        if (current != op.id) fineClosedWrong(s, op.id, current)
         s.setOpaque(if (s.depth > 0) s.stack[--s.depth] else NO_OP)
     }
 
@@ -941,7 +945,7 @@ object Profiler {
      *
      * For the boundary that is two callbacks rather than a block, which is most of what third-party
      * code offers. It carries the same hazard the fine form does and for the same reason: **there is
-     * no `finally` here**, so a body that throws leaves the context open and everything the thread
+     * no `finally` here**, so a body that throws leaves the execution open and everything the thread
      * does afterwards is billed to it. See [expectBalanced].
      */
     @JvmStatic
@@ -950,32 +954,59 @@ object Profiler {
         // From Java a handle is an int, and a fine one past the coarse ids would otherwise reach
         // the sampler's arrays and stop it.
         require(op.id in 0 until MAX_COARSE_TYPES) { "not a coarse operation: ${op.id}" }
-        val s = local.get()
-        // Before the context is made, so the push is not in the execution's time.
-        s.pushCoarseEntered(op.id)
-        s.openCoarse(op.id)
+        local.get().openCoarse(op.id, byEnter = true)
     }
 
     /**
-     * Closes the innermost coarse execution on this thread and records its span.
+     * Closes the innermost coarse execution of this thread's context and records its span: the one
+     * `enter` opened, the last one still open in the context that opened it.
      *
-     * Checked against [op], for the reason the fine form gives. Closing when nothing is open is
-     * reported rather than thrown: it means the caller closed something it never opened, which is a
-     * measurement problem and not a reason to stop somebody else's program.
+     * Checked against [op], for the reason the fine form gives; anything else fails the run, and is
+     * never thrown. With nothing open in this context it is ignored and counted, as the fine form is.
      */
     @JvmStatic
     @JvmName("exitCoarse")
     fun exit(op: CoarseOp) {
         val s = local.get()
-        val ctx = s.contextOpaque()
-        if (ctx == null) {
-            // Nothing open: nothing is billed to a wrong execution.
-            return
-        }
-        if (ctx.type != op.id) mismatch(nameOf(op), coarseNameOf(ctx.type))
-        if (s.coarseDepth > 0) s.coarseDepth--
-        s.closeCoarse(ctx)
+        val e = s.executionOpaque()
+        if (e != null && e.type == op.id && e.byEnter && e.context === s.context) s.closeCoarse(e)
+        else exitClosedWrong(s, op.id)
     }
+
+    /**
+     * The coarse execution the calling thread is inside, or null: the one to hand to work that runs
+     * within it on other threads, `within(parent) { }`, or to a context made for a line of work that
+     * moves between threads, [newContext].
+     *
+     * Call it on the thread that hands the work over. It reads this thread, so inside a coroutine it
+     * gives what the thread is inside, which TickSnick does not follow yet.
+     */
+    @JvmStatic
+    fun currentExecution(): Execution? = local.get().executionOpaque()
+
+    /**
+     * A context for a line of work that moves between threads - an async request whose stages run on
+     * different pools - placed under [parent]. Each stage runs with it on its thread, `using(context)
+     * { }`, so a label it entered on one thread can be exited on another; [Context.end] ends it.
+     */
+    @JvmStatic
+    fun newContext(parent: Execution?): Context = Context(NEW, parent)
+
+    /** For Java: `Profiler.within(parent, () -> work())`. See the Kotlin `within`. */
+    @JvmStatic
+    fun <T> within(parent: Execution?, work: Supplier<T>): T = com.ticksnick.within(parent) { work.get() }
+
+    /** For Java, work that returns nothing. See the Kotlin `within`. */
+    @JvmStatic
+    fun within(parent: Execution?, work: Runnable) = com.ticksnick.within(parent) { work.run() }
+
+    /** For Java: `Profiler.using(context, () -> stage())`. See the Kotlin `using`. */
+    @JvmStatic
+    fun <T> using(context: Context, work: Supplier<T>): T = com.ticksnick.using(context) { work.get() }
+
+    /** For Java, a stage that returns nothing. See the Kotlin `using`. */
+    @JvmStatic
+    fun using(context: Context, work: Runnable) = com.ticksnick.using(context) { work.run() }
 
     /** One scope per operation, made once, so opening one allocates nothing. */
     private val fineScopes = Array(MAX_OPERATIONS) { FineScope(it) }
@@ -1011,11 +1042,167 @@ object Profiler {
         return scope
     }
 
-    /** One closing call that did not match what was open. Counted with the leaks, and fatal. */
-    private fun mismatch(closed: String, open: String) {
+    /**
+     * Fails the run: a label closed wrong, or left open, so time went to the wrong label. Counted with
+     * the imbalances. Stopping the session rather than the program: this is somebody else's process.
+     */
+    private fun fail(message: String) {
         imbalances.incrementAndGet()
-        sampler?.fail(mismatchMessage(closed, open))
+        sampler?.fail(message)
     }
+
+    /**
+     * Exits that found nothing open in their context, per op, for the life of the process: each
+     * harmless alone, an op entered in one thread and exited in another when the op is still open at
+     * `stop()`. See [strayFailure].
+     */
+    private val strayFine = java.util.concurrent.atomic.AtomicIntegerArray(MAX_OPERATIONS)
+    private val strayCoarse = java.util.concurrent.atomic.AtomicIntegerArray(MAX_COARSE_TYPES)
+
+    /** [strayFine] and [strayCoarse] when the session began, so a session sees its own. */
+    private val strayFineAtStart = IntArray(MAX_OPERATIONS)
+    private val strayCoarseAtStart = IntArray(MAX_COARSE_TYPES)
+
+    private fun stray(counts: java.util.concurrent.atomic.AtomicIntegerArray, id: Int) {
+        if (id in 0 until counts.length()) counts.incrementAndGet(id)
+    }
+
+    /** How a failure names the calling thread. */
+    private fun thisThread(): String = "thread ${code(Thread.currentThread().name)}"
+
+    /**
+     * A fine `exit(id)` that found [current] open, not `id`: `id` entered below it and an `exit` of
+     * [current] missed, `id` closed inside [current]'s block, or `id` not open on this thread at all.
+     */
+    private fun fineClosedWrong(s: OpSlot, id: Int, current: Int) {
+        var i = s.depth - 1
+        while (i >= 0 && s.entered[i] != id) i--
+        val closed = nameOf(id)
+        val inner = nameOf(current)
+        fail(
+            when {
+                i < 0 -> notOpenMessage(closed, thisThread(), inner)
+                s.entered[s.depth - 1] == current -> missedExitMessage(closed, inner)
+                else -> crossedMessage(closed, inner)
+            }
+        )
+    }
+
+    /**
+     * A coarse `exit(id)` that could not close the innermost execution of this thread's context. Either
+     * nothing of the context's own is open, which is ignored and counted, or it fails the run, by
+     * cause: `id` open lower in the context, with an `exit` missed above it or an `op` block around the
+     * `exit`; `id` only borrowed by the context; `id` not open in it at all.
+     */
+    private fun exitClosedWrong(s: OpSlot, id: Int) {
+        if (id !in 0 until MAX_COARSE_TYPES) return
+        val c = s.context
+        val top = s.executionOpaque()
+        val closed = coarseNameOf(id)
+        if (top == null || top === c.bottom) {
+            val borrowed = borrowedOf(c, id)
+            if (borrowed != null) fail(borrowedMessage(closed, describeOpener(borrowed), c.describe()))
+            else stray(strayCoarse, id)
+            return
+        }
+        val found = openIn(top, c.bottom) { it.type == id }
+        if (found == null) {
+            val borrowed = borrowedOf(c, id)
+            fail(
+                if (borrowed != null) borrowedMessage(closed, describeOpener(borrowed), c.describe())
+                else notOpenMessage(closed, c.describe(), coarseNameOf(top.type))
+            )
+            return
+        }
+        if (found === top) {
+            // Opened by an `op` block, which only that block closes.
+            fail(crossedMessage(closed, closed))
+            return
+        }
+        val byOp = openIn(top, found) { !it.byEnter }
+        if (byOp != null) {
+            fail(crossedMessage(closed, coarseNameOf(byOp.type)))
+            return
+        }
+        fail(missedExitMessage(closed, coarseNameOf(top.type)))
+        // Closed with what was left open above it, so the labels after it are not billed to them.
+        s.unwindTo(found.parent)
+    }
+
+    /**
+     * An `op` block's execution [e] that was not the last one open in its context where the block
+     * ended, [s]: something opened after it still open on top, or the block ending in another context -
+     * on another thread, or under a context a `mount()` inside it left on.
+     */
+    @PublishedApi
+    internal fun opClosedWrong(s: OpSlot, e: Execution, moved: Boolean) {
+        val c = s.context
+        val closed = coarseNameOf(e.type)
+        val top = s.executionOpaque()
+        if (e.context === c && top != null && openIn(top, c.bottom) { it === e } != null) {
+            val byOp = openIn(top, e) { !it.byEnter }
+            fail(
+                if (byOp != null) suspendedMessage(closed, coarseNameOf(byOp.type))
+                else missedExitMessage(closed, coarseNameOf(top.type))
+            )
+            s.unwindTo(e.parent)
+            return
+        }
+        val opened = describeOpener(e)
+        fail(
+            when {
+                moved -> movedMessage(closed, opened, c.describe())
+                e.context !== c -> mountLeftMessage(closed, opened, c.describe())
+                else -> notOpenMessage(closed, c.describe(), if (top == null) "nothing" else coarseNameOf(top.type))
+            }
+        )
+    }
+
+    /** The first execution from [top] down to [bottom], exclusive, that [match] accepts, or null. */
+    private inline fun openIn(top: Execution?, bottom: Execution?, match: (Execution) -> Boolean): Execution? {
+        var e = top
+        var n = 0
+        while (e != null && e !== bottom && n++ < MAX_UNWIND) {
+            if (match(e)) return e
+            e = e.parent
+        }
+        return null
+    }
+
+    /** The execution of type [id] that [c] borrowed, its bottom or below it, or null. */
+    private fun borrowedOf(c: Context, id: Int): Execution? = openIn(c.bottom, null) { it.type == id }
+
+    /** The strand that opened [e], as a failure names it. */
+    private fun describeOpener(e: Execution): String = e.context?.describe() ?: "another thread"
+
+    /**
+     * The label to name for what is still open from [top] down to [bottom], exclusive, or null if
+     * nothing is: the innermost one `enter` opened, else the innermost.
+     */
+    internal fun leftOpen(top: Execution?, bottom: Execution?): String? {
+        if (top == null || top === bottom) return null
+        val entered = openIn(top, bottom) { it.byEnter } ?: top
+        return coarseNameOf(entered.type)
+    }
+
+    /** Fails the run for [label] still open at [place], where its context ended. */
+    internal fun failLeftOpen(label: String, place: String) = fail(leftOpenMessage(label, place))
+
+    /** Fails the run for [c] put on [slot]'s thread while it is on a thread already. */
+    internal fun failInUse(c: Context, slot: OpSlot) {
+        val other = c.on
+        fail(inUseMessage(c.describe(), slot.own.describe(), other?.own?.describe() ?: "another thread"))
+    }
+
+    /** Fails the run for a block that put [c] on [slot]'s thread and ended on another. */
+    internal fun failMoved(c: Context, slot: OpSlot) =
+        fail(blockMovedMessage(blockOf(c), slot.own.describe(), thisThread()))
+
+    /** Fails the run for a block whose context [c] ended with [stillOn] on its thread. */
+    internal fun failMountLeftOn(c: Context, stillOn: Context) =
+        fail(blockMountLeftMessage(blockOf(c), stillOn.describe()))
+
+    private fun blockOf(c: Context): String = if (c.kind == WITHIN) "`within`" else "`using`"
 
     /** How many hand-placed labels this thread has entered and not left. */
     internal fun depth(): Int = local.get().depth
@@ -1027,33 +1214,85 @@ object Profiler {
      * quiescent — between requests, between iterations, at the end of a task — and a leak surfaces
      * there instead of quietly contaminating everything that follows.
      *
-     * Resets the stack, so one leak is one report rather than every subsequent check failing too.
+     * Resets what was left open, so one leak is one report rather than every subsequent check failing too.
      */
     @JvmStatic
     fun expectBalanced(): Boolean {
         val s = local.get()
-        // Only what `enter` opened: a lexical `op` around this call, or a context borrowed by
-        // `withCoarse` or `propagating()`, is open by design and cannot leak. Named by what was
+        val c = s.context
+        val top = s.executionOpaque()
+        // Only what `enter` opened in this thread's context: a lexical `op` around this call, or an
+        // execution borrowed by `within`, is open by design and cannot leak. Named by what was
         // entered, innermost first, not by the label the thread is in now.
+        val entered = openIn(top, c.bottom) { it.byEnter }
+        val base = if (c === s.own) 0 else c.savedDepth
         val leaked = when {
-            // The coarse half is named first when both leaked, because a coarse context left open
+            // The coarse half is named first when both leaked, because a coarse execution left open
             // collects a whole request's worth of samples rather than one label's.
-            s.coarseDepth > 0 -> coarseNameOf(s.coarseEntered[s.coarseDepth - 1])
-            s.depth > 0 -> nameOf(s.entered[s.depth - 1])
+            entered != null -> coarseNameOf(entered.type)
+            s.depth > base -> nameOf(s.entered[s.depth - 1])
             else -> return true
         }
-        imbalances.incrementAndGet()
-        val ctx = s.contextOpaque()
-        s.flushCounts(ctx)
-        s.setContextOpaque(null)
-        s.depth = 0
-        s.coarseDepth = 0
-        s.setOpaque(NO_OP)
+        // What `enter` opened on top, down to the first an `op` block opened, which its block closes.
+        var e = top
+        while (e != null && e !== c.bottom && e.byEnter) {
+            e.markClosed()
+            e = e.parent
+        }
+        if (e !== top) {
+            s.flushCounts(top)
+            s.setExecutionOpaque(e)
+        }
+        if (s.depth > base) {
+            s.setOpaque(s.stack[base])
+            s.depth = base
+        }
         // Fatal. Resetting the slot stops the leak spreading, but it cannot give back the samples
         // already billed to the wrong operation - so continuing means reporting a share that was
         // manufactured by a bug.
-        sampler?.fail(leakMessage(leaked))
+        failLeftOpen(leaked, "`expectBalanced()` on ${thisThread()}")
         return false
+    }
+
+    /**
+     * The failure for an op exited where it was not open and still open somewhere at the end of the
+     * session: entered in one thread and exited in another, so the first thread's later work went to
+     * it. Null when there is none.
+     */
+    private fun strayFailure(): String? {
+        for (id in 0 until registeredCount()) {
+            val n = strayFine.get(id) - strayFineAtStart[id]
+            if (n <= 0) continue
+            val where = fineOpenIn(id) ?: continue
+            return strayExitMessage(nameOf(id), n.toLong(), where)
+        }
+        for (t in 0 until coarseCount()) {
+            val n = strayCoarse.get(t) - strayCoarseAtStart[t]
+            if (n <= 0) continue
+            val where = coarseOpenIn(t) ?: continue
+            return strayExitMessage(coarseNameOf(t), n.toLong(), where)
+        }
+        return null
+    }
+
+    /** A thread with fine op [id] open, as a failure names it, or null. */
+    private fun fineOpenIn(id: Int): String? {
+        var found: String? = null
+        forEachSlot { s ->
+            if (found == null && (s.getOpaque() == id || (0 until minOf(s.depth, s.entered.size)).any { s.entered[it] == id })) {
+                found = s.own.describe()
+            }
+        }
+        return found
+    }
+
+    /** A strand with an execution of coarse type [t] open, as a failure names it, or null. */
+    private fun coarseOpenIn(t: Int): String? {
+        var found: String? = null
+        forEachSlot { s ->
+            if (found == null) openIn(s.executionOpaque(), null) { it.type == t && !it.isClosed() }?.let { found = describeOpener(it) }
+        }
+        return found
     }
 
     /**
@@ -1244,11 +1483,13 @@ object Profiler {
             tags.forEach { (name, value) -> sessionTags[name] = value.toString() }
         }
         allocationSession = if (allocations && allocationsAvailable) ++sessions else 0
-        contextBytes = if (allocationSession != 0) AllocationClock.contextBytes() else 0L
+        executionBytes = if (allocationSession != 0) AllocationClock.executionBytes() else 0L
         allocationsMissing = allocations && !allocationsAvailable
         startedAt = System.nanoTime()
         gcAtStart = GcPauseClock.pauseNanos()
         imbalancesAtStart = imbalances.get()
+        for (id in 0 until MAX_OPERATIONS) strayFineAtStart[id] = strayFine.get(id)
+        for (t in 0 until MAX_COARSE_TYPES) strayCoarseAtStart[t] = strayCoarse.get(t)
         untrackedAtStart = untrackedSlots()
         reclaimedAtStart = reclaimedSlots()
         sampler = Sampler((tickMillis * 1_000_000).toLong(), wait, jitter, sampleState = sampleState)
@@ -1273,6 +1514,8 @@ object Profiler {
         Logo.once()
         val s = checkNotNull(sampler) { "not sampling" }
         s.shutdown()
+        // Before the run is built: an op exited where it was not open and still open now fails it.
+        strayFailure()?.let { imbalances.incrementAndGet(); s.fail(it) }
         sampler = null
         val allocations = allocationSession != 0
         allocationSession = 0
@@ -1297,7 +1540,7 @@ object Profiler {
         // A label still open when the session ends is a leak by definition: nothing can close it
         // now. Counted here rather than left to the user to notice, because the symptom — one
         // operation quietly accumulating everybody else's samples — looks exactly like a finding.
-        // Taken before the open-context count, so a context still open at the end is visible in
+        // Taken before the open-execution count, so an execution still open at the end is visible in
         // both: its span is missing from the totals precisely because nothing closed it.
         val tree = coarseTree()
         val totals = coarseTotals(tree)
@@ -1356,9 +1599,9 @@ object Profiler {
             reclaimedSlots = (reclaimedSlots() - reclaimedAtStart).coerceAtLeast(0),
             idleWaitingHits = s.idleWaitingHits,
             coarse = coarse,
-            openContextsAtEnd = openContexts(),
+            openExecutionsAtEnd = openExecutions(),
             labelledOutsideCoarse = s.labelledOutsideCoarse,
-            staleContextHits = s.staleContextHits,
+            staleExecutionHits = s.staleExecutionHits,
             coarseSampleHits = s.coarseSampleHits,
             pause = pauses,
             coarseTree = coarseTree,
@@ -1366,7 +1609,7 @@ object Profiler {
             bodyNanos = bodyTrace.nanos,
             nanoTimeBodies = bodyTrace.nanoTimeBodies,
             openAtEndNames = openSpanNames(),
-            openContextsAtEndByName = openContextsByName(),
+            openExecutionsAtEndByName = openExecutionsByName(),
             wait = s.wait,
             askedStepNanos = s.stepNanos,
             allocations = allocations,

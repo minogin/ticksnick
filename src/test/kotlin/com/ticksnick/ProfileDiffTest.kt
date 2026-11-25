@@ -447,7 +447,7 @@ class ProfileDiffTest {
     private fun profile(tree: List<CoarseNode>, ops: List<OperationStat>, span: Long = 1_000_000_000, stale: Long = 0, pause: Pauses = Pauses.NONE) = Run(
         operations = ops, idleHits = 0, ticks = 1_001,
         samplingSpanNanos = span, durationNanos = span, threads = 1, pause = pause,
-        staleContextHits = stale, coarseSampleHits = 10,
+        staleExecutionHits = stale, coarseSampleHits = 10,
         duty = Duty(
             labelledDuty = 0.999, invisibleOffCpu = 0.0, labelledFraction = 1.0, reason = null,
             resolutionNanos = 15_625_000, windowNanos = 1_000_000_000, windows = 1, threads = 1,

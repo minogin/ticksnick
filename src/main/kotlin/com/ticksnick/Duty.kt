@@ -18,8 +18,8 @@ internal const val FULL_PROCESSORS = 0.9
  */
 internal const val CORES_REFRESH_NANOS = 100_000_000L
 
-/** Contexts made at `start()` to measure one's size on this JVM. See [AllocationClock.contextBytes]. */
-internal const val CONTEXT_PROBES = 1_000
+/** Executions made at `start()` to measure one's size on this JVM. See [AllocationClock.executionBytes]. */
+internal const val EXECUTION_PROBES = 1_000
 
 /**
  * One thread's labelled samples in one window that read `Runnable` while its CPU clock says it was
@@ -154,20 +154,20 @@ internal object AllocationClock {
     fun currentBytes(): Long = bean!!.currentThreadAllocatedBytes
 
     /**
-     * The bytes one coarse execution's context takes on this JVM: TickSnick's own, made at each
+     * The bytes one coarse execution takes on this JVM: TickSnick's own, made at each
      * execution's start, after the parent's bytes are read, and so counted in the execution's
      * `Allocated` unless taken out (see `Profiler.stop`). An object's size is fixed by the JVM's layout,
-     * so [CONTEXT_PROBES] of them over the counter's difference is exact, rounded to the 8 bytes objects
+     * so [EXECUTION_PROBES] of them over the counter's difference is exact, rounded to the 8 bytes objects
      * align to. 0 where it cannot be read, a virtual thread among them.
      */
-    fun contextBytes(): Long {
+    fun executionBytes(): Long {
         if (!available) return 0
-        val keep = arrayOfNulls<CoarseContext>(CONTEXT_PROBES)
+        val keep = arrayOfNulls<Execution>(EXECUTION_PROBES)
         val before = currentBytes()
-        for (i in keep.indices) keep[i] = CoarseContext(0, null, 0L)
+        for (i in keep.indices) keep[i] = Execution(0, null, 0L)
         val after = currentBytes()
         if (before < 0 || after < 0 || keep.isEmpty()) return 0
-        return Math.round((after - before).toDouble() / CONTEXT_PROBES / 8) * 8
+        return Math.round((after - before).toDouble() / EXECUTION_PROBES / 8) * 8
     }
 }
 

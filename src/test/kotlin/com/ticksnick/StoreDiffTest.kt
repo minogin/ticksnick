@@ -166,7 +166,7 @@ class StoreDiffTest {
         ops: List<OperationStat>, tree: List<CoarseNode> = emptyList(), coarse: List<CoarseStat> = emptyList(),
         clock: ClockTrace = ClockTrace.NOT_RECORDED,
         openAtEnd: Int = 0, openAtEndNames: List<String> = emptyList(),
-        openContextsAtEnd: Int = 0, openContextsAtEndByName: Map<String, Int> = emptyMap(),
+        openExecutionsAtEnd: Int = 0, openExecutionsAtEndByName: Map<String, Int> = emptyMap(),
     ) = Run(
         operations = ops, idleHits = 0, ticks = 1_001, samplingSpanNanos = 1_000_000_000, durationNanos = 1_000_000_000,
         threads = 1,
@@ -178,7 +178,7 @@ class StoreDiffTest {
         ),
         coarse = coarse, coarseTree = tree, clock = clock,
         openAtEnd = openAtEnd, openAtEndNames = openAtEndNames,
-        openContextsAtEnd = openContextsAtEnd, openContextsAtEndByName = openContextsAtEndByName,
+        openExecutionsAtEnd = openExecutionsAtEnd, openExecutionsAtEndByName = openExecutionsAtEndByName,
     )
 
     /** A clock that read [v] every second of a three-second run. */
@@ -190,7 +190,7 @@ class StoreDiffTest {
             listOf(stat("a", 100, 1_000)),
             clock = ClockTrace(doubleArrayOf(205.0, Double.NaN, 135.0), ofBase = true, notMeasured = null),
             openAtEnd = 1, openAtEndNames = listOf("parse"),
-            openContextsAtEnd = 3, openContextsAtEndByName = mapOf("req" to 2, "step" to 1),
+            openExecutionsAtEnd = 3, openExecutionsAtEndByName = mapOf("req" to 2, "step" to 1),
         )
         val path = Files.createTempFile("ticksnick", RUN_EXTENSION)
         try {
@@ -202,7 +202,7 @@ class StoreDiffTest {
             assertEquals(135.0, back.clock.samples[2])
             assertTrue(back.clock.ofBase)
             assertEquals(listOf("parse"), back.openAtEndNames)
-            assertEquals(mapOf("req" to 2, "step" to 1), back.openContextsAtEndByName)
+            assertEquals(mapOf("req" to 2, "step" to 1), back.openExecutionsAtEndByName)
         } finally {
             Files.delete(path)
         }

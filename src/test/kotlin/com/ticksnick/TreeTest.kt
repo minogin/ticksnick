@@ -129,9 +129,9 @@ class TreeTest {
         val inner = Profiler.registerCoarse("tree-inner")
         start()
         Profiler.enter(outer)
-        val ctx = assertNotNull(captureCoarse())
+        val ctx = assertNotNull(Profiler.currentExecution())
         val worker = onThread("tree-worker") {
-            withCoarse(ctx) { op(inner) { spinFor(20_000_000) } }
+            within(ctx) { op(inner) { spinFor(20_000_000) } }
         }
         worker.start()
         worker.join()

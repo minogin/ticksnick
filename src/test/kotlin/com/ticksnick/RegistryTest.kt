@@ -289,6 +289,7 @@ class RegistryTest {
         assertTrue("test:mismatch-open" in failure, "the message did not name what was open")
     }
 
+    /** An `exit` of a label not open here, while another is, fails and closes nothing: the open one is not its to close. */
     @Test
     fun `closing a coarse execution that is not the one open is caught too`() {
         val a = Profiler.registerCoarse("test:coarse-open")
@@ -297,11 +298,14 @@ class RegistryTest {
         onOwnThread {
             Profiler.enter(a)
             Profiler.exit(b)
-            assertNull(Profiler.slot().contextOpaque(), "the context was not closed")
+            assertEquals(a.id, Profiler.slot().executionOpaque()?.type, "an exit of a label not open closed another")
+            Profiler.exit(a)
+            assertNull(Profiler.slot().executionOpaque(), "the open one did not close at its own exit")
             Profiler.release()
         }
         val report = Profiler.stop()
-        assertEquals(1, report.imbalances, "a crossed coarse exit was not counted")
+        val failure = assertNotNull(report.failure, "a crossed coarse exit did not fail the run")
+        assertTrue("test:coarse-closed" in failure && "test:coarse-open" in failure, failure)
     }
 
     /** An `exit` with no `enter` names nothing rather than reading off the end of the name table. */
@@ -356,8 +360,8 @@ class RegistryTest {
             op(fine) { assertTrue(Profiler.expectBalanced(), "a lexical fine op read as a leak") }
             op(coarse) {
                 assertTrue(Profiler.expectBalanced(), "a lexical coarse op read as a leak")
-                val ctx = captureCoarse()
-                val helper = Thread { withCoarse(ctx) { assertTrue(Profiler.expectBalanced(), "a borrowed context read as a leak") }; Profiler.release() }
+                val ctx = Profiler.currentExecution()
+                val helper = Thread { within(ctx) { assertTrue(Profiler.expectBalanced(), "a borrowed context read as a leak") }; Profiler.release() }
                 helper.start()
                 helper.join()
             }

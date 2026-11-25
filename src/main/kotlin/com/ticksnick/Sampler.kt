@@ -367,12 +367,13 @@ internal class Sampler(
 
     /**
      * Whether [p], an execution in the chain of [ctx], the innermost one this visit found on slot [s], is
-     * stale: closed while [s] still holds [ctx]. The slot is read again on the first closed execution of
-     * a visit and the answer kept for the rest of it, so a sample is stale for every counter or for none.
+     * stale: closed while [s] still holds [ctx], and not by a thread letting go of a coroutine resumed
+     * elsewhere. The slot is read again on the first closed execution of a visit and the answer kept for
+     * the rest of it, so a sample is stale for every counter or for none.
      */
     private fun stale(p: Execution, s: OpSlot, ctx: Execution): Boolean {
         if (!p.isClosed()) return false
-        if (stillMounted < 0) stillMounted = if (s.executionOpaque() === ctx) 1 else 0
+        if (stillMounted < 0) stillMounted = if (s.executionOpaque() === ctx && !s.lettingGo()) 1 else 0
         return stillMounted == 1
     }
 

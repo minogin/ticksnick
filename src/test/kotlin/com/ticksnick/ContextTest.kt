@@ -369,6 +369,73 @@ class ContextTest {
     }
 
     @Test
+    fun `a mount taken over before its first thread takes it off passes - a coroutine resumed early`() {
+        val fetch = Profiler.registerCoarse("ctx:early-fetch")
+        val a = worker("w-early-a")
+        val b = worker("w-early-b")
+        val failure = session {
+            val ctx = Profiler.newContext(null)
+            // Suspended inside `fetch` on the first thread, resumed on the second before the first let go.
+            val (m, opened) = a.run { ctx.mount() to Profiler.slot().let { it to it.openCoarse(fetch.id) } }
+            val (aSlot, e) = opened
+            b.run {
+                ctx.mount()
+                assertSame(e, Profiler.currentExecution(), "the second thread did not get the label open")
+                a.run {
+                    m.close()
+                    assertSame(Profiler.slot().own, Profiler.slot().context, "the first thread was not put back")
+                }
+                assertSame(e, Profiler.currentExecution(), "the first thread's late take-off changed the second")
+                aSlot.closeOp(e)
+                m.close()
+            }
+            assertNull(ctx.on)
+            assertNull(ctx.innermost)
+        }
+        assertNull(failure)
+    }
+
+    @Test
+    fun `a first thread taking a mount off after the second leaves the context as the second left it`() {
+        val fetch = Profiler.registerCoarse("ctx:late-fetch")
+        val parse = Profiler.registerCoarse("ctx:late-parse")
+        val a = worker("w-late-a")
+        val b = worker("w-late-b")
+        val failure = session {
+            val ctx = Profiler.newContext(null)
+            val (m, opened) = a.run { ctx.mount() to Profiler.slot().let { it to it.openCoarse(fetch.id) } }
+            val (aSlot, e) = opened
+            // The second thread closes `fetch`, suspends inside `parse`, and lets go: all before the first.
+            val (bSlot, p) = b.run {
+                ctx.mount()
+                aSlot.closeOp(e)
+                val p = Profiler.slot().let { it to it.openCoarse(parse.id) }
+                m.close()
+                p
+            }
+            a.run { m.close() }
+            assertSame(p, ctx.innermost, "the first thread's late take-off wrote its stale innermost")
+            worker("w-late-c").run {
+                ctx.mount()
+                bSlot.closeOp(p)
+                m.close()
+            }
+        }
+        assertNull(failure)
+    }
+
+    @Test
+    fun `a mount does not take over a context a using block has on another thread`() {
+        val failure = session {
+            val ctx = Profiler.newContext(null)
+            val slot = worker("w-using-held").run { Profiler.slot().also { it.mount(ctx) } }
+            worker("w-using-taker").run { ctx.mount().close() }
+            workers[0].run { slot.unmount(ctx) }
+        }
+        assertFails(failure, "was put on thread `w-using-taker` while still on thread `w-using-held`")
+    }
+
+    @Test
     fun `using nested on one thread is one mount`() {
         val failure = session {
             val ctx = Profiler.newContext(null)

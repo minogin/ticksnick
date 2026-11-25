@@ -270,10 +270,22 @@ internal class OpSlot(
 
     /**
      * The context on this thread now: [own], or one put on it by `within`, `using` or `mount`. The
-     * executions it opens belong to it, and only it closes them. Written and read by the owner only.
+     * executions it opens belong to it, and only it closes them. Written by the owner only.
      */
     @JvmField
     var context: Context = own
+
+    /**
+     * The contexts put on this thread over [own], innermost last, [frameCount] of them, each with what
+     * its mount saved; [context] is the last. Kept on the thread, not on the context: a coroutine's
+     * context can go onto a second thread before the first has taken it off, and each thread puts back
+     * its own. Written by the owner; a thread taking a context over reads the top one.
+     */
+    @JvmField
+    var frames = arrayOfNulls<Frame>(MOUNT_FRAMES)
+
+    @JvmField
+    var frameCount: Int = 0
 
     /**
      * The innermost coarse execution of [context], or null: what the thread is inside right now.
@@ -1190,7 +1202,7 @@ object Profiler {
 
     /** Fails the run for [c] put on [slot]'s thread while it is on a thread already. */
     internal fun failInUse(c: Context, slot: OpSlot) {
-        val other = c.on
+        val other = c.on as? OpSlot
         fail(inUseMessage(c.describe(), slot.own.describe(), other?.own?.describe() ?: "another thread"))
     }
 
@@ -1225,7 +1237,7 @@ object Profiler {
         // execution borrowed by `within`, is open by design and cannot leak. Named by what was
         // entered, innermost first, not by the label the thread is in now.
         val entered = openIn(top, c.bottom) { it.byEnter }
-        val base = if (c === s.own) 0 else c.savedDepth
+        val base = if (s.frameCount == 0) 0 else s.frames[s.frameCount - 1]!!.savedDepth
         val leaked = when {
             // The coarse half is named first when both leaked, because a coarse execution left open
             // collects a whole request's worth of samples rather than one label's.
